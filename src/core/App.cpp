@@ -25,6 +25,7 @@
 #include "save/SaveManager.hpp"
 #include "systems/QuestManager.hpp"
 #include "net/NetworkManager.hpp"
+#include <imgui.h>
 #include "ui/UIManager.hpp"
 #include "world/WorldState.hpp"
 #include <boost/json.hpp>
@@ -689,8 +690,8 @@ void App::update(float dt) {
     auto* pcs = m_entityManager->getComponent<CombatStats>(m_playerEntity);
     if (pcs && !pcs->alive) return;
 
-    // Don't move when menus are open (they capture keyboard)
-    if (m_showMultiplayer || m_showLoadMenu || m_showHelp) return;
+    // Don't move when ImGui wants keyboard or menus are open
+    if (ImGui::GetIO().WantCaptureKeyboard) return;
 
     float moveX = 0.f, moveY = 0.f;
     if (m_input->isPressed(InputManager::Action::MoveUp))    moveY -= 1.f;

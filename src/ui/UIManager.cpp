@@ -369,7 +369,15 @@ void UIManager::renderMultiplayerMenu(const App& app) {
             ImGui::TextWrapped("%s", msg.c_str());
         }
         ImGui::EndChild();
-        ImGui::InputText("##chat", m_chatBuf, sizeof(m_chatBuf));
+        ImGui::InputText("##chat", m_chatBuf, sizeof(m_chatBuf),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        if (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+            if (strlen(m_chatBuf) > 0) {
+                const_cast<NetworkManager*>(net)->sendChat(m_chatBuf);
+                m_chatBuf[0] = '\0';
+                ImGui::SetKeyboardFocusHere(-1);
+            }
+        }
         ImGui::SameLine();
         if (ImGui::Button("Send")) {
             if (strlen(m_chatBuf) > 0) {
