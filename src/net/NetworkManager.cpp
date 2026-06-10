@@ -169,9 +169,9 @@ void NetworkManager::sendCombatEvent(int attackerId, int defenderId, int damage,
     queueSend(makeCombatEvent(attackerId, defenderId, damage, killed));
 }
 
-void NetworkManager::sendRecruitRequest() {
+void NetworkManager::sendRecruitRequest(Vec2f playerPos) {
     if (!m_connected || m_connecting) return;
-    queueSend(makeRecruitRequest());
+    queueSend(makeRecruitRequest(playerPos));
 }
 
 void NetworkManager::sendEnemyWave(Vec2f center, int count, Team team) {

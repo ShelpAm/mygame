@@ -43,7 +43,7 @@ public:
     void update();
     void sendEntityUpdate(int playerId, Vec2f pos, int hp, int maxHp, bool alive);
     void sendCombatEvent(int attackerId, int defenderId, int damage, bool killed);
-    void sendRecruitRequest();
+    void sendRecruitRequest(Vec2f playerPos);
     void sendEnemyWave(Vec2f center, int count, Team team);
     void sendChat(const std::string& msg);
     void sendFullSync(const std::vector<uint8_t>& data);

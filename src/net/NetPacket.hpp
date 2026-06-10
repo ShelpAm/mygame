@@ -91,8 +91,10 @@ inline std::vector<uint8_t> makeCombatEvent(int attId, int defId, int dmg, bool 
     return serializePacket({NetPacket::CombatEvent, std::move(p)});
 }
 
-inline std::vector<uint8_t> makeRecruitRequest() {
-    return serializePacket({NetPacket::RecruitSoldier, {}});
+inline std::vector<uint8_t> makeRecruitRequest(Vec2f playerPos) {
+    std::vector<uint8_t> p;
+    writeFloat(p, playerPos.x); writeFloat(p, playerPos.y);
+    return serializePacket({NetPacket::RecruitSoldier, std::move(p)});
 }
 
 inline std::vector<uint8_t> makeEnemyWave(Vec2f center, int count, Team team) {

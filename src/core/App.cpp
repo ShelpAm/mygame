@@ -69,7 +69,10 @@ bool App::init() {
     // Network callback
     m_network->setCallback([this](const NetMessage& msg) {
         if (msg.type == NetMessage::RecruitSoldier) {
-            m_gameMode->spawnSoldier(m_gameMode->playerEntity(), rand(), {0,-1});
+            float px, py; memcpy(&px, msg.data.data(), 4); memcpy(&py, msg.data.data()+4, 4);
+            auto eid = m_gameMode->spawnSoldier(m_gameMode->playerEntity(), rand(), {0,-1});
+            auto* pos = m_server->entities().getComponent<Position>(eid);
+            if (pos) pos->worldPos = {px + 32.f, py + 32.f};  // Near requesting player
         } else if (msg.type == NetMessage::SpawnEnemyWave) {
             float cx, cy; int cnt; uint8_t tm;
             memcpy(&cx, msg.data.data(), 4); memcpy(&cy, msg.data.data()+4, 4);
@@ -186,8 +189,10 @@ void App::update(float dt) {
     if (m_network->isConnected()) {
         m_network->update();
         if (m_network->isHosting()) {
-            // Server: authoritative combat + sync (Server owns the combat loop)
             m_server->update(dt, *m_network);
+            if (m_server->checkNeedsFullSync()) {
+                m_server->sendFullState(*m_network);
+            }
         } else {
             // Client: receive sync
             m_client->update(dt, *m_network);
@@ -350,7 +355,7 @@ void App::loadFromSlot(int slot) {
 void App::recruitSoldier() {
     static int idx = 0;
     if (m_network->isConnected() && !m_network->isHosting()) {
-        m_network->sendRecruitRequest();
+        m_network->sendRecruitRequest(m_client->localPlayerPos());
     } else {
         Vec2f facing{0, -1};
         m_gameMode->spawnSoldier(m_gameMode->playerEntity(), idx++, facing);

@@ -32,10 +32,15 @@ public:
     bool remotePlayer(int playerId);
     void addRemotePlayer(int playerId, Vec2f pos);
     void updateRemotePlayer(int playerId, Vec2f pos, int hp, int maxHp, bool alive);
+    void sendFullState(NetworkManager& net);
+    void markNeedsFullSync() { needsFullSync = true; }
+    bool checkNeedsFullSync() { bool v = needsFullSync; needsFullSync = false; return v; }
 
 private:
     EntityManager m_em;
     std::unordered_map<int, EntityId> m_remotePlayerMap;
+    std::unordered_map<int, bool> m_sentInitialSync;
+    bool needsFullSync = false;
     CombatSystem* m_cs = nullptr;
     WorldState* m_ws = nullptr;
     QuestManager* m_qm = nullptr;

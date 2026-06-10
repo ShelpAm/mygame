@@ -58,6 +58,7 @@ void Client::applySync(const std::vector<uint8_t>& data) {
             auto eid = m_em.createEntity();
             m_idMap[nid] = eid;
             m_em.addComponent<Position>(eid, Position{{x,y}, {0,0}, 0.5f});
+            m_em.addComponent<Sprite>(eid, Sprite{"", {}, {12, 12}, {1,1,1,1}, 0.8f, true});
             m_em.addComponent<CombatStats>(eid, CombatStats{
                 team == 1 ? Team::Enemy : (team == 2 ? Team::Neutral : Team::Player),
                 maxHp, hp, 3, 2, 80.f
