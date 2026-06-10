@@ -192,12 +192,13 @@ BOOST_AUTO_TEST_CASE(dialogue_heard_rumor) {
 
 BOOST_AUTO_TEST_CASE(dialogue_template_fill) {
     DialogueEngine de;
+    addTestTemplate(de, "greeting_friendly", "Well met, friend!");
     NPCState npc;
     npc.npcId = "test";
     npc.personality = "friendly";
 
     auto resp = de.generateGreeting(npc, 10);
-    // Template should be filled without placeholder brackets remaining
+    BOOST_TEST(!resp.text.empty());
     BOOST_TEST(resp.text.find('[') == std::string::npos);
 }
 

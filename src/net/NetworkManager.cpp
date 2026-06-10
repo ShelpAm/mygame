@@ -1,6 +1,7 @@
 #include "net/NetworkManager.hpp"
 #include "net/NetPacket.hpp"
 #include <iostream>
+#include <cstring>
 
 NetworkManager::NetworkManager() {}
 NetworkManager::~NetworkManager() { disconnect(); }

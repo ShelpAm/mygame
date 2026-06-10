@@ -13,7 +13,6 @@ struct DialogueResponse {
     int trustDelta = 0;
     int fearDelta = 0;
     int respectDelta = 0;
-    std::vector<std::string> newTopicsSuggested;
 };
 
 struct DialogueTemplate {
@@ -27,23 +26,19 @@ struct DialogueTemplate {
 
 class DialogueEngine {
 public:
-    enum class Language { English, Chinese };
-
     DialogueEngine();
 
-    bool loadTemplates(Language lang, const std::string& jsonPath);
-    void setLanguage(Language lang);
+    int discoverLanguages(const std::string& dir);
+    void setLanguage(int langIndex);
+    void addTemplate(const DialogueTemplate& tmpl);  // For tests/content authoring
 
-    DialogueResponse generateAskResponse(
-        const NPCState& npc, const std::string& topicId,
-        const std::string& topicDisplayName, int playerTrust);
-
+    DialogueResponse generateAskResponse(const NPCState& npc, const std::string& topicId,
+                                          const std::string& topicDisplayName, int playerTrust);
     DialogueResponse generateGreeting(const NPCState& npc, int playerTrust);
-    void addTemplate(const DialogueTemplate& tmpl);
 
 private:
-    std::vector<DialogueTemplate> m_templates[2];  // 0=en, 1=zh
-    Language m_currentLang = Language::English;
+    std::vector<std::vector<DialogueTemplate>> m_templates;
+    int m_currentLang = 0;
 
     const std::vector<DialogueTemplate>& activeTemplates() const;
     const DialogueTemplate* pickTemplate(const NPCState& npc, bool knowsDirectly,

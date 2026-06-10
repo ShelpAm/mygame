@@ -57,9 +57,7 @@ bool App::init() {
 
     m_locale->discoverLanguages("assets/locale");
     m_locale->setLanguage(0);  // Default to first discovered language
-    m_dialogueEngine->loadTemplates(DialogueEngine::Language::English, "assets/data/dialogue_templates.json");
-    m_dialogueEngine->loadTemplates(DialogueEngine::Language::Chinese, "assets/data/dialogue_templates_zh.json");
-    m_dialogueEngine->setLanguage(DialogueEngine::Language::English);
+    m_dialogueEngine->discoverLanguages("assets/dialogue");
     m_quests->loadFromJson("assets/data/quests.json");
 
     m_network->setCallback([this](const NetMessage& msg) {
@@ -183,13 +181,14 @@ void App::render() {
     SDL_RenderClear(m_renderer);
     m_renderSystem->render(*m_entityManager, *m_worldState, *m_navigationSystem,
                             m_combat->events(), m_network->remoteEntities());
+    m_combat->clearEvents();
     m_uiManager->render(*m_worldState, *this);
     SDL_RenderPresent(m_renderer);
 }
 
 void App::setUILanguage(int langIndex) {
     m_locale->setLanguage(langIndex);
-    m_dialogueEngine->setLanguage(langIndex == 1 ? DialogueEngine::Language::Chinese : DialogueEngine::Language::English);
+    m_dialogueEngine->setLanguage(langIndex);
 }
 
 bool App::isPlayerDead() const {

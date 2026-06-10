@@ -95,8 +95,13 @@ void UIManager::render(const WorldState& worldState, const App& app) {
     if (m_showInventory) renderInventory(app);
     if (m_showMap) renderMap(app);
     if (app.showHelp()) renderHelpPanel(app);
-    if (app.showMultiplayer()) renderMultiplayerMenu(app);
     if (app.showLoadMenu()) renderLoadMenu(app);
+    if (app.showMultiplayer()) {
+        if (!m_chatActive) { m_chatBuf[0] = '\0'; m_chatActive = true; }
+        renderMultiplayerMenu(app);
+    } else {
+        if (m_chatActive) { m_chatActive = false; m_chatBuf[0] = '\0'; }
+    }
 
     ImGui::Render();
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), m_renderer);
@@ -313,9 +318,12 @@ void UIManager::renderLoadMenu(const App& app) {
 }
 
 void UIManager::renderMultiplayerMenu(const App& app) {
+    if (!app.showMultiplayer()) return;
     ImGui::SetNextWindowSize(ImVec2(320, 320), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImVec2(400, 200), ImGuiCond_Appearing);
-    ImGui::Begin("Multiplayer", nullptr, ImGuiWindowFlags_NoResize);
+    bool show = true;
+    ImGui::Begin("Multiplayer", &show, ImGuiWindowFlags_NoResize);
+    if (!show) const_cast<App&>(app).setShowMultiplayer(false);
 
     auto* net = const_cast<App&>(app).networkMut();
     if (!net->isConnected()) {

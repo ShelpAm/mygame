@@ -1,6 +1,7 @@
 #include "dialogue/DialogueEngine.hpp"
 #include "entities/components/NPCState.hpp"
 #include <boost/json.hpp>
+#include <filesystem>
 #include <fstream>
 #include <cstdlib>
 #include <iostream>
@@ -8,58 +9,52 @@
 DialogueEngine::DialogueEngine() {}
 
 const std::vector<DialogueTemplate>& DialogueEngine::activeTemplates() const {
-    return m_templates[static_cast<int>(m_currentLang)];
+    return m_templates[m_currentLang];
 }
 
-void DialogueEngine::setLanguage(Language lang) {
-    m_currentLang = lang;
+void DialogueEngine::setLanguage(int langIndex) {
+    if (langIndex >= 0 && langIndex < (int)m_templates.size())
+        m_currentLang = langIndex;
 }
 
-bool DialogueEngine::loadTemplates(Language lang, const std::string& jsonPath) {
-    std::ifstream file(jsonPath);
-    if (!file.is_open()) {
-        std::cerr << "Failed to open dialogue templates: " << jsonPath << '\n';
-        return false;
-    }
-
+int DialogueEngine::discoverLanguages(const std::string& dir) {
+    m_templates.clear();
     try {
-        std::string content{std::istreambuf_iterator<char>(file),
-                            std::istreambuf_iterator<char>()};
-        auto parsed = boost::json::parse(content);
-        auto& arr = parsed.as_object().at("templates").as_array();
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            if (!entry.is_regular_file()) continue;
+            if (entry.path().extension() != ".json") continue;
 
-        auto& tmpls = m_templates[static_cast<int>(lang)];
-        tmpls.clear();
+            std::ifstream file(entry.path().string());
+            if (!file) continue;
 
-        for (const auto& item : arr) {
-            auto& obj = item.as_object();
-            DialogueTemplate tmpl;
-            tmpl.type = std::string(obj.at("type").as_string());
+            std::string content{std::istreambuf_iterator<char>(file), {}};
+            auto parsed = boost::json::parse(content);
+            auto& arr = parsed.as_object().at("templates").as_array();
 
-            for (const auto& t : obj.at("texts").as_array()) {
-                tmpl.texts.push_back(std::string(t.as_string()));
+            std::vector<DialogueTemplate> tmpls;
+            for (const auto& item : arr) {
+                auto& obj = item.as_object();
+                DialogueTemplate t;
+                t.type = std::string(obj.at("type").as_string());
+                for (const auto& txt : obj.at("texts").as_array())
+                    t.texts.push_back(std::string(txt.as_string()));
+                if (obj.contains("requiresWitnessed")) t.requiresWitnessed = obj.at("requiresWitnessed").as_bool();
+                if (obj.contains("requiresHeard")) t.requiresHeard = obj.at("requiresHeard").as_bool();
+                if (obj.contains("minConfidence")) t.minConfidence = (int)obj.at("minConfidence").as_int64();
+                if (obj.contains("personalityPref")) t.personalityPref = std::string(obj.at("personalityPref").as_string());
+                tmpls.push_back(std::move(t));
             }
-
-            if (obj.contains("requiresWitnessed"))
-                tmpl.requiresWitnessed = obj.at("requiresWitnessed").as_bool();
-            if (obj.contains("requiresHeard"))
-                tmpl.requiresHeard = obj.at("requiresHeard").as_bool();
-            if (obj.contains("minConfidence"))
-                tmpl.minConfidence = static_cast<int>(obj.at("minConfidence").as_int64());
-            if (obj.contains("personalityPref"))
-                tmpl.personalityPref = std::string(obj.at("personalityPref").as_string());
-
-            tmpls.push_back(std::move(tmpl));
+            m_templates.push_back(std::move(tmpls));
         }
-        return true;
     } catch (const std::exception& e) {
-        std::cerr << "Failed to parse dialogue templates: " << e.what() << '\n';
-        return false;
+        std::cerr << "Failed to discover dialogue templates: " << e.what() << '\n';
     }
+    return (int)m_templates.size();
 }
 
 void DialogueEngine::addTemplate(const DialogueTemplate& tmpl) {
-    m_templates[static_cast<int>(m_currentLang)].push_back(tmpl);
+    while (m_templates.empty()) m_templates.emplace_back();
+    m_templates[m_currentLang].push_back(tmpl);
 }
 
 DialogueResponse DialogueEngine::generateGreeting(const NPCState& npc, int playerTrust) {

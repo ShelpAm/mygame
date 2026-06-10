@@ -383,7 +383,9 @@ void GameMode::update(float dt, InputManager& input, LocaleManager& loc, WorldSt
 
     // Movement
     float mx = 0, my = 0;
-    if (!dead && !m_dialogue->active && !ImGui::GetIO().WantCaptureKeyboard) {
+    // Only block movement when actively typing in an ImGui text input
+    bool typing = ImGui::IsAnyItemActive();
+    if (!dead && !m_dialogue->active && !typing) {
         if (input.isPressed(InputManager::Action::MoveUp)) my -= 1;
         if (input.isPressed(InputManager::Action::MoveDown)) my += 1;
         if (input.isPressed(InputManager::Action::MoveLeft)) mx -= 1;
