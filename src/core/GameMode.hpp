@@ -28,7 +28,7 @@ struct NPCState;
 class GameMode {
 public:
     explicit GameMode(EntityManager& em);
-    void setEntityManager(EntityManager& em) { m_emPtr = &em; }
+    bool isClient = false;  // Set true when this is a client-side GameMode
     void initWorld(WorldState& ws, KnowledgeGraph& kg, DialogueEngine& de,
                    TopicRegistry& tr, RelationshipTable& rt, FactionNetwork& fn,
                    EventSimulator& es, RumorPropagator& rp, CombatSystem& cs,

@@ -330,43 +330,39 @@ void GameMode::update(float dt, InputManager& input, LocaleManager& loc, WorldSt
     auto* cs = m_em.getComponent<CombatStats>(m_playerEntity);
     bool dead = cs && !cs->alive;
 
-    // Movement
-    float mx = 0, my = 0;
-    // Only block movement when actively typing in an ImGui text input
-    bool typing = ImGui::IsAnyItemActive();
-    if (!dead && !m_dialogue->active && !typing) {
-        if (input.isPressed(InputManager::Action::MoveUp)) my -= 1;
-        if (input.isPressed(InputManager::Action::MoveDown)) my += 1;
-        if (input.isPressed(InputManager::Action::MoveLeft)) mx -= 1;
-        if (input.isPressed(InputManager::Action::MoveRight)) mx += 1;
-    }
-
-    auto* pos = m_em.getComponent<Position>(m_playerEntity);
-    if (pos && !dead && (mx != 0 || my != 0)) {
-        float len = std::hypot(mx, my);
-        Vec2f dir{mx / len, my / len};
-        pos->worldPos.x += dir.x * 200.f * dt;
-        pos->worldPos.y += dir.y * 200.f * dt;
-        pos->tilePos = {static_cast<int>(pos->worldPos.x / 64.f), static_cast<int>(pos->worldPos.y / 64.f)};
-        m_ws->revealRadius(pos->tilePos, 8);
-
-        // Update soldier formation
-        int si = 0;
-        for (auto eid : m_em.allEntities()) {
-            auto* ai = m_em.getComponent<SoldierAI>(eid);
-            if (!ai || ai->followTarget != m_playerEntity) continue;
-            const int PER_ROW[] = {3, 4, 5};
-            int rem = ++si, row = 0, col = 0;
-            for (row = 0; row < 3; ++row) { if (rem <= PER_ROW[row]) { col = rem - 1; break; } rem -= PER_ROW[row]; }
-            if (row >= 3) { row = 2; col = si - PER_ROW[0] - PER_ROW[1] - 1; }
-            float s = 36.f;
-            float ox = (col - (PER_ROW[row] - 1) / 2.f) * s;
-            float oy = -(50.f + row * 45.f);
-            ai->formationOffset = {ox * dir.y + oy * dir.x, ox * -dir.x + oy * dir.y};
+    // Client mode: movement handled by App. Server/single-player: handle here.
+    if (!isClient) {
+        float mx = 0, my = 0;
+        if (!dead && !m_dialogue->active) {
+            if (input.isPressed(InputManager::Action::MoveUp)) my -= 1;
+            if (input.isPressed(InputManager::Action::MoveDown)) my += 1;
+            if (input.isPressed(InputManager::Action::MoveLeft)) mx -= 1;
+            if (input.isPressed(InputManager::Action::MoveRight)) mx += 1;
+        }
+        auto* pos = m_em.getComponent<Position>(m_playerEntity);
+        if (pos && !dead && (mx != 0 || my != 0)) {
+            float len = std::hypot(mx, my);
+            Vec2f dir{mx / len, my / len};
+            pos->worldPos.x += dir.x * 200.f * dt;
+            pos->worldPos.y += dir.y * 200.f * dt;
+            pos->tilePos = {static_cast<int>(pos->worldPos.x / 64.f), static_cast<int>(pos->worldPos.y / 64.f)};
+            m_ws->revealRadius(pos->tilePos, 8);
+            int si = 0;
+            for (auto eid : m_em.allEntities()) {
+                auto* ai = m_em.getComponent<SoldierAI>(eid);
+                if (!ai || ai->followTarget != m_playerEntity) continue;
+                const int PER_ROW[] = {3, 4, 5};
+                int rem = ++si, row = 0, col = 0;
+                for (row = 0; row < 3; ++row) { if (rem <= PER_ROW[row]) { col = rem - 1; break; } rem -= PER_ROW[row]; }
+                if (row >= 3) { row = 2; col = si - PER_ROW[0] - PER_ROW[1] - 1; }
+                float s = 36.f;
+                ai->formationOffset = {((col - (PER_ROW[row] - 1) / 2.f) * s) * dir.y + (-(50.f + row * 45.f)) * dir.x,
+                                      ((col - (PER_ROW[row] - 1) / 2.f) * s) * -dir.x + (-(50.f + row * 45.f)) * dir.y};
+            }
         }
     }
 
-    // Update systems — both sides run combat for responsive damage
+    // Combat
     m_cs->update(m_em, dt);
     for (const auto& ev : m_cs->events())
         if (ev.killed) m_qm->reportKill("enemy");

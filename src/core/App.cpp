@@ -206,22 +206,31 @@ void App::update(float dt) {
         if (pcs && pcs->alive) pcs->hp = std::max(0, pcs->hp - 1);
     }
 
+    m_gameMode->isClient = (m_network->isConnected() && !m_network->isHosting());
     m_gameMode->update(dt, *m_input, *m_locale, *m_worldState);
-    // Camera tracks player
+
+    // Client: move local player and send to server
     if (m_network->isConnected() && !m_network->isHosting()) {
+        Vec2f p = m_client->localPlayerPos();
+        float mx = 0, my = 0;
+        if (!ImGui::IsAnyItemActive()) {
+            if (m_input->isPressed(InputManager::Action::MoveUp)) my -= 1;
+            if (m_input->isPressed(InputManager::Action::MoveDown)) my += 1;
+            if (m_input->isPressed(InputManager::Action::MoveLeft)) mx -= 1;
+            if (m_input->isPressed(InputManager::Action::MoveRight)) mx += 1;
+        }
+        if (mx != 0 || my != 0) {
+            float len = std::hypot(mx, my);
+            m_client->setLocalPlayerPos({p.x + mx/len * 200.f * dt, p.y + my/len * 200.f * dt});
+        }
         m_cameraSystem->setTarget(m_client->localPlayerPos());
+        auto* cs = m_client->entities().getComponent<CombatStats>(m_client->localPlayer());
+        m_network->sendEntityUpdate(0, m_client->localPlayerPos(), cs ? cs->hp : 20, cs ? cs->maxHp : 20, cs ? cs->alive : true);
     } else {
         auto* ppos = m_server->entities().getComponent<Position>(m_gameMode->playerEntity());
         if (ppos) m_cameraSystem->setTarget(ppos->worldPos);
     }
     m_cameraSystem->update(dt);
-
-    // Client sends position to server
-    if (m_network->isConnected() && !m_network->isHosting()) {
-        auto pos = m_client->localPlayerPos();
-        auto* cs = m_client->entities().getComponent<CombatStats>(m_client->localPlayer());
-        m_network->sendEntityUpdate(0, pos, cs ? cs->hp : 20, cs ? cs->maxHp : 20, cs ? cs->alive : true);
-    }
 
     m_uiManager->update(dt);
 }
