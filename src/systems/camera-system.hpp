@@ -4,7 +4,7 @@
 #include <SDL3/SDL.h>
 
 class CameraSystem {
-public:
+  public:
     explicit CameraSystem(int width, int height);
 
     void resize(int width, int height);
@@ -16,10 +16,16 @@ public:
     Vec2f screen_to_world(Vec2i screen_pos) const;
 
     SDL_FRect viewport() const;
-    Vec2f center() const { return center_; }
-    float zoom() const { return zoom_; }
+    Vec2f center() const
+    {
+        return center_;
+    }
+    float zoom() const
+    {
+        return zoom_;
+    }
 
-private:
+  private:
     Vec2f center_;
     Vec2f target_;
     int width_;

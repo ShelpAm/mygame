@@ -1,67 +1,85 @@
 #include "dialogue/dialogue-engine.hpp"
 #include "entities/components/npc-state.hpp"
 #include <boost/json.hpp>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <cstdlib>
 #include <iostream>
 
 DialogueEngine::DialogueEngine() {}
 
-const std::vector<DialogueTemplate>& DialogueEngine::active_templates() const {
+std::vector<DialogueTemplate> const &DialogueEngine::active_templates() const
+{
     return templates_[current_lang_];
 }
 
-void DialogueEngine::set_language(int lang_index) {
+void DialogueEngine::set_language(int lang_index)
+{
     if (lang_index >= 0 && lang_index < (int)templates_.size())
         current_lang_ = lang_index;
 }
 
-int DialogueEngine::discover_languages(const std::string& dir) {
+int DialogueEngine::discover_languages(std::string const &dir)
+{
     templates_.clear();
     try {
-        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-            if (!entry.is_regular_file()) continue;
-            if (entry.path().extension() != ".json") continue;
+        for (auto const &entry : std::filesystem::directory_iterator(dir)) {
+            if (!entry.is_regular_file())
+                continue;
+            if (entry.path().extension() != ".json")
+                continue;
 
             std::ifstream file(entry.path().string());
-            if (!file) continue;
+            if (!file)
+                continue;
 
             std::string content{std::istreambuf_iterator<char>(file), {}};
             auto parsed = boost::json::parse(content);
-            auto& arr = parsed.as_object().at("templates").as_array();
+            auto &arr = parsed.as_object().at("templates").as_array();
 
             std::vector<DialogueTemplate> tmpls;
-            for (const auto& item : arr) {
-                auto& obj = item.as_object();
+            for (auto const &item : arr) {
+                auto &obj = item.as_object();
                 DialogueTemplate t;
                 t.type = std::string(obj.at("type").as_string());
-                for (const auto& txt : obj.at("texts").as_array())
+                for (auto const &txt : obj.at("texts").as_array())
                     t.texts.push_back(std::string(txt.as_string()));
-                if (obj.contains("requires_witnessed")) t.requires_witnessed = obj.at("requires_witnessed").as_bool();
-                if (obj.contains("requires_heard")) t.requires_heard = obj.at("requires_heard").as_bool();
-                if (obj.contains("min_confidence")) t.min_confidence = (int)obj.at("min_confidence").as_int64();
-                if (obj.contains("personality_pref")) t.personality_pref = std::string(obj.at("personality_pref").as_string());
+                if (obj.contains("requires_witnessed"))
+                    t.requires_witnessed =
+                        obj.at("requires_witnessed").as_bool();
+                if (obj.contains("requires_heard"))
+                    t.requires_heard = obj.at("requires_heard").as_bool();
+                if (obj.contains("min_confidence"))
+                    t.min_confidence = (int)obj.at("min_confidence").as_int64();
+                if (obj.contains("personality_pref"))
+                    t.personality_pref =
+                        std::string(obj.at("personality_pref").as_string());
                 tmpls.push_back(std::move(t));
             }
             templates_.push_back(std::move(tmpls));
         }
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to discover dialogue templates: " << e.what() << '\n';
+    }
+    catch (std::exception const &e) {
+        std::cerr << "Failed to discover dialogue templates: " << e.what()
+                  << '\n';
     }
     return (int)templates_.size();
 }
 
-void DialogueEngine::add_template(const DialogueTemplate& tmpl) {
-    while (templates_.empty()) templates_.emplace_back();
+void DialogueEngine::add_template(DialogueTemplate const &tmpl)
+{
+    while (templates_.empty())
+        templates_.emplace_back();
     templates_[current_lang_].push_back(tmpl);
 }
 
-DialogueResponse DialogueEngine::generate_greeting(const NPCState& npc, int player_trust) {
+DialogueResponse DialogueEngine::generate_greeting(NPCState const &npc,
+                                                   int player_trust)
+{
     DialogueResponse resp;
 
     // First try personality-specific greeting
-    for (const auto& t : active_templates()) {
+    for (auto const &t : active_templates()) {
         if (t.type == "greeting_" + npc.personality) {
             resp.text = t.texts[std::rand() % t.texts.size()];
             break;
@@ -70,7 +88,7 @@ DialogueResponse DialogueEngine::generate_greeting(const NPCState& npc, int play
 
     // Fallback to generic greeting
     if (resp.text.empty()) {
-        for (const auto& t : active_templates()) {
+        for (auto const &t : active_templates()) {
             if (t.type == "greeting") {
                 resp.text = t.texts[std::rand() % t.texts.size()];
                 break;
@@ -78,15 +96,14 @@ DialogueResponse DialogueEngine::generate_greeting(const NPCState& npc, int play
         }
     }
 
-    resp.trust_delta = (npc.personality == "hostile" || npc.personality == "fearful") ? -2 : 2;
+    resp.trust_delta =
+        (npc.personality == "hostile" || npc.personality == "fearful") ? -2 : 2;
     return resp;
 }
 
 DialogueResponse DialogueEngine::generate_ask_response(
-    const NPCState& npc,
-    const std::string& topic_id,
-    const std::string& topic_display_name,
-    int player_trust)
+    NPCState const &npc, std::string const &topic_id,
+    std::string const &topic_display_name, int player_trust)
 {
     DialogueResponse resp;
 
@@ -97,26 +114,40 @@ DialogueResponse DialogueEngine::generate_ask_response(
     int confidence = knows ? it->second.confidence : 0;
     bool lie = would_lie(npc, player_trust);
 
-    const DialogueTemplate* tmpl = nullptr;
+    DialogueTemplate const *tmpl = nullptr;
 
     if (lie || !knows || confidence < 10) {
         // Deny or hostile response
-        for (const auto& t : active_templates()) {
-            if (lie && t.type == "deny_knowledge_hostile") { tmpl = &t; break; }
-            if (!lie && t.personality_pref == npc.personality && t.type.find("deny") != std::string::npos) { tmpl = &t; break; }
-        }
-        if (!tmpl) {
-            for (const auto& t : active_templates()) {
-                if (t.type == "deny_knowledge") { tmpl = &t; break; }
+        for (auto const &t : active_templates()) {
+            if (lie && t.type == "deny_knowledge_hostile") {
+                tmpl = &t;
+                break;
+            }
+            if (!lie && t.personality_pref == npc.personality &&
+                t.type.find("deny") != std::string::npos) {
+                tmpl = &t;
+                break;
             }
         }
-    } else {
+        if (!tmpl) {
+            for (auto const &t : active_templates()) {
+                if (t.type == "deny_knowledge") {
+                    tmpl = &t;
+                    break;
+                }
+            }
+        }
+    }
+    else {
         tmpl = pick_template(npc, witnessed, heardOf, confidence);
     }
 
     if (!tmpl) {
-        for (const auto& t : active_templates()) {
-            if (t.type == "deny_knowledge") { tmpl = &t; break; }
+        for (auto const &t : active_templates()) {
+            if (t.type == "deny_knowledge") {
+                tmpl = &t;
+                break;
+            }
         }
     }
 
@@ -124,50 +155,66 @@ DialogueResponse DialogueEngine::generate_ask_response(
     slots["topic"] = topic_display_name;
     if (knows && !lie) {
         slots["detail"] = it->second.npc_version;
-        slots["person"] = it->second.source_npc_id.empty() ? "a traveler" : it->second.source_npc_id;
+        slots["person"] = it->second.source_npc_id.empty()
+                              ? "a traveler"
+                              : it->second.source_npc_id;
         resp.fact_id = topic_id;
-    } else {
+    }
+    else {
         slots["detail"] = "";
         slots["person"] = "someone";
     }
 
-    resp.text = fill_template(tmpl->texts[std::rand() % tmpl->texts.size()], slots);
+    resp.text =
+        fill_template(tmpl->texts[std::rand() % tmpl->texts.size()], slots);
     resp.is_truthful = !lie && knows;
 
-    if (npc.current_goal == NPCState::Goal::gain_info && topic_id == npc.goal_fact_id) {
+    if (npc.current_goal == NPCState::Goal::gain_info &&
+        topic_id == npc.goal_fact_id) {
         resp.trust_delta = 5;
         resp.respect_delta = 3;
-    } else if (npc.personality == "friendly") {
+    }
+    else if (npc.personality == "friendly") {
         resp.trust_delta = 3;
-    } else if (npc.personality == "hostile") {
+    }
+    else if (npc.personality == "hostile") {
         resp.trust_delta = -3;
-    } else {
+    }
+    else {
         resp.trust_delta = 1;
     }
 
     return resp;
 }
 
-const DialogueTemplate* DialogueEngine::pick_template(
-    const NPCState& npc, bool knows_directly, bool knows_indirectly, int confidence) const
+DialogueTemplate const *DialogueEngine::pick_template(NPCState const &npc,
+                                                      bool knows_directly,
+                                                      bool knows_indirectly,
+                                                      int confidence) const
 {
-    for (const auto& t : active_templates()) {
-        if (t.type == "greeting") continue;
-        if (!t.personality_pref.empty() && t.personality_pref != npc.personality) continue;
-        if (t.requires_witnessed && !knows_directly) continue;
-        if (t.requires_heard && !knows_indirectly) continue;
-        if (confidence < t.min_confidence) continue;
+    for (auto const &t : active_templates()) {
+        if (t.type == "greeting")
+            continue;
+        if (!t.personality_pref.empty() &&
+            t.personality_pref != npc.personality)
+            continue;
+        if (t.requires_witnessed && !knows_directly)
+            continue;
+        if (t.requires_heard && !knows_indirectly)
+            continue;
+        if (confidence < t.min_confidence)
+            continue;
         return &t;
     }
     return nullptr;
 }
 
 std::string DialogueEngine::fill_template(
-    const std::string& pattern,
-    const std::unordered_map<std::string, std::string>& slots) const
+    std::string const &pattern,
+    std::unordered_map<std::string, std::string> const &slots) const
 {
     std::string result = pattern;
-    for (const auto& [key, value] : slots) {
+    for (auto const &[key, value] : slots) {
         std::string placeholder = "[" + key + "]";
         size_t pos = 0;
         while ((pos = result.find(placeholder, pos)) != std::string::npos) {
@@ -178,10 +225,16 @@ std::string DialogueEngine::fill_template(
     return result;
 }
 
-bool DialogueEngine::would_lie(const NPCState& npc, int player_trust) const {
-    if (npc.current_goal == NPCState::Goal::spread_misinfo) return true;
-    if (npc.personality == "hostile" && player_trust < -20) return true;
-    if (npc.current_goal == NPCState::Goal::harm_player && player_trust < 0) return true;
-    if (npc.personality == "guarded" && npc.urgency > 50 && std::rand() % 100 < 40) return true;
+bool DialogueEngine::would_lie(NPCState const &npc, int player_trust) const
+{
+    if (npc.current_goal == NPCState::Goal::spread_misinfo)
+        return true;
+    if (npc.personality == "hostile" && player_trust < -20)
+        return true;
+    if (npc.current_goal == NPCState::Goal::harm_player && player_trust < 0)
+        return true;
+    if (npc.personality == "guarded" && npc.urgency > 50 &&
+        std::rand() % 100 < 40)
+        return true;
     return false;
 }

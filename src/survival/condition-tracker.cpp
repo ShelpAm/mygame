@@ -1,7 +1,9 @@
 #include "survival/condition-tracker.hpp"
 #include <algorithm>
 
-void ConditionTracker::update(float game_hours_passed, bool is_moving, bool is_sleeping) {
+void ConditionTracker::update(float game_hours_passed, bool is_moving,
+                              bool is_sleeping)
+{
     float days_passed = game_hours_passed / 24.f;
 
     // Decay food and water
@@ -18,10 +20,13 @@ void ConditionTracker::update(float game_hours_passed, bool is_moving, bool is_s
 
     // Energy
     if (is_sleeping) {
-        state_.energy += SurvivalState::energy_recover_sleeping * game_hours_passed;
-    } else if (is_moving) {
+        state_.energy +=
+            SurvivalState::energy_recover_sleeping * game_hours_passed;
+    }
+    else if (is_moving) {
         state_.energy -= SurvivalState::energy_decay_moving * game_hours_passed;
-    } else {
+    }
+    else {
         state_.energy -= 0.5f * game_hours_passed;
     }
 
@@ -38,14 +43,17 @@ void ConditionTracker::update(float game_hours_passed, bool is_moving, bool is_s
     state_.equipment_wear = std::clamp(state_.equipment_wear, 0.f, 100.f);
 }
 
-void ConditionTracker::consume_food(float amount) {
+void ConditionTracker::consume_food(float amount)
+{
     state_.food = std::clamp(state_.food + amount, 0.f, 100.f);
 }
 
-void ConditionTracker::consume_water(float amount) {
+void ConditionTracker::consume_water(float amount)
+{
     state_.water = std::clamp(state_.water + amount, 0.f, 100.f);
 }
 
-void ConditionTracker::heal(float amount) {
+void ConditionTracker::heal(float amount)
+{
     state_.health = std::clamp(state_.health + amount, 0.f, 100.f);
 }

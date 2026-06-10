@@ -37,6 +37,8 @@ set(SOURCES
     src/net/network-manager.cpp
     src/net/server.cpp
     src/net/client.cpp
+    src/net/local-transport.cpp
+    src/net/network-transport.cpp
     src/core/locale-manager.cpp
     src/ui/ui-manager.cpp
     src/ui/hud.cpp
@@ -74,12 +76,26 @@ add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    SDL3::SDL3
+    sdl::sdl
     Boost::boost
     Boost::json
     imgui::imgui
 )
 
+if(MINGW OR WIN32)
+    target_link_libraries(TheSunsetStraits PRIVATE
+        ws2_32
+        mswsock
+    )
+
+    target_link_options(TheSunsetStraits PRIVATE
+        -static
+        -Wl,--allow-multiple-definition
+    )
+endif()
+
+
+# compile_commands.json
 if(WIN32)
     # Visual Studio doesn't support symlinks by default. Don't use it.
 else()

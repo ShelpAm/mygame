@@ -16,6 +16,7 @@ sdl/*:xsync=False
 *:with_x11=False
 
 boost/*:without_cobalt=True
+boost/*:without_stacktrace=True
 
 [generators]
 CMakeDeps

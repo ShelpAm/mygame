@@ -1,10 +1,10 @@
 #pragma once
 
 #include "core/math.hpp"
-#include <string>
-#include <vector>
 #include <array>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 class WorldState;
 class KnowledgeGraph;
@@ -12,14 +12,17 @@ class RelationshipTable;
 class EntityManager;
 
 class SaveManager {
-public:
+  public:
     struct NPCData {
         std::string id;
         std::string name;
         std::string personality;
         Vec2f position;
-        int hp = 10; int max_hp = 10; bool alive = true;
-        std::unordered_map<std::string, std::string> knowledge;  // fact_id -> version
+        int hp = 10;
+        int max_hp = 10;
+        bool alive = true;
+        std::unordered_map<std::string, std::string>
+            knowledge; // fact_id -> version
     };
 
     struct SaveData {
@@ -27,16 +30,17 @@ public:
         int season = 0;
         float time_of_day = 6.f;
         Vec2f player_pos;
-        int player_hp = 20; int player_max_hp = 20;
+        int player_hp = 20;
+        int player_max_hp = 20;
         std::vector<std::string> known_topics;
         std::vector<Vec2i> seen_tiles;
         std::vector<std::pair<std::string, std::array<int, 3>>> relations;
         std::vector<NPCData> npcs;
     };
 
-    static bool save(const std::string& path, const WorldState& ws,
-                     const KnowledgeGraph& kg, const RelationshipTable& rt,
+    static bool save(std::string const &path, WorldState const &ws,
+                     KnowledgeGraph const &kg, RelationshipTable const &rt,
                      Vec2f player_pos, int player_hp, int player_max_hp,
-                     const std::vector<NPCData>& npcs);
-    static bool load(const std::string& path, SaveData& out);
+                     std::vector<NPCData> const &npcs);
+    static bool load(std::string const &path, SaveData &out);
 };

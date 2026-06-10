@@ -3,18 +3,30 @@
 #include <chrono>
 
 class GameClock {
-public:
+  public:
     GameClock();
 
     void restart();
     float tick();
 
-    float delta_time() const { return delta_time_; }
-    float total_time() const { return total_time_; }
-    int frame_count() const { return frame_count_; }
-    float fps() const { return fps_; }
+    float delta_time() const
+    {
+        return delta_time_;
+    }
+    float total_time() const
+    {
+        return total_time_;
+    }
+    int frame_count() const
+    {
+        return frame_count_;
+    }
+    float fps() const
+    {
+        return fps_;
+    }
 
-private:
+  private:
     using Clock = std::chrono::steady_clock;
     using TimePoint = Clock::time_point;
 

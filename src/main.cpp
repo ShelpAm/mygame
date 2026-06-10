@@ -1,5 +1,7 @@
 #include "core/app.hpp"
-auto main() -> int {
+
+int main(int argc, char **argv)
+{
     App app;
     if (!app.init()) {
         return 1;

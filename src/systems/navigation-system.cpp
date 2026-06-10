@@ -1,25 +1,30 @@
 #include "systems/navigation-system.hpp"
-#include <queue>
-#include <unordered_map>
 #include <algorithm>
 #include <cmath>
+#include <queue>
+#include <unordered_map>
 
 void NavigationSystem::update(float /*dt*/) {}
 
-bool NavigationSystem::is_walkable(Vec2i tile) const {
+bool NavigationSystem::is_walkable(Vec2i tile) const
+{
     return !blocked_tiles_.contains(tile);
 }
 
-void NavigationSystem::set_walkable(Vec2i tile, bool walkable) {
+void NavigationSystem::set_walkable(Vec2i tile, bool walkable)
+{
     if (walkable) {
         blocked_tiles_.erase(tile);
-    } else {
+    }
+    else {
         blocked_tiles_.insert(tile);
     }
 }
 
-std::vector<Vec2i> NavigationSystem::find_path(Vec2i start, Vec2i goal) const {
-    if (!is_walkable(goal)) return {};
+std::vector<Vec2i> NavigationSystem::find_path(Vec2i start, Vec2i goal) const
+{
+    if (!is_walkable(goal))
+        return {};
 
     using Node = std::pair<int, Vec2i>;
     auto heuristic = [](Vec2i a, Vec2i b) -> int {
@@ -33,7 +38,7 @@ std::vector<Vec2i> NavigationSystem::find_path(Vec2i start, Vec2i goal) const {
     gScore[start] = 0;
     openSet.emplace(heuristic(start, goal), start);
 
-    const Vec2i neighbors[] = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
+    Vec2i const neighbors[] = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
 
     while (!openSet.empty()) {
         auto [f, current] = openSet.top();
@@ -51,7 +56,8 @@ std::vector<Vec2i> NavigationSystem::find_path(Vec2i start, Vec2i goal) const {
 
         for (auto [dx, dy] : neighbors) {
             Vec2i next{current.x + dx, current.y + dy};
-            if (!is_walkable(next)) continue;
+            if (!is_walkable(next))
+                continue;
 
             int tentativeG = gScore[current] + 1;
             if (!gScore.contains(next) || tentativeG < gScore[next]) {

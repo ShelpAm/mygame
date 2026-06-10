@@ -1,21 +1,21 @@
 #pragma once
 
 #include <string>
-#include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 class TopicRegistry {
-public:
-    void register_topic(const std::string& id, const std::string& display_name,
-                       const std::string& category);
-    bool exists(const std::string& id) const;
-    const std::string& display_name(const std::string& id) const;
+  public:
+    void register_topic(std::string const &id, std::string const &display_name,
+                        std::string const &category);
+    bool exists(std::string const &id) const;
+    std::string const &display_name(std::string const &id) const;
 
     std::vector<std::string> all_topics() const;
-    std::vector<std::string> by_category(const std::string& category) const;
+    std::vector<std::string> by_category(std::string const &category) const;
 
-private:
+  private:
     struct Topic {
         std::string display_name;
         std::string category;

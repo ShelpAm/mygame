@@ -2,13 +2,13 @@
 
 #include "knowledge/knowledge-graph.hpp"
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 struct NPCState {
     std::string npc_id;
     std::string display_name;
-    std::string personality;  // "friendly", "guarded", "hostile", "fearful"
+    std::string personality; // "friendly", "guarded", "hostile", "fearful"
 
     // What this NPC knows
     struct KnownFact {
@@ -22,15 +22,22 @@ struct NPCState {
 
     // Opinion toward player
     struct PlayerOpinion {
-        int trust = 0;     // -100 to 100
-        int fear = 0;      // 0 to 100
-        int respect = 0;   // 0 to 100
+        int trust = 0;   // -100 to 100
+        int fear = 0;    // 0 to 100
+        int respect = 0; // 0 to 100
     };
     PlayerOpinion opinion;
 
     // Current agenda
-    enum class Goal { gain_info, spread_misinfo, get_item, form_alliance, harm_player, neutral };
+    enum class Goal {
+        gain_info,
+        spread_misinfo,
+        get_item,
+        form_alliance,
+        harm_player,
+        neutral
+    };
     Goal current_goal = Goal::neutral;
     std::string goal_fact_id;
-    int urgency = 0;  // 0-100
+    int urgency = 0; // 0-100
 };

@@ -1,40 +1,49 @@
 #include "knowledge/knowledge-graph.hpp"
-const Fact* KnowledgeGraph::fact(const std::string& id) const {
+Fact const *KnowledgeGraph::fact(std::string const &id) const
+{
     auto it = facts_.find(id);
     return it != facts_.end() ? &it->second : nullptr;
 }
 
-Fact* KnowledgeGraph::fact_mutable(const std::string& id) {
+Fact *KnowledgeGraph::fact_mutable(std::string const &id)
+{
     auto it = facts_.find(id);
     return it != facts_.end() ? &it->second : nullptr;
 }
 
-void KnowledgeGraph::add_or_update_fact(Fact fact) {
+void KnowledgeGraph::add_or_update_fact(Fact fact)
+{
     auto it = facts_.find(fact.id);
     if (it != facts_.end()) {
         // Merge origins
-        for (auto& origin : fact.origins) {
+        for (auto &origin : fact.origins) {
             it->second.origins.push_back(std::move(origin));
         }
         // Upgrade certainty if multiple sources
         if (it->second.origins.size() >= 3) {
             it->second.player_certainty = Fact::Certainty::plausible;
         }
-    } else {
+    }
+    else {
         facts_[fact.id] = std::move(fact);
     }
 }
 
-bool KnowledgeGraph::has_fact(const std::string& id) const {
+bool KnowledgeGraph::has_fact(std::string const &id) const
+{
     return facts_.contains(id);
 }
 
-void KnowledgeGraph::add_relation(const std::string& fact_a, const std::string& fact_b) {
+void KnowledgeGraph::add_relation(std::string const &fact_a,
+                                  std::string const &fact_b)
+{
     fact_relations_.emplace(fact_a, fact_b);
     fact_relations_.emplace(fact_b, fact_a);
 }
 
-std::vector<std::string> KnowledgeGraph::related_facts(const std::string& id) const {
+std::vector<std::string>
+KnowledgeGraph::related_facts(std::string const &id) const
+{
     std::vector<std::string> result;
     auto range = fact_relations_.equal_range(id);
     for (auto it = range.first; it != range.second; ++it) {
@@ -43,18 +52,21 @@ std::vector<std::string> KnowledgeGraph::related_facts(const std::string& id) co
     return result;
 }
 
-bool KnowledgeGraph::is_topic_known(const std::string& topic) const {
+bool KnowledgeGraph::is_topic_known(std::string const &topic) const
+{
     return known_topics_.contains(topic);
 }
 
-void KnowledgeGraph::mark_topic_known(const std::string& topic) {
+void KnowledgeGraph::mark_topic_known(std::string const &topic)
+{
     known_topics_.insert(topic);
 }
 
-std::vector<const Fact*> KnowledgeGraph::facts_witnessed() const {
-    std::vector<const Fact*> result;
-    for (const auto& [id, fact] : facts_) {
-        for (const auto& origin : fact.origins) {
+std::vector<Fact const *> KnowledgeGraph::facts_witnessed() const
+{
+    std::vector<Fact const *> result;
+    for (auto const &[id, fact] : facts_) {
+        for (auto const &origin : fact.origins) {
             if (origin.source == Fact::Origin::Source::player_witness) {
                 result.push_back(&fact);
                 break;
@@ -64,12 +76,13 @@ std::vector<const Fact*> KnowledgeGraph::facts_witnessed() const {
     return result;
 }
 
-std::vector<const Fact*> KnowledgeGraph::facts_heard() const {
-    std::vector<const Fact*> result;
-    for (const auto& [id, fact] : facts_) {
+std::vector<Fact const *> KnowledgeGraph::facts_heard() const
+{
+    std::vector<Fact const *> result;
+    for (auto const &[id, fact] : facts_) {
         bool witnessed = false;
         bool heard = false;
-        for (const auto& origin : fact.origins) {
+        for (auto const &origin : fact.origins) {
             if (origin.source == Fact::Origin::Source::player_witness) {
                 witnessed = true;
                 break;

@@ -1,31 +1,62 @@
 #pragma once
 
+#include "entities/components/combat-stats.hpp"
 #include "entities/entity-manager.hpp"
+#include "net/transport.hpp"
+#include <memory>
 #include <unordered_map>
 
-class NetworkManager;
 class CombatSystem;
 class WorldState;
 class QuestManager;
+class NetworkManager;
 
 class Client {
-public:
+  public:
     Client();
-    void set_managers(CombatSystem* cs, WorldState* ws, QuestManager* qm);
+    void set_managers(CombatSystem *cs, WorldState *ws, QuestManager *qm);
 
-    void update(float dt, NetworkManager& net);
-    void handle_combat_event(int attacker_id, int defender_id, int damage, bool killed);
+    void update(float dt);
+    void handle_combat_event(int attacker_id, int defender_id, int damage,
+                             bool killed);
+    void attach_local(ITransport *t);
+    void attach_network(NetworkManager &net);
+    void detach_transport();
+    void reset();
 
-    EntityManager& entities() { return em_; }
+    void set_player_id(EntityId id)
+    {
+        player_id_ = id;
+    }
+    uint32_t player_id() const
+    {
+        return player_id_;
+    }
+
+    void send_player_direction(Vec2f dir);
+    void send_interact();
+    void send_rest();
+    void send_recruit();
+
+    EntityManager &entities()
+    {
+        return em_;
+    }
+    EntityManager const &entities() const
+    {
+        return em_;
+    }
     EntityId local_player() const;
-    Vec2f local_player_pos();
-    void set_local_player_pos(Vec2f pos);
-    const EntityManager& entities() const { return em_; }
+    Vec2f player_position();
+    bool is_player_dead();
+    CombatStats const *player_stats();
 
-private:
+  private:
     EntityManager em_;
-    EntityId my_player_ = 0;
+    EntityId player_id_ = invalid_entity;
     std::unordered_map<int, EntityId> id_map_;
+    std::unique_ptr<ITransport> transport_;
 
-    void apply_sync(const std::vector<uint8_t>& data);
+    void apply_sync(std::vector<uint8_t> const &data);
+    void on_message(TransportMessage const &msg);
 };
