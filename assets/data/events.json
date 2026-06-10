@@ -1,0 +1,124 @@
+{
+    "events": [
+        {
+            "id": "ugarit_sacks",
+            "type": "Battle",
+            "description": "Ugarit is struck by a massive Sea People raid. The port burns for three days.",
+            "locationId": "ugarit",
+            "sourceFactionId": "sea_peoples",
+            "targetFactionId": "ugarit_merchants",
+            "triggerDay": 5,
+            "powerShift": 20,
+            "wealthShift": -30,
+            "cohesionShift": -20
+        },
+        {
+            "id": "byblos_fortifies",
+            "type": "DiplomaticShift",
+            "description": "The King of Byblos orders the city walls reinforced. Refugees pour in seeking protection.",
+            "locationId": "byblos",
+            "sourceFactionId": "byblos_royalty",
+            "targetFactionId": "",
+            "triggerDay": 15,
+            "powerShift": 10,
+            "wealthShift": -15,
+            "cohesionShift": 10
+        },
+        {
+            "id": "refugee_wave_1",
+            "type": "RefugeeWave",
+            "description": "Hundreds of refugees from destroyed coastal villages arrive, straining food supplies.",
+            "locationId": "byblos",
+            "sourceFactionId": "",
+            "targetFactionId": "byblos_royalty",
+            "triggerDay": 20,
+            "powerShift": 0,
+            "wealthShift": -20,
+            "cohesionShift": -15
+        },
+        {
+            "id": "plague_outbreak",
+            "type": "Plague",
+            "description": "A mysterious illness spreads through the refugee camps. The temple closes its gates.",
+            "locationId": "byblos",
+            "sourceFactionId": "",
+            "targetFactionId": "byblos_royalty",
+            "triggerDay": 35,
+            "powerShift": 0,
+            "wealthShift": -10,
+            "cohesionShift": -30
+        },
+        {
+            "id": "copper_route_blocked",
+            "type": "NaturalDisaster",
+            "description": "A storm destroys several merchant vessels. The copper trade route is disrupted.",
+            "locationId": "cyprus_coast",
+            "sourceFactionId": "",
+            "targetFactionId": "ugarit_merchants",
+            "triggerDay": 25,
+            "powerShift": 0,
+            "wealthShift": -25,
+            "cohesionShift": -5
+        },
+        {
+            "id": "egypt_refuses",
+            "type": "DiplomaticShift",
+            "description": "Pharaoh refuses to send aid to the Levantine city-states. 'Every kingdom must stand alone.'",
+            "locationId": "egypt",
+            "sourceFactionId": "egypt",
+            "targetFactionId": "byblos_royalty",
+            "triggerDay": 45,
+            "powerShift": 0,
+            "wealthShift": -10,
+            "cohesionShift": -10
+        },
+        {
+            "id": "warlord_rising",
+            "type": "DiplomaticShift",
+            "description": "A former mercenary captain declares himself 'Protector of the Coast' and begins extracting tribute.",
+            "locationId": "coastal_villages",
+            "sourceFactionId": "warlord_faction",
+            "targetFactionId": "ugarit_merchants",
+            "triggerDay": 60,
+            "powerShift": 15,
+            "wealthShift": -15,
+            "cohesionShift": 0
+        },
+        {
+            "id": "temple_schism",
+            "type": "Betrayal",
+            "description": "The High Priest accuses the King of Byblos of angering the gods. Half the priesthood splits off.",
+            "locationId": "byblos",
+            "sourceFactionId": "temple_faction",
+            "targetFactionId": "byblos_royalty",
+            "triggerDay": 80,
+            "powerShift": -10,
+            "wealthShift": -10,
+            "cohesionShift": -25
+        },
+        {
+            "id": "assassination_attempt",
+            "type": "Assassination",
+            "description": "An attempt on the King of Byblos's life fails, but his chief advisor is killed. Trust evaporates.",
+            "locationId": "byblos",
+            "sourceFactionId": "",
+            "targetFactionId": "byblos_royalty",
+            "triggerDay": 100,
+            "powerShift": 0,
+            "wealthShift": 0,
+            "cohesionShift": -40
+        },
+        {
+            "id": "cyprus_discovery",
+            "type": "Discovery",
+            "description": "A new copper vein is discovered in Cyprus. Hope for the trade networks returns.",
+            "locationId": "cyprus",
+            "sourceFactionId": "",
+            "targetFactionId": "ugarit_merchants",
+            "triggerDay": 120,
+            "powerShift": 0,
+            "wealthShift": 30,
+            "cohesionShift": 15
+        }
+    ]
+}

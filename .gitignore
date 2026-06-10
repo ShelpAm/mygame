@@ -1,0 +1,9 @@
+.claude/
+.cache/
+
+build/
+CMakeUserPresets.json
+compile_commands.json
+imgui.ini
+saves/
+

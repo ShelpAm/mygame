@@ -1,0 +1,36 @@
+{
+    "quests": [
+        {
+            "id": "find_brother",
+            "title": "quest.find_brother.title",
+            "desc": "quest.find_brother.desc",
+            "giver": "merchant_1",
+            "objectives": [{"type": "reach", "target": "byblos", "textKey": "quest.find_brother.obj"}],
+            "rewards": {"trust": 20, "gold": 50}
+        },
+        {
+            "id": "deliver_letter",
+            "title": "quest.deliver_letter.title",
+            "desc": "quest.deliver_letter.desc",
+            "giver": "guard_1",
+            "objectives": [{"type": "talk", "target": "priest_1", "textKey": "quest.deliver_letter.obj"}],
+            "rewards": {"trust": 15, "gold": 30}
+        },
+        {
+            "id": "copper_shipment",
+            "title": "quest.copper_shipment.title",
+            "desc": "quest.copper_shipment.desc",
+            "giver": "smith_1",
+            "objectives": [{"type": "talk", "target": "sailor_1", "textKey": "quest.copper_shipment.obj"}],
+            "rewards": {"trust": 10, "gold": 40}
+        },
+        {
+            "id": "defend_camp",
+            "title": "quest.defend_camp.title",
+            "desc": "quest.defend_camp.desc",
+            "giver": "refugee_1",
+            "objectives": [{"type": "kill", "target": "enemy", "count": 5, "textKey": "quest.defend_camp.obj"}],
+            "rewards": {"trust": 25, "gold": 60}
+        }
+    ]
+}

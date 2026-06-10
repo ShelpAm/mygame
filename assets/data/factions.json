@@ -1,0 +1,58 @@
+{
+    "factions": [
+        {
+            "id": "ugarit_merchants",
+            "name": "Ugarit Merchant Families",
+            "power": 30,
+            "cohesion": 40,
+            "wealth": 50,
+            "controlledLocations": ["ugarit"],
+            "relations": {}
+        },
+        {
+            "id": "byblos_royalty",
+            "name": "Byblos Royal Court",
+            "power": 60,
+            "cohesion": 50,
+            "wealth": 70,
+            "controlledLocations": ["byblos"],
+            "relations": {"ugarit_merchants": 40, "egypt": 60, "temple_faction": 50}
+        },
+        {
+            "id": "sea_peoples",
+            "name": "Sea Peoples",
+            "power": 80,
+            "cohesion": 70,
+            "wealth": 60,
+            "controlledLocations": [],
+            "relations": {"ugarit_merchants": -80, "byblos_royalty": -70}
+        },
+        {
+            "id": "egypt",
+            "name": "Egypt",
+            "power": 85,
+            "cohesion": 60,
+            "wealth": 90,
+            "controlledLocations": ["egypt"],
+            "relations": {"byblos_royalty": 50, "ugarit_merchants": 30}
+        },
+        {
+            "id": "temple_faction",
+            "name": "Temple of Baal",
+            "power": 40,
+            "cohesion": 80,
+            "wealth": 50,
+            "controlledLocations": [],
+            "relations": {"byblos_royalty": 40, "ugarit_merchants": 20}
+        },
+        {
+            "id": "warlord_faction",
+            "name": "Coastal Warlords",
+            "power": 45,
+            "cohesion": 30,
+            "wealth": 40,
+            "controlledLocations": ["coastal_villages"],
+            "relations": {"sea_peoples": -30, "ugarit_merchants": -50}
+        }
+    ]
+}

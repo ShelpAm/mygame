@@ -1,0 +1,88 @@
+{
+    "templates": [
+        {
+            "type": "greeting",
+            "texts": ["Ah, a traveler. What brings you here?",
+                       "Greetings, friend. What can I do for you?",
+                       "Hmm. Another stranger passing through.",
+                       "Welcome. I have seen you around these parts."]
+        },
+        {
+            "type": "greeting_friendly",
+            "texts": ["Well met, friend! The road has been kind to you, I hope?",
+                       "A familiar face! Come, share news of your travels.",
+                       "Welcome, welcome! Rest your feet. What tidings do you bring?"],
+            "personalityPref": "friendly"
+        },
+        {
+            "type": "greeting_guarded",
+            "texts": ["I do not know you. State your business.",
+                       "Travelers bring trouble. What do you want?",
+                       "Be quick with your words. These are dangerous times."],
+            "personalityPref": "guarded"
+        },
+        {
+            "type": "greeting_hostile",
+            "texts": ["Another rat scurrying through the ruins. What do you want?",
+                       "I do not talk to strangers for free."],
+            "personalityPref": "hostile"
+        },
+        {
+            "type": "greeting_fearful",
+            "texts": ["Please... I mean no harm. Are you... are you one of them?",
+                       "Have you seen them? The raiders? Are they close?"],
+            "personalityPref": "fearful"
+        },
+        {
+            "type": "knows_directly",
+            "texts": ["I was there when [topic] happened. [detail]",
+                       "I saw it with my own eyes — [topic]. [detail]",
+                       "Yes, [topic]. I was nearby when it occurred. [detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60
+        },
+        {
+            "type": "heard_rumor",
+            "texts": ["I have heard rumors about [topic]. [detail]",
+                       "People say that [topic]. Though I cannot confirm it myself.",
+                       "[person] told me about [topic]. [detail]"],
+            "requiresHeard": true,
+            "minConfidence": 30
+        },
+        {
+            "type": "heard_rumor_guarded",
+            "texts": ["I may have heard something about [topic], but I should not speak of it.",
+                       "Some things are better left unsaid. Even about [topic].",
+                       "Why do you ask about [topic]? That is dangerous talk."],
+            "requiresHeard": true,
+            "minConfidence": 0,
+            "personalityPref": "guarded"
+        },
+        {
+            "type": "deny_knowledge",
+            "texts": ["I am afraid I know nothing of [topic].",
+                       "You would have to ask someone else about that.",
+                       "[topic]? Never heard of it."]
+        },
+        {
+            "type": "deny_knowledge_hostile",
+            "texts": ["Even if I knew about [topic], I would not tell you.",
+                       "That is none of your concern, stranger.",
+                       "Ask someone who cares. I do not."],
+            "personalityPref": "hostile"
+        },
+        {
+            "type": "deny_knowledge_fearful",
+            "texts": ["I... I cannot talk about [topic]. Please leave me alone.",
+                       "Speaking of [topic] brings danger. I have said too much already."],
+            "personalityPref": "fearful"
+        },
+        {
+            "type": "share_rumor_version",
+            "texts": ["From what I hear, [topic]. [detail] But you know how rumors spread.",
+                       "The version I got is that [topic]. [detail] Make of it what you will."],
+            "requiresHeard": true,
+            "minConfidence": 20
+        }
+    ]
+}
