@@ -66,9 +66,22 @@ bool App::init() {
     m_dialogueEngine->discoverLanguages("assets/dialogue");
     m_quests->loadFromJson("assets/data/quests.json");
 
-    // Network callback: route combat events to server/client
+    // Network callback: handle incoming entity updates and combat events
     m_network->setCallback([this](const NetMessage& msg) {
-        if (msg.type == NetMessage::CombatEvent && msg.data.size() >= 13) {
+        if (msg.type == NetMessage::EntityUpdate && msg.data.size() >= 21) {
+            // Remote player position update
+            int id; float x, y; int hp, maxHp; uint8_t alive;
+            memcpy(&id, msg.data.data(), 4);
+            memcpy(&x, msg.data.data()+4, 4); memcpy(&y, msg.data.data()+8, 4);
+            memcpy(&hp, msg.data.data()+12, 4); memcpy(&maxHp, msg.data.data()+16, 4);
+            alive = msg.data[20];
+            // Create/update remote player entity on server
+            if (!m_server->remotePlayer(id)) {
+                m_server->addRemotePlayer(id, {x, y});
+            } else {
+                m_server->updateRemotePlayer(id, {x, y}, hp, maxHp, (bool)alive);
+            }
+        } else if (msg.type == NetMessage::CombatEvent && msg.data.size() >= 13) {
             auto read = [&](int o) { int v; memcpy(&v, msg.data.data()+o, 4); return v; };
             int att = read(0), def = read(4), dmg = read(8); bool k = msg.data[12];
             if (m_server) m_server->handleCombatEvent(att, def, dmg, k);
@@ -193,9 +206,22 @@ void App::update(float dt) {
     }
 
     m_gameMode->update(dt, *m_input, *m_locale, *m_worldState);
-    auto* ppos = m_server->entities().getComponent<Position>(m_gameMode->playerEntity());
-    if (ppos) m_cameraSystem->setTarget(ppos->worldPos);
+    // Camera tracks player
+    if (m_network->isConnected() && !m_network->isHosting()) {
+        m_cameraSystem->setTarget(m_client->localPlayerPos());
+    } else {
+        auto* ppos = m_server->entities().getComponent<Position>(m_gameMode->playerEntity());
+        if (ppos) m_cameraSystem->setTarget(ppos->worldPos);
+    }
     m_cameraSystem->update(dt);
+
+    // Client sends position to server
+    if (m_network->isConnected() && !m_network->isHosting()) {
+        auto pos = m_client->localPlayerPos();
+        auto* cs = m_client->entities().getComponent<CombatStats>(m_client->localPlayer());
+        m_network->sendEntityUpdate(0, pos, cs ? cs->hp : 20, cs ? cs->maxHp : 20, cs ? cs->alive : true);
+    }
+
     m_uiManager->update(dt);
 }
 

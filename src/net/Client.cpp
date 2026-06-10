@@ -5,13 +5,29 @@
 #include "systems/QuestManager.hpp"
 #include "entities/components/Position.hpp"
 
-Client::Client() {}
+Client::Client() {
+    // Create local player entity immediately so we see ourselves
+    m_myPlayer = m_em.createEntity();
+    m_em.addComponent<Position>(m_myPlayer, Position{{0,0}, {0,0}, 1.f});
+    m_em.addComponent<CombatStats>(m_myPlayer, CombatStats{Team::Player, 20, 20, 4, 3, 80.f});
+}
 
 void Client::setManagers(CombatSystem*, WorldState*, QuestManager*) {}
 
+EntityId Client::localPlayer() const { return m_myPlayer; }
+
+Vec2f Client::localPlayerPos() {
+    auto* p = m_em.getComponent<Position>(m_myPlayer);
+    return p ? p->worldPos : Vec2f{};
+}
+
+void Client::setLocalPlayerPos(Vec2f pos) {
+    auto* p = m_em.getComponent<Position>(m_myPlayer);
+    if (p) p->worldPos = pos;
+}
+
 void Client::update(float dt, NetworkManager& net) {
     (void)dt;
-    // Setup callback to handle sync data
     net.setCallback([this](const NetMessage& msg) {
         if (msg.type == NetMessage::StateFull) {
             applySync(msg.data);
@@ -29,6 +45,8 @@ void Client::applySync(const std::vector<uint8_t>& data) {
         auto readInt = [&](size_t off) { int v; memcpy(&v, data.data()+i+off, 4); return v; };
         auto readFloat = [&](size_t off) { float v; memcpy(&v, data.data()+i+off, 4); return v; };
         int nid = readInt(0);
+        // Skip our own player entity (ID 0)
+        if (nid == 0) continue;
         float x = readFloat(4), y = readFloat(8);
         int hp = readInt(12), maxHp = readInt(16);
         bool alive = data[i+20] != 0;

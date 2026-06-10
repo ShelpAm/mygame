@@ -92,5 +92,21 @@
     "topic.ugarit_sack": "乌加里特陷落",
     "topic.sea_peoples": "海上民族",
     "topic.byblos_king": "比布鲁斯之王",
-    "topic.copper_trade": "铜贸易"
+    "topic.copper_trade": "铜贸易",
+
+    "mp.title": "多人联机",
+    "mp.host": "创建主机",
+    "mp.host_btn": "创建 (端口 27015)",
+    "mp.join": "加入游戏",
+    "mp.ip": "IP地址",
+    "mp.connect": "连接",
+    "mp.hosting": "正在监听端口 27015",
+    "mp.hosting_hint": "告诉你的朋友用你的IP地址连接",
+    "mp.connected": "已连接！",
+    "mp.remote_entities": "远程实体",
+    "mp.chat": "聊天：",
+    "mp.send": "发送",
+    "mp.disconnect": "断开",
+    "mp.close": "关闭",
+    "mp.saved_servers": "已保存的服务器："
 }

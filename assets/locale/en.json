@@ -93,5 +93,21 @@
     "topic.ugarit_sack": "the Sack of Ugarit",
     "topic.sea_peoples": "the Sea Peoples",
     "topic.byblos_king": "the King of Byblos",
-    "topic.copper_trade": "the Copper Trade"
+    "topic.copper_trade": "the Copper Trade",
+
+    "mp.title": "Multiplayer",
+    "mp.host": "Host Game",
+    "mp.host_btn": "Host (port 27015)",
+    "mp.join": "Join Game",
+    "mp.ip": "IP",
+    "mp.connect": "Connect",
+    "mp.hosting": "Hosting on port 27015",
+    "mp.hosting_hint": "Tell your friend to connect to your IP",
+    "mp.connected": "Connected!",
+    "mp.remote_entities": "Remote entities",
+    "mp.chat": "Chat:",
+    "mp.send": "Send",
+    "mp.disconnect": "Disconnect",
+    "mp.close": "Close",
+    "mp.saved_servers": "Saved Servers:"
 }

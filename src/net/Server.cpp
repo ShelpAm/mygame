@@ -1,6 +1,7 @@
 #include "net/Server.hpp"
 #include "net/NetworkManager.hpp"
 #include "systems/CombatSystem.hpp"
+#include <unordered_set>
 #include "world/WorldState.hpp"
 #include "systems/QuestManager.hpp"
 
@@ -49,9 +50,34 @@ void Server::removeEntity(EntityId id) {
     m_em.destroyEntity(id);
 }
 
+bool Server::remotePlayer(int playerId) {
+    return m_remotePlayerMap.contains(playerId);
+}
+
+void Server::addRemotePlayer(int playerId, Vec2f pos) {
+    auto eid = m_em.createEntity();
+    m_remotePlayerMap[playerId] = eid;
+    m_em.addComponent<Position>(eid, Position{pos, {0,0}, 1.f});
+    m_em.addComponent<CombatStats>(eid, CombatStats{Team::Enemy, 20, 20, 4, 3, 80.f});
+}
+
+void Server::updateRemotePlayer(int playerId, Vec2f pos, int hp, int maxHp, bool alive) {
+    auto it = m_remotePlayerMap.find(playerId);
+    if (it == m_remotePlayerMap.end()) return;
+    auto* p = m_em.getComponent<Position>(it->second);
+    auto* c = m_em.getComponent<CombatStats>(it->second);
+    if (p) p->worldPos = pos;
+    if (c) { c->hp = hp; c->alive = alive; }
+}
+
 std::vector<uint8_t> Server::buildSyncPayload() {
+    // Collect IDs of remote players so we don't sync them back
+    std::unordered_set<EntityId> remoteIds;
+    for (const auto& [pid, eid] : m_remotePlayerMap) remoteIds.insert(eid);
+
     std::vector<uint8_t> out;
     for (auto id : m_em.allEntities()) {
+        if (remoteIds.contains(id)) continue;  // Skip remote players
         auto* ep = m_em.getComponent<Position>(id);
         auto* ec = m_em.getComponent<CombatStats>(id);
         if (!ep || !ec) continue;

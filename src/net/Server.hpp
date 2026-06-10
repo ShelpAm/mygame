@@ -28,8 +28,14 @@ public:
     EntityId addEntity(Vec2f pos, Team team, int hp, int maxHp);
     void removeEntity(EntityId id);
 
+    // Remote player management
+    bool remotePlayer(int playerId);
+    void addRemotePlayer(int playerId, Vec2f pos);
+    void updateRemotePlayer(int playerId, Vec2f pos, int hp, int maxHp, bool alive);
+
 private:
     EntityManager m_em;
+    std::unordered_map<int, EntityId> m_remotePlayerMap;
     CombatSystem* m_cs = nullptr;
     WorldState* m_ws = nullptr;
     QuestManager* m_qm = nullptr;
