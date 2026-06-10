@@ -190,8 +190,9 @@ void App::update(float dt) {
 
     // Single-player or host: spawn enemies from events
     if (!m_network->isConnected() || m_network->isHosting()) {
-        auto prevCount = m_events->triggeredEvents().size();
-        if (prevCount > 0) {
+        static size_t s_lastCount = 0;
+        auto cnt = m_events->triggeredEvents().size();
+        if (cnt > s_lastCount) { s_lastCount = cnt;
             auto* pos = m_server->entities().getComponent<Position>(m_gameMode->playerEntity());
             Vec2f center = pos ? pos->worldPos : Vec2f{};
             auto& latest = m_events->triggeredEvents().back();
