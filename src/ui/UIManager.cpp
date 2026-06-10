@@ -35,12 +35,29 @@ UIManager::UIManager(SDL_Window* window, SDL_Renderer* renderer)
         0x4E00, 0x9FFF,
         0,
     };
-    // Try CJK font — if it fails, continue without Chinese support
-    const char* cjkFont = "/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf";
-    FILE* test = fopen(cjkFont, "rb");
-    if (test) {
-        fclose(test);
-        fonts.AddFontFromFileTTF(cjkFont, 16.f, &cfg, cjkRanges);
+    // Try CJK fonts across platforms
+    static const char* cjkPaths[] = {
+#ifdef _WIN32
+        "C:\\Windows\\Fonts\\msyh.ttc",
+        "C:\\Windows\\Fonts\\simsun.ttc",
+        "C:\\Windows\\Fonts\\msgothic.ttc",
+#elif __APPLE__
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+#else
+        "/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+#endif
+    };
+    for (const char* path : cjkPaths) {
+        FILE* test = fopen(path, "rb");
+        if (test) {
+            fclose(test);
+            fonts.AddFontFromFileTTF(path, 16.f, &cfg, cjkRanges);
+            break;
+        }
     }
     fonts.Build();
 
@@ -259,6 +276,7 @@ void UIManager::renderHelpPanel(const App& app) {
     ImGui::Text("%s", loc.get("help.f2").c_str());
     ImGui::Text("%s", loc.get("help.f5").c_str());
     ImGui::Text("%s", loc.get("help.f9").c_str());
+    ImGui::Text("%s", loc.get("help.f10").c_str());
     ImGui::Separator();
     ImGui::TextDisabled("%s", loc.get("help.close").c_str());
     ImGui::End();
@@ -307,7 +325,8 @@ void UIManager::renderMultiplayerMenu(const App& app) {
         }
     } else {
         if (net->isHosting()) {
-            ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "Hosting...");
+            ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "Hosting on port 27015");
+            ImGui::TextDisabled("Tell your friend to connect to your IP");
         } else {
             ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "Connected!");
         }

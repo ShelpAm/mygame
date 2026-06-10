@@ -8,7 +8,7 @@
     "hud.water": "Water",
     "hud.energy": "Energy",
     "hud.hp": "HP",
-    "hud.keys": "F1: Help",
+    "hud.keys": "F1: Help | F10: Multiplayer",
     "help.title": "Controls",
     "help.wasd": "WASD - Move",
     "help.e": "E - Interact / Talk",
@@ -17,6 +17,7 @@
     "help.f2": "F2 - Recruit soldier",
     "help.f5": "F5 - Quick save",
     "help.f9": "F9 - Load game",
+    "help.f10": "F10 - Multiplayer (Host/Join)",
     "help.close": "Press F1 again to close",
 
     "season.spring": "Spring",

@@ -639,6 +639,9 @@ void App::update(float dt) {
     auto* pcs = m_entityManager->getComponent<CombatStats>(m_playerEntity);
     if (pcs && !pcs->alive) return;
 
+    // Don't move when menus are open (they capture keyboard)
+    if (m_showMultiplayer || m_showLoadMenu || m_showHelp) return;
+
     float moveX = 0.f, moveY = 0.f;
     if (m_input->isPressed(InputManager::Action::MoveUp))    moveY -= 1.f;
     if (m_input->isPressed(InputManager::Action::MoveDown))  moveY += 1.f;

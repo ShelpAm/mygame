@@ -8,7 +8,7 @@
     "hud.water": "水",
     "hud.energy": "体力",
     "hud.hp": "生命",
-    "hud.keys": "F1: 帮助",
+    "hud.keys": "F1: 帮助 | F10: 多人联机",
     "help.title": "操作说明",
     "help.wasd": "WASD - 移动",
     "help.e": "E - 对话/互动",
@@ -17,6 +17,7 @@
     "help.f2": "F2 - 招募士兵",
     "help.f5": "F5 - 快速存档",
     "help.f9": "F9 - 读取存档",
+    "help.f10": "F10 - 多人联机（创建/加入）",
     "help.close": "再按F1关闭",
 
     "season.spring": "春",

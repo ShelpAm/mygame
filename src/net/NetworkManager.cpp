@@ -44,12 +44,14 @@ void NetworkManager::disconnect() {
     if (!m_connected && !m_hosting) return;
     m_connected = false;
     m_hosting = false;
+    if (m_thread.joinable()) {
+        m_io.stop();
+        m_thread.join();
+    }
     try {
-        if (m_socket && m_socket->is_open()) m_socket->close();
-        if (m_acceptor && m_acceptor->is_open()) m_acceptor->close();
+        if (m_socket) m_socket->close();
+        if (m_acceptor) m_acceptor->close();
     } catch (...) {}
-    m_io.stop();
-    if (m_thread.joinable()) m_thread.join();
     m_socket.reset();
     m_acceptor.reset();
     m_io.restart();
