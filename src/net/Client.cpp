@@ -4,11 +4,12 @@
 #include "world/WorldState.hpp"
 #include "systems/QuestManager.hpp"
 #include "entities/components/Position.hpp"
+#include "entities/components/Sprite.hpp"
 
 Client::Client() {
-    // Create local player entity immediately so we see ourselves
     m_myPlayer = m_em.createEntity();
     m_em.addComponent<Position>(m_myPlayer, Position{{0,0}, {0,0}, 1.f});
+    m_em.addComponent<Sprite>(m_myPlayer, Sprite{"player", {}, {16, 16}, {0.3f, 0.8f, 0.3f, 1.f}, 1.f, true});
     m_em.addComponent<CombatStats>(m_myPlayer, CombatStats{Team::Player, 20, 20, 4, 3, 80.f});
 }
 

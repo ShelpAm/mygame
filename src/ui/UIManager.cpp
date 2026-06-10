@@ -329,12 +329,12 @@ void UIManager::renderMultiplayerMenu(const App& app) {
     auto* net = const_cast<App&>(app).networkMut();
     if (!net->isConnected()) {
         ImGui::Text("%s", loc.get("mp.host").c_str());
-        if (ImGui::Button(loc.get("mp.host_btn").c_str())) { net->host(); }
+        if (ImGui::Button(loc.get("mp.host_btn").c_str())) { try { net->host(); } catch (...) {} }
         ImGui::Separator();
         ImGui::Text("%s", loc.get("mp.join").c_str());
         ImGui::InputText(loc.get("mp.ip").c_str(), m_hostIp, sizeof(m_hostIp));
         if (ImGui::Button(loc.get("mp.connect").c_str())) {
-            net->connect(m_hostIp);
+            try { net->connect(m_hostIp); } catch (...) {}
             std::string ip(m_hostIp);
             if (std::find(m_serverList.begin(), m_serverList.end(), ip) == m_serverList.end()) {
                 m_serverList.push_back(ip); saveServerList();
@@ -347,7 +347,8 @@ void UIManager::renderMultiplayerMenu(const App& app) {
                 ImGui::PushID(i);
                 if (ImGui::Button(m_serverList[i].c_str())) {
                     strncpy(m_hostIp, m_serverList[i].c_str(), sizeof(m_hostIp) - 1);
-                    net->connect(m_serverList[i]);
+                    try { net->connect(m_serverList[i]); }
+                    catch (...) { /* connection failed, ignore */ }
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("X")) { m_serverList.erase(m_serverList.begin() + i); saveServerList(); ImGui::PopID(); break; }

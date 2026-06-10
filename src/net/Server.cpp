@@ -58,7 +58,7 @@ void Server::addRemotePlayer(int playerId, Vec2f pos) {
     auto eid = m_em.createEntity();
     m_remotePlayerMap[playerId] = eid;
     m_em.addComponent<Position>(eid, Position{pos, {0,0}, 1.f});
-    m_em.addComponent<CombatStats>(eid, CombatStats{Team::Enemy, 20, 20, 4, 3, 80.f});
+    m_em.addComponent<CombatStats>(eid, CombatStats{Team::Player, 20, 20, 4, 3, 80.f});
 }
 
 void Server::updateRemotePlayer(int playerId, Vec2f pos, int hp, int maxHp, bool alive) {
