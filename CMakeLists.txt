@@ -80,13 +80,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     imgui::imgui
 )
 
-# Visual Studio doesn't support symlinks by default, so we copy the file instead
 if(WIN32)
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_BINARY_DIR}/compile_commands.json
-            ${CMAKE_SOURCE_DIR}/compile_commands.json
-    )
+    # Visual Studio doesn't support symlinks by default. Don't use it.
 else()
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E create_symlink
