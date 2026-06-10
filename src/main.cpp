@@ -1,5 +1,4 @@
-#include "core/App.hpp"
-
+#include "core/app.hpp"
 auto main() -> int {
     App app;
     if (!app.init()) {

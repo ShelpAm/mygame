@@ -1,38 +1,37 @@
 #include <boost/test/unit_test.hpp>
-#include "dialogue/DialogueEngine.hpp"
-#include "dialogue/TopicRegistry.hpp"
-#include "dialogue/RelationshipTable.hpp"
-#include "entities/components/NPCState.hpp"
-
+#include "dialogue/dialogue-engine.hpp"
+#include "dialogue/topic-registry.hpp"
+#include "dialogue/relationship-table.hpp"
+#include "entities/components/npc-state.hpp"
 BOOST_AUTO_TEST_SUITE(dialogue_tests)
 
 BOOST_AUTO_TEST_CASE(topic_registry_basics) {
     TopicRegistry tr;
-    tr.registerTopic("event_1", "the Battle", "events");
-    tr.registerTopic("person_1", "the King", "people");
+    tr.register_topic("event_1", "the Battle", "events");
+    tr.register_topic("person_1", "the King", "people");
 
     BOOST_TEST(tr.exists("event_1"));
     BOOST_TEST(!tr.exists("event_2"));
-    BOOST_TEST(tr.displayName("event_1") == "the Battle");
-    BOOST_TEST(tr.displayName("person_1") == "the King");
-    BOOST_TEST(tr.displayName("nonexistent").empty());
+    BOOST_TEST(tr.display_name("event_1") == "the Battle");
+    BOOST_TEST(tr.display_name("person_1") == "the King");
+    BOOST_TEST(tr.display_name("nonexistent").empty());
 
-    auto all = tr.allTopics();
+    auto all = tr.all_topics();
     BOOST_TEST(all.size() == 2u);
 
-    auto events = tr.byCategory("events");
+    auto events = tr.by_category("events");
     BOOST_TEST(events.size() == 1u);
     BOOST_TEST(events[0] == "event_1");
 
-    auto people = tr.byCategory("people");
+    auto people = tr.by_category("people");
     BOOST_TEST(people.size() == 1u);
 }
 
 BOOST_AUTO_TEST_CASE(relationship_table_basics) {
     RelationshipTable rt;
-    rt.setRelation("npc_1", {.trust = 10, .fear = 5, .respect = 20});
+    rt.set_relation("npc_1", {.trust = 10, .fear = 5, .respect = 20});
 
-    auto* rel = rt.getRelation("npc_1");
+    auto* rel = rt.get_relation("npc_1");
     BOOST_REQUIRE(rel != nullptr);
     BOOST_TEST(rel->trust == 10);
     BOOST_TEST(rel->fear == 5);
@@ -41,45 +40,45 @@ BOOST_AUTO_TEST_CASE(relationship_table_basics) {
 
 BOOST_AUTO_TEST_CASE(relationship_modifications) {
     RelationshipTable rt;
-    rt.modifyTrust("npc_1", 30);
-    BOOST_TEST(rt.getRelation("npc_1")->trust == 30);
+    rt.modify_trust("npc_1", 30);
+    BOOST_TEST(rt.get_relation("npc_1")->trust == 30);
 
-    rt.modifyTrust("npc_1", -50);
-    BOOST_TEST(rt.getRelation("npc_1")->trust == -20);
+    rt.modify_trust("npc_1", -50);
+    BOOST_TEST(rt.get_relation("npc_1")->trust == -20);
 
-    rt.modifyFear("npc_1", 60);
-    BOOST_TEST(rt.getRelation("npc_1")->fear == 60);
+    rt.modify_fear("npc_1", 60);
+    BOOST_TEST(rt.get_relation("npc_1")->fear == 60);
 
-    rt.modifyRespect("npc_1", 10);
-    rt.modifyRespect("npc_1", -5);
-    BOOST_TEST(rt.getRelation("npc_1")->respect == 5);
+    rt.modify_respect("npc_1", 10);
+    rt.modify_respect("npc_1", -5);
+    BOOST_TEST(rt.get_relation("npc_1")->respect == 5);
 }
 
 BOOST_AUTO_TEST_CASE(relationship_clamping) {
     RelationshipTable rt;
-    rt.modifyTrust("npc_1", 200);
-    BOOST_TEST(rt.getRelation("npc_1")->trust == 100);
+    rt.modify_trust("npc_1", 200);
+    BOOST_TEST(rt.get_relation("npc_1")->trust == 100);
 
-    rt.modifyTrust("npc_1", -300);
-    BOOST_TEST(rt.getRelation("npc_1")->trust == -100);
+    rt.modify_trust("npc_1", -300);
+    BOOST_TEST(rt.get_relation("npc_1")->trust == -100);
 
-    rt.modifyFear("npc_1", 200);
-    BOOST_TEST(rt.getRelation("npc_1")->fear == 100);
+    rt.modify_fear("npc_1", 200);
+    BOOST_TEST(rt.get_relation("npc_1")->fear == 100);
 
-    rt.modifyFear("npc_1", -20);
-    BOOST_TEST(rt.getRelation("npc_1")->fear == 80);
+    rt.modify_fear("npc_1", -20);
+    BOOST_TEST(rt.get_relation("npc_1")->fear == 80);
 }
 
 BOOST_AUTO_TEST_CASE(relationship_unknown_npc) {
     RelationshipTable rt;
-    BOOST_TEST(rt.getRelation("unknown") == nullptr);
+    BOOST_TEST(rt.get_relation("unknown") == nullptr);
 }
 
 BOOST_AUTO_TEST_CASE(relationship_all_ids) {
     RelationshipTable rt;
-    rt.setRelation("a", {});
-    rt.setRelation("b", {});
-    auto ids = rt.allNpcIds();
+    rt.set_relation("a", {});
+    rt.set_relation("b", {});
+    auto ids = rt.all_npc_ids();
     BOOST_TEST(ids.size() == 2u);
 }
 
@@ -88,8 +87,8 @@ static void addTestTemplate(DialogueEngine& de, const std::string& type,
     DialogueTemplate t;
     t.type = type;
     t.texts = {text};
-    t.personalityPref = personality;
-    de.addTemplate(t);
+    t.personality_pref = personality;
+    de.add_template(t);
 }
 
 BOOST_AUTO_TEST_CASE(dialogue_greeting_friendly) {
@@ -97,12 +96,12 @@ BOOST_AUTO_TEST_CASE(dialogue_greeting_friendly) {
     addTestTemplate(de, "greeting_friendly", "Well met, friend!");
     addTestTemplate(de, "greeting", "Hello traveler.");
     NPCState npc;
-    npc.npcId = "test";
+    npc.npc_id = "test";
     npc.personality = "friendly";
 
-    auto resp = de.generateGreeting(npc, 20);
+    auto resp = de.generate_greeting(npc, 20);
     BOOST_TEST(!resp.text.empty());
-    BOOST_TEST(resp.trustDelta >= 0); // Friendly should be positive
+    BOOST_TEST(resp.trust_delta >= 0); // Friendly should be positive
 }
 
 BOOST_AUTO_TEST_CASE(dialogue_greeting_hostile) {
@@ -110,12 +109,12 @@ BOOST_AUTO_TEST_CASE(dialogue_greeting_hostile) {
     addTestTemplate(de, "greeting_hostile", "Get lost, stranger.");
     addTestTemplate(de, "greeting", "Hello.");
     NPCState npc;
-    npc.npcId = "test";
+    npc.npc_id = "test";
     npc.personality = "hostile";
 
-    auto resp = de.generateGreeting(npc, -30);
+    auto resp = de.generate_greeting(npc, -30);
     BOOST_TEST(!resp.text.empty());
-    BOOST_TEST(resp.trustDelta <= 0);
+    BOOST_TEST(resp.trust_delta <= 0);
 }
 
 BOOST_AUTO_TEST_CASE(dialogue_ask_known_topic) {
@@ -124,7 +123,7 @@ BOOST_AUTO_TEST_CASE(dialogue_ask_known_topic) {
     addTestTemplate(de, "heard_rumor", "I heard: [topic]. [detail]");
     addTestTemplate(de, "deny_knowledge", "No idea about [topic].");
     NPCState npc;
-    npc.npcId = "merchant";
+    npc.npc_id = "merchant";
     npc.personality = "friendly";
     npc.knowledge["ugarit_sack"] = {
         "ugarit_sack",
@@ -132,22 +131,22 @@ BOOST_AUTO_TEST_CASE(dialogue_ask_known_topic) {
         80, true, ""
     };
 
-    auto resp = de.generateAskResponse(npc, "ugarit_sack", "the Sack of Ugarit", 20);
+    auto resp = de.generate_ask_response(npc, "ugarit_sack", "the Sack of Ugarit", 20);
     BOOST_TEST(!resp.text.empty());
-    BOOST_TEST(resp.isTruthful);
-    BOOST_TEST(resp.factId == "ugarit_sack");
+    BOOST_TEST(resp.is_truthful);
+    BOOST_TEST(resp.fact_id == "ugarit_sack");
 }
 
 BOOST_AUTO_TEST_CASE(dialogue_ask_unknown_topic) {
     DialogueEngine de;
     addTestTemplate(de, "deny_knowledge", "I know nothing about [topic].");
     NPCState npc;
-    npc.npcId = "merchant";
+    npc.npc_id = "merchant";
     npc.personality = "friendly";
 
-    auto resp = de.generateAskResponse(npc, "unknown", "Unknown Topic", 10);
+    auto resp = de.generate_ask_response(npc, "unknown", "Unknown Topic", 10);
     BOOST_TEST(!resp.text.empty());
-    BOOST_TEST(!resp.isTruthful);  // They don't know, so not truthful info
+    BOOST_TEST(!resp.is_truthful);  // They don't know, so not truthful info
 }
 
 BOOST_AUTO_TEST_CASE(dialogue_hostile_lies) {
@@ -155,16 +154,16 @@ BOOST_AUTO_TEST_CASE(dialogue_hostile_lies) {
     addTestTemplate(de, "deny_knowledge_hostile", "Not telling you about [topic].", "hostile");
     addTestTemplate(de, "deny_knowledge", "No idea.");
     NPCState npc;
-    npc.npcId = "pirate";
+    npc.npc_id = "pirate";
     npc.personality = "hostile";
-    npc.currentGoal = NPCState::Goal::SpreadMisinfo;
+    npc.current_goal = NPCState::Goal::spread_misinfo;
     npc.knowledge["secret"] = {
         "secret",
         "The real treasure is buried near the temple.",
         90, true, ""
     };
 
-    auto resp = de.generateAskResponse(npc, "secret", "the Secret", -40);
+    auto resp = de.generate_ask_response(npc, "secret", "the Secret", -40);
     BOOST_TEST(!resp.text.empty());
     // Hostile + SpreadMisinfo = likely provides misleading info
     // Verify we got a response (content depends on random template selection)
@@ -177,7 +176,7 @@ BOOST_AUTO_TEST_CASE(dialogue_heard_rumor) {
     addTestTemplate(de, "heard_rumor", "[topic]: [detail]");
     addTestTemplate(de, "deny_knowledge", "Nothing about [topic].");
     NPCState npc;
-    npc.npcId = "guard";
+    npc.npc_id = "guard";
     npc.personality = "guarded";
     npc.knowledge["byblos_king"] = {
         "byblos_king",
@@ -185,7 +184,7 @@ BOOST_AUTO_TEST_CASE(dialogue_heard_rumor) {
         40, false, "merchant from Sidon"
     };
 
-    auto resp = de.generateAskResponse(npc, "byblos_king", "the King of Byblos", 0);
+    auto resp = de.generate_ask_response(npc, "byblos_king", "the King of Byblos", 0);
     BOOST_TEST(!resp.text.empty());
     // Should mention it's secondhand
 }
@@ -194,10 +193,10 @@ BOOST_AUTO_TEST_CASE(dialogue_template_fill) {
     DialogueEngine de;
     addTestTemplate(de, "greeting_friendly", "Well met, friend!");
     NPCState npc;
-    npc.npcId = "test";
+    npc.npc_id = "test";
     npc.personality = "friendly";
 
-    auto resp = de.generateGreeting(npc, 10);
+    auto resp = de.generate_greeting(npc, 10);
     BOOST_TEST(!resp.text.empty());
     BOOST_TEST(resp.text.find('[') == std::string::npos);
 }

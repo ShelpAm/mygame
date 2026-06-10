@@ -1,0 +1,107 @@
+#pragma once
+
+#include "core/math.hpp"
+#include "entities/components/combat-stats.hpp"
+#include <cstdint>
+#include <vector>
+#include <array>
+#include <bit>
+#include <concepts>
+#include <string>
+
+struct NetPacket {
+    enum Type : uint32_t { join = 0, state_full = 1, entity_update = 2, chat = 3, disconnect = 4, combat_event = 5, recruit_soldier = 6, spawn_enemy_wave = 7 };
+    Type type;
+    std::vector<uint8_t> payload;
+};
+
+// Serialize a value into bytes (little-endian)
+template<std::integral T>
+void write_bytes(std::vector<uint8_t>& out, T val) {
+    if constexpr (std::endian::native != std::endian::little) {
+        // Swap to little-endian if needed
+        val = std::byteswap(val);
+    }
+    auto bytes = std::bit_cast<std::array<uint8_t, sizeof(T)>>(val);
+    out.insert(out.end(), bytes.begin(), bytes.end());
+}
+
+inline void write_float(std::vector<uint8_t>& out, float val) {
+    auto bytes = std::bit_cast<std::array<uint8_t, 4>>(val);
+    out.insert(out.end(), bytes.begin(), bytes.end());
+}
+
+inline void write_string(std::vector<uint8_t>& out, const std::string& s) {
+    out.insert(out.end(), s.begin(), s.end());
+}
+
+// Serialize a NetPacket for sending
+inline std::vector<uint8_t> serialize_packet(const NetPacket& pkt) {
+    std::vector<uint8_t> data;
+    uint32_t payload_size = static_cast<uint32_t>(pkt.payload.size());
+    write_bytes(data, static_cast<uint32_t>(pkt.type));
+    write_bytes(data, payload_size);
+    data.insert(data.end(), pkt.payload.begin(), pkt.payload.end());
+    return data;
+}
+
+// Deserialize helpers
+template<std::integral T>
+T read_bytes(const std::vector<uint8_t>& data, size_t offset) {
+    std::array<uint8_t, sizeof(T)> arr{};
+    for (size_t i = 0; i < sizeof(T); ++i) arr[i] = data[offset + i];
+    if constexpr (std::endian::native != std::endian::little) {
+        return std::byteswap(std::bit_cast<T>(arr));
+    }
+    return std::bit_cast<T>(arr);
+}
+
+inline float read_float(const std::vector<uint8_t>& data, size_t offset) {
+    std::array<uint8_t, 4> arr{data[offset], data[offset+1], data[offset+2], data[offset+3]};
+    return std::bit_cast<float>(arr);
+}
+
+// Convenience packet builders
+inline std::vector<uint8_t> make_entity_update(int id, float x, float y, int hp, int max_hp, bool alive) {
+    std::vector<uint8_t> p;
+    write_bytes(p, id);
+    write_float(p, x);
+    write_float(p, y);
+    write_bytes(p, hp);
+    write_bytes(p, max_hp);
+    p.push_back(alive ? 1 : 0);
+    return serialize_packet({NetPacket::entity_update, std::move(p)});
+}
+
+inline std::vector<uint8_t> make_full_sync(const std::vector<uint8_t>& entities) {
+    return serialize_packet({NetPacket::state_full, entities});
+}
+
+inline std::vector<uint8_t> make_chat(const std::string& msg) {
+    std::vector<uint8_t> p(msg.begin(), msg.end());
+    return serialize_packet({NetPacket::chat, std::move(p)});
+}
+
+inline std::vector<uint8_t> make_combat_event(int att_id, int def_id, int dmg, bool killed) {
+    std::vector<uint8_t> p;
+    write_bytes(p, att_id);
+    write_bytes(p, def_id);
+    write_bytes(p, dmg);
+    p.push_back(killed ? 1 : 0);
+    return serialize_packet({NetPacket::combat_event, std::move(p)});
+}
+
+inline std::vector<uint8_t> make_recruit_request(Vec2f player_pos) {
+    std::vector<uint8_t> p;
+    write_float(p, player_pos.x); write_float(p, player_pos.y);
+    return serialize_packet({NetPacket::recruit_soldier, std::move(p)});
+}
+
+inline std::vector<uint8_t> make_enemy_wave(Vec2f center, int count, Team team) {
+    std::vector<uint8_t> p;
+    write_float(p, center.x); write_float(p, center.y);
+    write_bytes(p, count);
+    write_bytes(p, static_cast<uint8_t>(team));
+    p.push_back(0);
+    return serialize_packet({NetPacket::spawn_enemy_wave, std::move(p)});
+}

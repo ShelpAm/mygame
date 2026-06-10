@@ -12,60 +12,60 @@ find_package(imgui REQUIRED)
 
 set(SOURCES
     src/main.cpp
-    src/core/App.cpp
-    src/core/GameMode.cpp
-    src/core/ResourceManager.cpp
-    src/core/InputManager.cpp
-    src/core/GameClock.cpp
-    src/entities/EntityManager.cpp
-    src/systems/RenderSystem.cpp
-    src/systems/CameraSystem.cpp
-    src/systems/NavigationSystem.cpp
-    src/knowledge/KnowledgeGraph.cpp
-    src/world/WorldState.cpp
-    src/world/MapData.cpp
-    src/dialogue/DialogueEngine.cpp
-    src/dialogue/TopicRegistry.cpp
-    src/dialogue/RelationshipTable.cpp
-    src/factions/FactionNetwork.cpp
-    src/factions/EventSimulator.cpp
-    src/knowledge/RumorPropagator.cpp
-    src/survival/ConditionTracker.cpp
-    src/save/SaveManager.cpp
-    src/systems/CombatSystem.cpp
-    src/systems/QuestManager.cpp
-    src/net/NetworkManager.cpp
-    src/net/Server.cpp
-    src/net/Client.cpp
-    src/core/LocaleManager.cpp
-    src/ui/UIManager.cpp
-    src/ui/HUD.cpp
+    src/core/app.cpp
+    src/core/game-mode.cpp
+    src/core/resource-manager.cpp
+    src/core/input-manager.cpp
+    src/core/game-clock.cpp
+    src/entities/entity-manager.cpp
+    src/systems/render-system.cpp
+    src/systems/camera-system.cpp
+    src/systems/navigation-system.cpp
+    src/knowledge/knowledge-graph.cpp
+    src/world/world-state.cpp
+    src/world/map-data.cpp
+    src/dialogue/dialogue-engine.cpp
+    src/dialogue/topic-registry.cpp
+    src/dialogue/relationship-table.cpp
+    src/factions/faction-network.cpp
+    src/factions/event-simulator.cpp
+    src/knowledge/rumor-propagator.cpp
+    src/survival/condition-tracker.cpp
+    src/save/save-manager.cpp
+    src/systems/combat-system.cpp
+    src/systems/quest-manager.cpp
+    src/net/network-manager.cpp
+    src/net/server.cpp
+    src/net/client.cpp
+    src/core/locale-manager.cpp
+    src/ui/ui-manager.cpp
+    src/ui/hud.cpp
     src/ui/imgui_impl_sdl3.cpp
 )
 
 set(HEADERS
-    src/core/App.hpp
-    src/core/ResourceManager.hpp
-    src/core/InputManager.hpp
-    src/core/GameClock.hpp
-    src/core/Math.hpp
-    src/entities/EntityManager.hpp
-    src/entities/components/Position.hpp
-    src/entities/components/Sprite.hpp
-    src/entities/components/Movement.hpp
-    src/entities/components/NPCState.hpp
-    src/entities/components/Interactable.hpp
-    src/systems/RenderSystem.hpp
-    src/systems/CameraSystem.hpp
-    src/systems/NavigationSystem.hpp
-    src/knowledge/KnowledgeGraph.hpp
-    src/world/WorldState.hpp
-    src/world/MapData.hpp
-    src/dialogue/DialogueEngine.hpp
-    src/dialogue/TopicRegistry.hpp
-    src/dialogue/RelationshipTable.hpp
-    src/ui/UIManager.hpp
-    src/ui/HUD.hpp
+    src/core/app.hpp
+    src/core/resource-manager.hpp
+    src/core/input-manager.hpp
+    src/core/game-clock.hpp
+    src/core/math.hpp
+    src/entities/entity-manager.hpp
+    src/entities/components/position.hpp
+    src/entities/components/sprite.hpp
+    src/entities/components/movement.hpp
+    src/entities/components/npc-state.hpp
+    src/entities/components/interactable.hpp
+    src/systems/render-system.hpp
+    src/systems/camera-system.hpp
+    src/systems/navigation-system.hpp
+    src/knowledge/knowledge-graph.hpp
+    src/world/world-state.hpp
+    src/world/map-data.hpp
+    src/dialogue/dialogue-engine.hpp
+    src/dialogue/topic-registry.hpp
+    src/dialogue/relationship-table.hpp
+    src/ui/ui-manager.hpp
+    src/ui/hud.hpp
     src/ui/imgui_impl_sdl3.h
 )
 
@@ -103,22 +103,22 @@ set(TEST_SOURCES
     tests/test_factions.cpp
     tests/test_survival.cpp
     tests/test_combat.cpp
-    src/core/InputManager.cpp
-    src/core/GameClock.cpp
-    src/entities/EntityManager.cpp
-    src/systems/NavigationSystem.cpp
-    src/knowledge/KnowledgeGraph.cpp
-    src/world/WorldState.cpp
-    src/world/MapData.cpp
-    src/dialogue/DialogueEngine.cpp
-    src/dialogue/TopicRegistry.cpp
-    src/dialogue/RelationshipTable.cpp
-    src/factions/FactionNetwork.cpp
-    src/factions/EventSimulator.cpp
-    src/knowledge/RumorPropagator.cpp
-    src/survival/ConditionTracker.cpp
-    src/save/SaveManager.cpp
-    src/systems/CombatSystem.cpp
+    src/core/input-manager.cpp
+    src/core/game-clock.cpp
+    src/entities/entity-manager.cpp
+    src/systems/navigation-system.cpp
+    src/knowledge/knowledge-graph.cpp
+    src/world/world-state.cpp
+    src/world/map-data.cpp
+    src/dialogue/dialogue-engine.cpp
+    src/dialogue/topic-registry.cpp
+    src/dialogue/relationship-table.cpp
+    src/factions/faction-network.cpp
+    src/factions/event-simulator.cpp
+    src/knowledge/rumor-propagator.cpp
+    src/survival/condition-tracker.cpp
+    src/save/save-manager.cpp
+    src/systems/combat-system.cpp
 )
 
 add_executable(TheSunsetStraits_tests ${TEST_SOURCES})

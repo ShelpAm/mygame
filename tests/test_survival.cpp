@@ -1,6 +1,5 @@
 #include <boost/test/unit_test.hpp>
-#include "survival/ConditionTracker.hpp"
-
+#include "survival/condition-tracker.hpp"
 BOOST_AUTO_TEST_SUITE(survival_tests)
 
 BOOST_AUTO_TEST_CASE(initial_state) {
@@ -47,7 +46,7 @@ BOOST_AUTO_TEST_CASE(consume_food) {
     ConditionTracker ct;
     ct.update(24.f, false, false);  // lose some food
     float before = ct.state().food;
-    ct.consumeFood(20.f);
+    ct.consume_food(20.f);
     BOOST_TEST(ct.state().food > before);
 }
 
@@ -55,7 +54,7 @@ BOOST_AUTO_TEST_CASE(consume_water) {
     ConditionTracker ct;
     ct.update(24.f, false, false);
     float before = ct.state().water;
-    ct.consumeWater(20.f);
+    ct.consume_water(20.f);
     BOOST_TEST(ct.state().water > before);
 }
 
@@ -69,10 +68,10 @@ BOOST_AUTO_TEST_CASE(healing) {
 
 BOOST_AUTO_TEST_CASE(clamping_bounds) {
     ConditionTracker ct;
-    ct.consumeFood(200.f);
+    ct.consume_food(200.f);
     BOOST_TEST(ct.state().food == 100.f);
 
-    ct.consumeWater(200.f);
+    ct.consume_water(200.f);
     BOOST_TEST(ct.state().water == 100.f);
 }
 

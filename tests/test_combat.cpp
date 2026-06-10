@@ -1,10 +1,9 @@
 #include <boost/test/unit_test.hpp>
-#include "systems/CombatSystem.hpp"
-#include "entities/EntityManager.hpp"
-#include "entities/components/CombatStats.hpp"
-#include "entities/components/Position.hpp"
-#include "entities/components/SoldierAI.hpp"
-
+#include "systems/combat-system.hpp"
+#include "entities/entity-manager.hpp"
+#include "entities/components/combat-stats.hpp"
+#include "entities/components/position.hpp"
+#include "entities/components/soldier-ai.hpp"
 BOOST_AUTO_TEST_SUITE(combat_tests)
 
 BOOST_AUTO_TEST_CASE(combat_stats_initialization) {
@@ -16,19 +15,19 @@ BOOST_AUTO_TEST_CASE(combat_stats_initialization) {
 
 BOOST_AUTO_TEST_CASE(damage_kills_entity) {
     EntityManager em;
-    auto eid = em.createEntity();
-    em.addComponent<CombatStats>(eid, CombatStats{
-        .team = Team::Player, .maxHp = 10, .hp = 10,
-        .attack = 3, .defense = 1, .attackRange = 80.f
+    auto eid = em.create_entity();
+    em.add_component<CombatStats>(eid, CombatStats{
+        .team = Team::player, .max_hp = 10, .hp = 10,
+        .attack = 3, .defense = 1, .attack_range = 80.f
     });
-    em.addComponent<Position>(eid, Position{{0,0},{0,0}});
+    em.add_component<Position>(eid, Position{{0,0},{0,0}});
 
-    auto eid2 = em.createEntity();
-    em.addComponent<CombatStats>(eid2, CombatStats{
-        .team = Team::Enemy, .maxHp = 3, .hp = 3,
-        .attack = 2, .defense = 0, .attackRange = 80.f
+    auto eid2 = em.create_entity();
+    em.add_component<CombatStats>(eid2, CombatStats{
+        .team = Team::enemy, .max_hp = 3, .hp = 3,
+        .attack = 2, .defense = 0, .attack_range = 80.f
     });
-    em.addComponent<Position>(eid2, Position{{50,0},{1,0}});
+    em.add_component<Position>(eid2, Position{{50,0},{1,0}});
 
     CombatSystem csys;
     // Run several updates until someone dies
@@ -36,8 +35,8 @@ BOOST_AUTO_TEST_CASE(damage_kills_entity) {
         csys.update(em, 1.f);
     }
 
-    auto* cs1 = em.getComponent<CombatStats>(eid);
-    auto* cs2 = em.getComponent<CombatStats>(eid2);
+    auto* cs1 = em.get_component<CombatStats>(eid);
+    auto* cs2 = em.get_component<CombatStats>(eid2);
     BOOST_REQUIRE(cs1 != nullptr);
     BOOST_REQUIRE(cs2 != nullptr);
     // At least one should have taken damage
@@ -46,18 +45,18 @@ BOOST_AUTO_TEST_CASE(damage_kills_entity) {
 
 BOOST_AUTO_TEST_CASE(soldier_ai_follows_leader) {
     EntityManager em;
-    auto leader = em.createEntity();
-    em.addComponent<Position>(leader, Position{{100,100},{1,1}});
+    auto leader = em.create_entity();
+    em.add_component<Position>(leader, Position{{100,100},{1,1}});
 
-    auto soldier = em.createEntity();
-    em.addComponent<Position>(soldier, Position{{0,0},{0,0}});
-    em.addComponent<CombatStats>(soldier, CombatStats{
-        .team = Team::Player, .maxHp = 10, .hp = 10
+    auto soldier = em.create_entity();
+    em.add_component<Position>(soldier, Position{{0,0},{0,0}});
+    em.add_component<CombatStats>(soldier, CombatStats{
+        .team = Team::player, .max_hp = 10, .hp = 10
     });
-    em.addComponent<SoldierAI>(soldier, SoldierAI{
-        .followTarget = leader,
-        .formationOffset = {32.f, -32.f},
-        .followDistance = 16.f
+    em.add_component<SoldierAI>(soldier, SoldierAI{
+        .follow_target = leader,
+        .formation_offset = {32.f, -32.f},
+        .follow_distance = 16.f
     });
 
     CombatSystem csys;
@@ -65,22 +64,22 @@ BOOST_AUTO_TEST_CASE(soldier_ai_follows_leader) {
         csys.update(em, 1.f / 60.f);
     }
 
-    auto* sPos = em.getComponent<Position>(soldier);
+    auto* sPos = em.get_component<Position>(soldier);
     BOOST_REQUIRE(sPos != nullptr);
     // Soldier should have moved toward leader
-    BOOST_TEST(sPos->worldPos.x > 20.f);
-    BOOST_TEST(sPos->worldPos.y > 20.f);
+    BOOST_TEST(sPos->world_pos.x > 20.f);
+    BOOST_TEST(sPos->world_pos.y > 20.f);
 }
 
 BOOST_AUTO_TEST_CASE(spawn_enemy_wave) {
     EntityManager em;
     CombatSystem csys;
-    csys.spawnEnemyWave(em, 3, {0, 0}, 100.f, Team::Enemy);
+    csys.spawn_enemy_wave(em, 3, {0, 0}, 100.f, Team::enemy);
 
     int enemyCount = 0;
-    for (auto id : em.allEntities()) {
-        auto* cs = em.getComponent<CombatStats>(id);
-        if (cs && cs->team == Team::Enemy) {
+    for (auto id : em.all_entities()) {
+        auto* cs = em.get_component<CombatStats>(id);
+        if (cs && cs->team == Team::enemy) {
             enemyCount++;
             BOOST_TEST(cs->alive);
         }
@@ -90,43 +89,43 @@ BOOST_AUTO_TEST_CASE(spawn_enemy_wave) {
 
 BOOST_AUTO_TEST_CASE(team_near_position) {
     EntityManager em;
-    auto eid = em.createEntity();
-    em.addComponent<CombatStats>(eid, CombatStats{
-        .team = Team::Player, .maxHp = 10, .hp = 10
+    auto eid = em.create_entity();
+    em.add_component<CombatStats>(eid, CombatStats{
+        .team = Team::player, .max_hp = 10, .hp = 10
     });
-    em.addComponent<Position>(eid, Position{{50, 0}, {0, 0}});
+    em.add_component<Position>(eid, Position{{50, 0}, {0, 0}});
 
     CombatSystem csys;
-    BOOST_TEST(csys.teamNearPosition(em, Team::Player, {0, 0}, 100.f));
-    BOOST_TEST(!csys.teamNearPosition(em, Team::Player, {0, 0}, 10.f));
-    BOOST_TEST(!csys.teamNearPosition(em, Team::Enemy, {0, 0}, 200.f));
+    BOOST_TEST(csys.team_near_position(em, Team::player, {0, 0}, 100.f));
+    BOOST_TEST(!csys.team_near_position(em, Team::player, {0, 0}, 10.f));
+    BOOST_TEST(!csys.team_near_position(em, Team::enemy, {0, 0}, 200.f));
 }
 
 BOOST_AUTO_TEST_CASE(dead_entity_not_in_combat) {
     EntityManager em;
-    auto eid = em.createEntity();
-    em.addComponent<CombatStats>(eid, CombatStats{
-        .team = Team::Player, .maxHp = 10, .hp = 10, .alive = false
+    auto eid = em.create_entity();
+    em.add_component<CombatStats>(eid, CombatStats{
+        .team = Team::player, .max_hp = 10, .hp = 10, .alive = false
     });
-    em.addComponent<Position>(eid, Position{{0, 0}, {0, 0}});
+    em.add_component<Position>(eid, Position{{0, 0}, {0, 0}});
 
     CombatSystem csys;
-    BOOST_TEST(!csys.teamNearPosition(em, Team::Player, {0, 0}, 200.f));
+    BOOST_TEST(!csys.team_near_position(em, Team::player, {0, 0}, 200.f));
 }
 
 BOOST_AUTO_TEST_CASE(combat_events_generated) {
     EntityManager em;
-    auto eid1 = em.createEntity();
-    em.addComponent<CombatStats>(eid1, CombatStats{
-        .team = Team::Player, .maxHp = 10, .hp = 10, .attack = 5, .attackRange = 100.f
+    auto eid1 = em.create_entity();
+    em.add_component<CombatStats>(eid1, CombatStats{
+        .team = Team::player, .max_hp = 10, .hp = 10, .attack = 5, .attack_range = 100.f
     });
-    em.addComponent<Position>(eid1, Position{{0, 0}, {0, 0}});
+    em.add_component<Position>(eid1, Position{{0, 0}, {0, 0}});
 
-    auto eid2 = em.createEntity();
-    em.addComponent<CombatStats>(eid2, CombatStats{
-        .team = Team::Enemy, .maxHp = 10, .hp = 10, .attack = 3, .attackRange = 100.f
+    auto eid2 = em.create_entity();
+    em.add_component<CombatStats>(eid2, CombatStats{
+        .team = Team::enemy, .max_hp = 10, .hp = 10, .attack = 3, .attack_range = 100.f
     });
-    em.addComponent<Position>(eid2, Position{{50, 0}, {1, 0}});
+    em.add_component<Position>(eid2, Position{{50, 0}, {1, 0}});
 
     CombatSystem csys;
     for (int i = 0; i < 10; ++i) {

@@ -1,5 +1,5 @@
 #include <boost/test/unit_test.hpp>
-#include "core/Math.hpp"
+#include "core/math.hpp"
 #include <unordered_set>
 
 BOOST_AUTO_TEST_SUITE(math_tests)
