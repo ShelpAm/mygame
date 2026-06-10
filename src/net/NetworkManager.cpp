@@ -115,6 +115,7 @@ void NetworkManager::handleMessage(const NetMessage& msg) {
     } else if (msg.type == NetMessage::Chat) {
         std::string text(msg.data.begin(), msg.data.end());
         m_chatHistory.push_back(text);
+    } else if (msg.type == NetMessage::CombatEvent) {
         if (m_callback) m_callback(msg);
     } else if (msg.type == NetMessage::StateFull) {
         // Parse multi-entity sync
@@ -186,7 +187,7 @@ void NetworkManager::sendChat(const std::string& msg) {
 void NetworkManager::sendCombatEvent(int attackerId, int defenderId, int damage, bool killed) {
     if (!m_connected) return;
     std::vector<uint8_t> data(25);
-    uint32_t type = NetMessage::Chat;  // reuse Chat for combat events
+    uint32_t type = NetMessage::CombatEvent;
     uint32_t size = 17;
     memcpy(data.data(), &type, 4);
     memcpy(data.data() + 4, &size, 4);

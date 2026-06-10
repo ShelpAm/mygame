@@ -21,7 +21,7 @@ struct RemoteEntity {
 };
 
 struct NetMessage {
-    enum Type { Join = 0, StateFull = 1, EntityUpdate = 2, Chat = 3, Disconnect = 4 };
+    enum Type { Join = 0, StateFull = 1, EntityUpdate = 2, Chat = 3, Disconnect = 4, CombatEvent = 5 };
     Type type;
     std::vector<uint8_t> data;
 };

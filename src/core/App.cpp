@@ -69,8 +69,7 @@ bool App::init() {
     m_quests->loadFromJson("assets/data/quests.json");
     m_network = std::make_unique<NetworkManager>();
     m_network->setCallback([this](const NetMessage& msg) {
-        if (msg.type == NetMessage::Chat) {
-            // Combat event from remote
+        if (msg.type == NetMessage::CombatEvent) {
             if (msg.data.size() >= 17) {
                 int attId, defId, dmg; uint8_t killed;
                 memcpy(&attId, msg.data.data(), 4);
