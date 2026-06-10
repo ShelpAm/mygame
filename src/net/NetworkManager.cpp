@@ -2,21 +2,15 @@
 #include <iostream>
 #include <cstring>
 
-NetworkManager::NetworkManager() : m_readBuf(4096) {}
+NetworkManager::NetworkManager() {}
 NetworkManager::~NetworkManager() { disconnect(); }
 
 bool NetworkManager::host(int port) {
     try {
         m_acceptor = std::make_unique<tcp::acceptor>(m_io, tcp::endpoint(tcp::v4(), port));
-        m_socket = std::make_unique<tcp::socket>(m_io);
         m_hosting = true;
         m_connected = true;
-
-        m_thread = std::thread([this]() {
-            m_acceptor->accept(*m_socket);
-            std::cout << "Client connected\n";
-            readLoop();
-        });
+        m_thread = std::thread(&NetworkManager::ioThread, this);
         std::cout << "Hosting on port " << port << '\n';
         return true;
     } catch (const std::exception& e) {
@@ -28,11 +22,22 @@ bool NetworkManager::host(int port) {
 bool NetworkManager::connect(const std::string& ip, int port) {
     try {
         m_socket = std::make_unique<tcp::socket>(m_io);
-        m_socket->connect(tcp::endpoint(boost::asio::ip::make_address(ip), port));
-        m_connected = true;
-
-        m_thread = std::thread([this]() { readLoop(); });
-        std::cout << "Connected to " << ip << ':' << port << '\n';
+        m_connected = true;  // Mark connected immediately so UI updates
+        m_thread = std::thread(&NetworkManager::ioThread, this);
+        // Post async connect to IO thread
+        boost::asio::post(m_io, [this, ip, port]() {
+            m_socket->async_connect(
+                tcp::endpoint(boost::asio::ip::make_address(ip), port),
+                [this](boost::system::error_code ec) {
+                    if (ec) {
+                        std::cerr << "Connect failed: " << ec.message() << '\n';
+                        m_connected = false;
+                        return;
+                    }
+                    std::cout << "Connected!\n";
+                    startRead();
+                });
+        });
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Connect failed: " << e.what() << '\n';
@@ -40,46 +45,58 @@ bool NetworkManager::connect(const std::string& ip, int port) {
     }
 }
 
+void NetworkManager::ioThread() {
+    try {
+        if (m_hosting) {
+            m_socket = std::make_unique<tcp::socket>(m_io);
+            m_acceptor->async_accept(*m_socket, [this](boost::system::error_code ec) {
+                if (!ec) { std::cout << "Client connected\n"; startRead(); }
+            });
+        }
+        m_io.run();
+    } catch (const std::exception& e) {
+        std::cerr << "IO error: " << e.what() << '\n';
+        m_connected = false;
+    }
+}
+
 void NetworkManager::disconnect() {
     if (!m_connected && !m_hosting) return;
     m_connected = false;
     m_hosting = false;
-    if (m_thread.joinable()) {
-        m_io.stop();
-        m_thread.join();
-    }
-    try {
-        if (m_socket) m_socket->close();
-        if (m_acceptor) m_acceptor->close();
-    } catch (...) {}
+    try { m_io.stop(); } catch (...) {}
+    if (m_thread.joinable()) m_thread.join();
     m_socket.reset();
     m_acceptor.reset();
     m_io.restart();
 }
 
-void NetworkManager::readLoop() {
-    try {
-        while (m_connected) {
-            uint32_t msgType = 0, size = 0;
-            boost::asio::read(*m_socket, boost::asio::buffer(&msgType, 4));
-            boost::asio::read(*m_socket, boost::asio::buffer(&size, 4));
+void NetworkManager::startRead() {
+    auto buf = std::make_shared<std::array<uint8_t, 8>>();
+    boost::asio::async_read(*m_socket, boost::asio::buffer(*buf),
+        [this, buf](boost::system::error_code ec, size_t) {
+            if (ec || !m_connected) return;
+            uint32_t msgType, size;
+            memcpy(&msgType, buf->data(), 4);
+            memcpy(&size, buf->data() + 4, 4);
 
-            std::vector<uint8_t> data(size);
-            if (size > 0)
-                boost::asio::read(*m_socket, boost::asio::buffer(data.data(), size));
-
-            NetMessage msg;
-            msg.type = static_cast<NetMessage::Type>(msgType);
-            msg.data = std::move(data);
-
-            std::lock_guard<std::mutex> lock(m_mutex);
-            handleMessage(msg);
-            if (m_callback) m_callback(msg);
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Connection lost: " << e.what() << '\n';
-        m_connected = false;
-    }
+            auto data = std::make_shared<std::vector<uint8_t>>(size);
+            if (size > 0) {
+                boost::asio::async_read(*m_socket, boost::asio::buffer(*data),
+                    [this, msgType, data](boost::system::error_code ec2, size_t) {
+                        if (ec2) { m_connected = false; return; }
+                        NetMessage msg{static_cast<NetMessage::Type>(msgType), *data};
+                        std::lock_guard<std::mutex> lock(m_mutex);
+                        handleMessage(msg);
+                        if (m_callback) m_callback(msg);
+                    });
+            } else {
+                NetMessage msg{static_cast<NetMessage::Type>(msgType), {}};
+                handleMessage(msg);
+                if (m_callback) m_callback(msg);
+            }
+            startRead();  // Continue reading
+        });
 }
 
 void NetworkManager::handleMessage(const NetMessage& msg) {
@@ -90,62 +107,101 @@ void NetworkManager::handleMessage(const NetMessage& msg) {
         memcpy(&y, msg.data.data() + 8, 4);
         memcpy(&hp, msg.data.data() + 12, 4);
         memcpy(&maxHp, msg.data.data() + 16, 4);
-        memcpy(&alive, msg.data.data() + 20, 1);
-
+        alive = msg.data[20];
         for (auto& rp : m_remoteEntities) {
-            if (rp.id == id) {
-                rp.targetPos = {x, y}; rp.hp = hp;
-                rp.maxHp = maxHp; rp.alive = alive; return;
-            }
+            if (rp.id == id) { rp.targetPos = {x,y}; rp.hp = hp; rp.maxHp = maxHp; rp.alive = alive; return; }
         }
-        m_remoteEntities.push_back({id, {x, y}, {x, y}, hp, maxHp, (bool)alive});
+        m_remoteEntities.push_back({id, {x,y}, {x,y}, hp, maxHp, (bool)alive});
+    } else if (msg.type == NetMessage::Chat) {
+        std::string text(msg.data.begin(), msg.data.end());
+        m_chatHistory.push_back(text);
+        if (m_callback) m_callback(msg);
+    } else if (msg.type == NetMessage::StateFull) {
+        // Parse multi-entity sync
+        auto& d = msg.data;
+        for (size_t i = 0; i + 22 <= d.size(); i += 22) {
+            int eid; float x, y; int hp, maxHp; uint8_t alive, team;
+            memcpy(&eid, d.data() + i, 4);
+            memcpy(&x, d.data() + i + 4, 4);
+            memcpy(&y, d.data() + i + 8, 4);
+            memcpy(&hp, d.data() + i + 12, 4);
+            memcpy(&maxHp, d.data() + i + 16, 4);
+            alive = d[i + 20];
+            team = d[i + 21];
+            bool found = false;
+            for (auto& re : m_remoteEntities) {
+                if (re.id == eid) { re.targetPos = {x,y}; re.hp = hp; re.maxHp = maxHp; re.alive = alive; re.team = team; found = true; break; }
+            }
+            if (!found) m_remoteEntities.push_back({eid, {x,y}, {x,y}, hp, maxHp, (bool)alive, (int)team});
+        }
     }
 }
 
-void NetworkManager::sendEntityUpdate(int playerId, Vec2f pos, int hp, int maxHp, bool alive) {
-    if (!m_connected || !m_socket || !m_socket->is_open()) return;
-    std::vector<uint8_t> data(21);
-    memcpy(data.data(), &playerId, 4);
-    memcpy(data.data() + 4, &pos.x, 4);
-    memcpy(data.data() + 8, &pos.y, 4);
-    memcpy(data.data() + 12, &hp, 4);
-    memcpy(data.data() + 16, &maxHp, 4);
-    data[20] = alive ? 1 : 0;
+void NetworkManager::queueSend(std::vector<uint8_t> data) {
+    if (!m_socket || !m_socket->is_open()) return;
+    auto buf = std::make_shared<std::vector<uint8_t>>(std::move(data));
+    boost::asio::async_write(*m_socket, boost::asio::buffer(*buf),
+        [buf](boost::system::error_code, size_t) {});
+}
 
+void NetworkManager::sendEntityUpdate(int playerId, Vec2f pos, int hp, int maxHp, bool alive) {
+    if (!m_connected) return;
+    std::vector<uint8_t> data(25);
     uint32_t type = NetMessage::EntityUpdate;
-    uint32_t size = data.size();
-    try {
-        boost::asio::write(*m_socket, boost::asio::buffer(&type, 4));
-        boost::asio::write(*m_socket, boost::asio::buffer(&size, 4));
-        boost::asio::write(*m_socket, boost::asio::buffer(data.data(), size));
-    } catch (...) {}
+    uint32_t size = 21;
+    memcpy(data.data(), &type, 4);
+    memcpy(data.data() + 4, &size, 4);
+    memcpy(data.data() + 8, &playerId, 4);
+    memcpy(data.data() + 12, &pos.x, 4);
+    memcpy(data.data() + 16, &pos.y, 4);
+    memcpy(data.data() + 20, &hp, 4);
+    memcpy(data.data() + 24, &maxHp, 4);
+    data[28] = alive ? 1 : 0;
+    queueSend(std::move(data));
+}
+
+void NetworkManager::sendFullSync(const std::vector<uint8_t>& payload) {
+    if (!m_connected) return;
+    std::vector<uint8_t> data(8 + payload.size());
+    uint32_t type = NetMessage::StateFull;
+    uint32_t size = payload.size();
+    memcpy(data.data(), &type, 4);
+    memcpy(data.data() + 4, &size, 4);
+    memcpy(data.data() + 8, payload.data(), size);
+    queueSend(std::move(data));
 }
 
 void NetworkManager::sendChat(const std::string& msg) {
+    if (!m_connected) return;
+    m_chatHistory.push_back("You: " + msg);
+    std::vector<uint8_t> data(8 + msg.size());
     uint32_t type = NetMessage::Chat;
     uint32_t size = msg.size();
-    try {
-        boost::asio::write(*m_socket, boost::asio::buffer(&type, 4));
-        boost::asio::write(*m_socket, boost::asio::buffer(&size, 4));
-        boost::asio::write(*m_socket, boost::asio::buffer(msg.data(), size));
-    } catch (...) {}
+    memcpy(data.data(), &type, 4);
+    memcpy(data.data() + 4, &size, 4);
+    memcpy(data.data() + 8, msg.data(), size);
+    queueSend(std::move(data));
 }
 
-void NetworkManager::sendFullSync(const std::vector<uint8_t>& data) {
-    if (!m_connected || !m_socket || !m_socket->is_open()) return;
-    uint32_t type = NetMessage::StateFull;
-    uint32_t size = data.size();
-    try {
-        boost::asio::write(*m_socket, boost::asio::buffer(&type, 4));
-        boost::asio::write(*m_socket, boost::asio::buffer(&size, 4));
-        boost::asio::write(*m_socket, boost::asio::buffer(data.data(), size));
-    } catch (...) {}
+void NetworkManager::sendCombatEvent(int attackerId, int defenderId, int damage, bool killed) {
+    if (!m_connected) return;
+    std::vector<uint8_t> data(25);
+    uint32_t type = NetMessage::Chat;  // reuse Chat for combat events
+    uint32_t size = 17;
+    memcpy(data.data(), &type, 4);
+    memcpy(data.data() + 4, &size, 4);
+    memcpy(data.data() + 8, &attackerId, 4);
+    memcpy(data.data() + 12, &defenderId, 4);
+    memcpy(data.data() + 16, &damage, 4);
+    data[20] = killed ? 1 : 0;
+    queueSend(std::move(data));
 }
 
 void NetworkManager::interpolateEntities(float dt) {
     for (auto& e : m_remoteEntities) {
-        e.position.x += (e.targetPos.x - e.position.x) * std::min(1.f, dt * 15.f);
-        e.position.y += (e.targetPos.y - e.position.y) * std::min(1.f, dt * 15.f);
+        float t = std::min(1.f, dt * 15.f);
+        e.position.x += (e.targetPos.x - e.position.x) * t;
+        e.position.y += (e.targetPos.y - e.position.y) * t;
     }
 }
 

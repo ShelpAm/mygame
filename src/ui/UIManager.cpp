@@ -6,7 +6,10 @@
 #include "survival/ConditionTracker.hpp"
 #include "entities/components/CombatStats.hpp"
 #include "net/NetworkManager.hpp"
+#include <fstream>
 #include <cstdio>
+#include <cstring>
+#include <algorithm>
 #include <imgui.h>
 
 UIManager::UIManager(SDL_Window* window, SDL_Renderer* renderer)
@@ -64,6 +67,7 @@ UIManager::UIManager(SDL_Window* window, SDL_Renderer* renderer)
     ImGui_ImplSDL3_Init(window);
     ImGui_ImplSDLRenderer3_Init(renderer);
     SDL_StartTextInput(window);
+    loadServerList();
 }
 
 UIManager::~UIManager() {
@@ -308,8 +312,8 @@ void UIManager::renderLoadMenu(const App& app) {
 }
 
 void UIManager::renderMultiplayerMenu(const App& app) {
-    ImGui::SetNextWindowSize(ImVec2(300, 200), ImGuiCond_Appearing);
-    ImGui::SetNextWindowPos(ImVec2(400, 250), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(320, 320), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(400, 200), ImGuiCond_Appearing);
     ImGui::Begin("Multiplayer", nullptr, ImGuiWindowFlags_NoResize);
 
     auto* net = const_cast<App&>(app).networkMut();
@@ -323,15 +327,57 @@ void UIManager::renderMultiplayerMenu(const App& app) {
         ImGui::InputText("IP", m_hostIp, sizeof(m_hostIp));
         if (ImGui::Button("Connect")) {
             net->connect(m_hostIp);
+            // Add to server list
+            std::string ip(m_hostIp);
+            if (std::find(m_serverList.begin(), m_serverList.end(), ip) == m_serverList.end()) {
+                m_serverList.push_back(ip);
+                saveServerList();
+            }
+        }
+        // Server list
+        if (!m_serverList.empty()) {
+            ImGui::Separator();
+            ImGui::Text("Saved Servers:");
+            for (int i = 0; i < (int)m_serverList.size(); ++i) {
+                ImGui::PushID(i);
+                if (ImGui::Button(m_serverList[i].c_str())) {
+                    strncpy(m_hostIp, m_serverList[i].c_str(), sizeof(m_hostIp) - 1);
+                    net->connect(m_serverList[i]);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("X")) {
+                    m_serverList.erase(m_serverList.begin() + i);
+                    saveServerList();
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::PopID();
+            }
         }
     } else {
         if (net->isHosting()) {
             ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "Hosting on port 27015");
-            ImGui::TextDisabled("Tell your friend to connect to your IP");
         } else {
             ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "Connected!");
         }
-        ImGui::Text("Players: %zu", net->remoteEntities().size() + 1);
+        ImGui::Text("Remote entities: %zu", net->remoteEntities().size());
+
+        ImGui::Separator();
+        ImGui::Text("Chat:");
+        ImGui::BeginChild("ChatLog", ImVec2(0, 100), true);
+        for (const auto& msg : net->chatHistory()) {
+            ImGui::TextWrapped("%s", msg.c_str());
+        }
+        ImGui::EndChild();
+        ImGui::InputText("##chat", m_chatBuf, sizeof(m_chatBuf));
+        ImGui::SameLine();
+        if (ImGui::Button("Send")) {
+            if (strlen(m_chatBuf) > 0) {
+                const_cast<NetworkManager*>(net)->sendChat(m_chatBuf);
+                m_chatBuf[0] = '\0';
+            }
+        }
+
         if (ImGui::Button("Disconnect")) {
             net->disconnect();
         }
@@ -341,6 +387,20 @@ void UIManager::renderMultiplayerMenu(const App& app) {
         const_cast<App&>(app).setShowMultiplayer(false);
     }
     ImGui::End();
+}
+
+void UIManager::loadServerList() {
+    std::ifstream f("saves/servers.txt");
+    if (!f.is_open()) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (!line.empty()) m_serverList.push_back(line);
+    }
+}
+
+void UIManager::saveServerList() {
+    std::ofstream f("saves/servers.txt");
+    for (const auto& ip : m_serverList) f << ip << '\n';
 }
 
 void UIManager::renderMap(const App& app) {

@@ -23,21 +23,26 @@ void RenderSystem::render(EntityManager& entities, const WorldState& worldState,
     renderEntities(entities);
     renderHealthBars(entities);
     renderDamageNumbers(combatEvents);
-    // Render remote players
+    // Render remote entities
     for (const auto& rp : remotePlayers) {
         if (!rp.alive) continue;
         Vec2f screen = m_camera.worldToScreen(rp.position);
-        SDL_FRect rect{screen.x - 14.f, screen.y - 14.f, 28.f, 28.f};
-        SDL_SetRenderDrawColor(m_renderer, 255, 200, 50, 255);
+        // Color by team
+        uint8_t r, g, b;
+        if (rp.team == 1) { r = 220; g = 40; b = 40; }       // Enemy - red
+        else if (rp.team == 2) { r = 150; g = 150; b = 150; } // Neutral - gray
+        else { r = 50; g = 150; b = 255; }                     // Player/friendly - blue
+        SDL_FRect rect{screen.x - 12.f, screen.y - 12.f, 24.f, 24.f};
+        SDL_SetRenderDrawColor(m_renderer, r, g, b, 255);
         SDL_RenderFillRect(m_renderer, &rect);
         // HP bar
-        float barW = 28.f;
+        float barW = 24.f;
         float ratio = (float)rp.hp / (float)rp.maxHp;
-        SDL_FRect bg{screen.x - barW/2, screen.y - 22.f, barW, 4.f};
+        SDL_FRect bg{screen.x - barW/2, screen.y - 20.f, barW, 3.f};
         SDL_SetRenderDrawColor(m_renderer, 40, 10, 10, 255);
         SDL_RenderFillRect(m_renderer, &bg);
-        SDL_FRect fill{screen.x - barW/2, screen.y - 22.f, barW * ratio, 4.f};
-        SDL_SetRenderDrawColor(m_renderer, 255, 200, 50, 255);
+        SDL_FRect fill{screen.x - barW/2, screen.y - 20.f, barW * ratio, 3.f};
+        SDL_SetRenderDrawColor(m_renderer, 50, 200, 50, 255);
         SDL_RenderFillRect(m_renderer, &fill);
     }
 }

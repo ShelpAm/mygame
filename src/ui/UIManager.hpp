@@ -1,6 +1,8 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include <vector>
+#include <string>
 
 class WorldState;
 class App;
@@ -31,4 +33,8 @@ private:
     void renderLoadMenu(const App& app);
     void renderMultiplayerMenu(const App& app);
     char m_hostIp[32] = "127.0.0.1";
+    char m_chatBuf[256] = {};
+    std::vector<std::string> m_serverList;
+    void loadServerList();
+    void saveServerList();
 };

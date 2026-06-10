@@ -84,6 +84,8 @@ public:
     std::vector<int> availableSaveSlots() const;
     void recruitSoldier();
     void spawnTestEnemies();
+    void applyRemoteEntities();
+    void syncCombatEvents();
     void doRest();
 
     LocaleManager& locale() { return *m_locale; }

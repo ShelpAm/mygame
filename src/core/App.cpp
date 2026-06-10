@@ -68,6 +68,29 @@ bool App::init() {
     m_quests = std::make_unique<QuestManager>();
     m_quests->loadFromJson("assets/data/quests.json");
     m_network = std::make_unique<NetworkManager>();
+    m_network->setCallback([this](const NetMessage& msg) {
+        if (msg.type == NetMessage::Chat) {
+            // Combat event from remote
+            if (msg.data.size() >= 17) {
+                int attId, defId, dmg; uint8_t killed;
+                memcpy(&attId, msg.data.data(), 4);
+                memcpy(&defId, msg.data.data() + 4, 4);
+                memcpy(&dmg, msg.data.data() + 8, 4);
+                killed = msg.data[12];
+                // Apply damage to local entity
+                EntityId defEid = static_cast<EntityId>(defId - 1000);
+                auto* cs = m_entityManager->getComponent<CombatStats>(defEid);
+                if (!cs) {
+                    // Try player entity
+                    auto* pcs = m_entityManager->getComponent<CombatStats>(m_playerEntity);
+                    if (pcs) { pcs->hp -= dmg; if (killed) pcs->alive = false; }
+                } else {
+                    cs->hp -= dmg;
+                    if (killed) cs->alive = false;
+                }
+            }
+        }
+    });
     m_cameraSystem = std::make_unique<CameraSystem>(WINDOW_WIDTH, WINDOW_HEIGHT);
     m_renderSystem = std::make_unique<RenderSystem>(m_renderer, *m_resources, *m_cameraSystem);
     m_navigationSystem = std::make_unique<NavigationSystem>();
@@ -637,6 +660,8 @@ void App::update(float dt) {
         }
         m_network->update();
         m_network->interpolateEntities(dt);
+        applyRemoteEntities();
+        syncCombatEvents();
     }
 
     // Starvation damages combat HP
@@ -925,6 +950,52 @@ void App::doRest() {
         m_survival->heal(5.f);
         m_worldState->update(m_worldState->day() == 0 ? 0.f : 2.f);  // Pass 2 game hours
         SDL_Log("%s HP: %d/%d", m_locale->get("resp.rested").c_str(), pcs->hp, pcs->maxHp);
+    }
+}
+
+void App::applyRemoteEntities() {
+    // Create/update local entities from remote sync data
+    for (const auto& re : m_network->remoteEntities()) {
+        // Player entities handled separately via sendEntityUpdate
+        if (re.id < 1000 && re.team == 0) continue;
+
+        EntityId localId = static_cast<EntityId>(re.id - 1000);
+        if (!m_entityManager->alive(localId)) {
+            // Create new entity
+            localId = m_entityManager->createEntity();
+            // Store mapping... for now, we just create
+            m_entityManager->addComponent<Position>(localId, Position{
+                .worldPos = re.position, .zOrder = 0.5f
+            });
+            m_entityManager->addComponent<Sprite>(localId, Sprite{
+                .origin = {12.f, 12.f}, .scale = 0.8f, .visible = true
+            });
+            // Remote player entities are enemies (PvP), their soldiers are also enemies
+            Team t = re.team == 1 ? Team::Enemy : (re.team == 2 ? Team::Neutral : Team::Enemy);
+            m_entityManager->addComponent<CombatStats>(localId, CombatStats{
+                .team = t, .maxHp = re.maxHp, .hp = re.hp,
+                .attack = 3, .defense = 2, .attackRange = 80.f
+            });
+        } else {
+            auto* pos = m_entityManager->getComponent<Position>(localId);
+            auto* cs = m_entityManager->getComponent<CombatStats>(localId);
+            if (pos) pos->worldPos = re.position;
+            if (cs) { cs->hp = re.hp; cs->alive = re.alive; }
+        }
+    }
+}
+
+void App::syncCombatEvents() {
+    // Send local combat events to remote
+    for (const auto& ev : m_combat->events()) {
+        if (ev.killed || ev.damage > 0) {
+            EntityId localAttacker = ev.attackerId;
+            EntityId localDefender = ev.defenderId;
+            m_network->sendCombatEvent(
+                static_cast<int>(localAttacker) + 1000,
+                static_cast<int>(localDefender) + 1000,
+                ev.damage, ev.killed);
+        }
     }
 }
 
