@@ -169,6 +169,16 @@ void NetworkManager::sendCombatEvent(int attackerId, int defenderId, int damage,
     queueSend(makeCombatEvent(attackerId, defenderId, damage, killed));
 }
 
+void NetworkManager::sendRecruitRequest() {
+    if (!m_connected || m_connecting) return;
+    queueSend(makeRecruitRequest());
+}
+
+void NetworkManager::sendEnemyWave(Vec2f center, int count, Team team) {
+    if (!m_connected || m_connecting) return;
+    queueSend(makeEnemyWave(center, count, team));
+}
+
 void NetworkManager::interpolateEntities(float dt) {
     for (auto& e : m_remoteEntities) {
         float t = std::min(1.f, dt * 15.f);

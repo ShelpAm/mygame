@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Math.hpp"
+#include "entities/components/CombatStats.hpp"
 #include <boost/asio.hpp>
 #include <string>
 #include <vector>
@@ -21,7 +22,7 @@ struct RemoteEntity {
 };
 
 struct NetMessage {
-    enum Type { Join = 0, StateFull = 1, EntityUpdate = 2, Chat = 3, Disconnect = 4, CombatEvent = 5 };
+    enum Type { Join = 0, StateFull = 1, EntityUpdate = 2, Chat = 3, Disconnect = 4, CombatEvent = 5, RecruitSoldier = 6, SpawnEnemyWave = 7 };
     Type type;
     std::vector<uint8_t> data;
 };
@@ -42,6 +43,8 @@ public:
     void update();
     void sendEntityUpdate(int playerId, Vec2f pos, int hp, int maxHp, bool alive);
     void sendCombatEvent(int attackerId, int defenderId, int damage, bool killed);
+    void sendRecruitRequest();
+    void sendEnemyWave(Vec2f center, int count, Team team);
     void sendChat(const std::string& msg);
     void sendFullSync(const std::vector<uint8_t>& data);
     void interpolateEntities(float dt);

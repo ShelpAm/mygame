@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/Math.hpp"
+#include "entities/components/CombatStats.hpp"
 #include <cstdint>
 #include <vector>
 #include <array>
@@ -8,7 +10,7 @@
 #include <string>
 
 struct NetPacket {
-    enum Type : uint32_t { Join = 0, StateFull = 1, EntityUpdate = 2, Chat = 3, Disconnect = 4, CombatEvent = 5 };
+    enum Type : uint32_t { Join = 0, StateFull = 1, EntityUpdate = 2, Chat = 3, Disconnect = 4, CombatEvent = 5, RecruitSoldier = 6, SpawnEnemyWave = 7 };
     Type type;
     std::vector<uint8_t> payload;
 };
@@ -87,4 +89,17 @@ inline std::vector<uint8_t> makeCombatEvent(int attId, int defId, int dmg, bool 
     writeBytes(p, dmg);
     p.push_back(killed ? 1 : 0);
     return serializePacket({NetPacket::CombatEvent, std::move(p)});
+}
+
+inline std::vector<uint8_t> makeRecruitRequest() {
+    return serializePacket({NetPacket::RecruitSoldier, {}});
+}
+
+inline std::vector<uint8_t> makeEnemyWave(Vec2f center, int count, Team team) {
+    std::vector<uint8_t> p;
+    writeFloat(p, center.x); writeFloat(p, center.y);
+    writeBytes(p, count);
+    writeBytes(p, static_cast<uint8_t>(team));
+    p.push_back(0);
+    return serializePacket({NetPacket::SpawnEnemyWave, std::move(p)});
 }

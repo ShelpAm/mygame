@@ -66,9 +66,16 @@ bool App::init() {
     m_dialogueEngine->discoverLanguages("assets/dialogue");
     m_quests->loadFromJson("assets/data/quests.json");
 
-    // Network callback: handle incoming entity updates and combat events
+    // Network callback
     m_network->setCallback([this](const NetMessage& msg) {
-        if (msg.type == NetMessage::EntityUpdate && msg.data.size() >= 21) {
+        if (msg.type == NetMessage::RecruitSoldier) {
+            m_gameMode->spawnSoldier(m_gameMode->playerEntity(), rand(), {0,-1});
+        } else if (msg.type == NetMessage::SpawnEnemyWave) {
+            float cx, cy; int cnt; uint8_t tm;
+            memcpy(&cx, msg.data.data(), 4); memcpy(&cy, msg.data.data()+4, 4);
+            memcpy(&cnt, msg.data.data()+8, 4); tm = msg.data[12];
+            m_combat->spawnEnemyWave(m_server->entities(), cnt, {cx, cy}, 400.f, (Team)tm);
+        } else if (msg.type == NetMessage::EntityUpdate && msg.data.size() >= 21) {
             // Remote player position update
             int id; float x, y; int hp, maxHp; uint8_t alive;
             memcpy(&id, msg.data.data(), 4);
@@ -342,24 +349,10 @@ void App::loadFromSlot(int slot) {
 
 void App::recruitSoldier() {
     static int idx = 0;
-    Vec2f facing{0, -1};
     if (m_network->isConnected() && !m_network->isHosting()) {
-        // Client: spawn directly in Client's EM
-        auto& em = m_client->entities();
-        auto eid = em.createEntity();
-        auto* pp = em.getComponent<Position>(m_client->localPlayer());
-        Vec2f base = pp ? pp->worldPos : Vec2f{};
-        // Half-circle formation
-        const int PER_ROW[] = {3, 4, 5};
-        int rem = ++idx, row = 0, col = 0;
-        for (row = 0; row < 3; ++row) { if (rem <= PER_ROW[row]) { col = rem - 1; break; } rem -= PER_ROW[row]; }
-        if (row >= 3) { row = 2; col = idx - PER_ROW[0] - PER_ROW[1] - 1; }
-        float s = 36.f;
-        Vec2f off{(col - (PER_ROW[row] - 1) / 2.f) * s, -(50.f + row * 45.f)};
-        em.addComponent<Position>(eid, Position{{base.x + off.x, base.y + off.y}, {0,0}, 0.8f});
-        em.addComponent<Sprite>(eid, Sprite{"", {}, {12,12}, {0.3f, 0.5f, 0.9f, 1.f}, 0.8f, true});
-        em.addComponent<CombatStats>(eid, CombatStats{Team::Player, 12, 12, 3, 2, 80.f});
+        m_network->sendRecruitRequest();
     } else {
+        Vec2f facing{0, -1};
         m_gameMode->spawnSoldier(m_gameMode->playerEntity(), idx++, facing);
     }
 }
