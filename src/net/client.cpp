@@ -6,23 +6,20 @@
 #include "net/network-manager.hpp"
 #include "net/network-transport.hpp"
 #include <cstring>
+#include <print>
 
 Client::Client() = default;
-
-void Client::set_managers(CombatSystem *, WorldState *, QuestManager *) {}
 
 void Client::attach_local(ITransport *t)
 {
     transport_.reset(t);
-    transport_->set_callback(
-        [this](TransportMessage const &msg) { on_message(msg); });
+    transport_->set_callback(std::bind_front(&Client::on_message, this));
 }
 
 void Client::attach_network(NetworkManager &net)
 {
-    auto t = std::make_unique<NetworkTransport>(net);
-    t->set_callback([this](TransportMessage const &msg) { on_message(msg); });
-    transport_ = std::move(t);
+    transport_ = std::make_unique<NetworkTransport>(net);
+    transport_->set_callback(std::bind_front(&Client::on_message, this));
 }
 
 void Client::detach_transport()
@@ -38,6 +35,12 @@ void Client::reset()
         em_.destroy_entity(eid);
     id_map_.clear();
     player_id_ = invalid_entity;
+}
+
+void Client::send_join_request()
+{
+    assert(!transport_);
+    transport_->send({NetPacket::join, std::vector<std::uint8_t>{}}); // Empty
 }
 
 void Client::send_player_direction(Vec2f dir)
@@ -78,7 +81,7 @@ void Client::send_rest()
     transport_->send({NetPacket::rest, std::move(payload)});
 }
 
-void Client::on_message(TransportMessage const &msg)
+void Client::on_message(TransportExMessage const &msg)
 {
     if (msg.type == 1 /* state_full */) {
         apply_sync(msg.payload);
@@ -92,13 +95,17 @@ void Client::on_message(TransportMessage const &msg)
         k = msg.payload[12];
         handle_combat_event(att, def, dmg, (bool)k);
     }
+    else if (msg.type == NetPacket::return_pid) {
+        memcpy(&player_id_, msg.payload.data(), 4);
+        std::println("Returned player ID: {}", player_id_);
+    }
 }
 
 void Client::update(float dt)
 {
     (void)dt;
     if (transport_)
-        transport_->update();
+        transport_->do_receive();
 }
 
 EntityId Client::local_player() const

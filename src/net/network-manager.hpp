@@ -94,6 +94,4 @@ class NetworkManager {
     void io_thread();
     void start_read();
     void handle_message(NetPacket const &msg);
-
-    static constexpr int max_players = 4;
 };

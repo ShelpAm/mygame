@@ -28,14 +28,14 @@ void LocalTransportEndpoint::set_callback(Callback cb)
     callback_ = std::move(cb);
 }
 
-void LocalTransportEndpoint::update()
+void LocalTransportEndpoint::do_receive()
 {
     std::lock_guard<std::mutex> lock(mutex_);
     while (!inbound_.empty()) {
         auto msg = std::move(inbound_.front());
         inbound_.pop();
         if (callback_)
-            callback_(msg);
+            callback_({this, msg.type, std::move(msg.payload)});
     }
 }
 

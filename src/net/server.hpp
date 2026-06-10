@@ -3,7 +3,9 @@
 #include "entities/entity-manager.hpp"
 #include "net/transport.hpp"
 #include <memory>
+#include <queue>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 class CombatSystem;
@@ -27,14 +29,6 @@ class Server {
     void set_survival(ConditionTracker *s)
     {
         survival_ = s;
-    }
-    void set_host_player(EntityId eid)
-    {
-        host_player_id_ = eid;
-    }
-    EntityId host_player_id() const
-    {
-        return host_player_id_;
     }
 
     EntityManager &entities()
@@ -67,7 +61,7 @@ class Server {
 
   private:
     EntityManager em_;
-    std::unordered_map<int, EntityId> player_entities_;
+    std::unordered_set<EntityId> player_entities_;
     std::unordered_map<EntityId, bool> sent_initial_sync_;
     bool needs_full_sync_ = false;
     CombatSystem *cs_ = nullptr;
@@ -76,17 +70,19 @@ class Server {
     EventSimulator *events_ = nullptr;
     GameMode *game_mode_ = nullptr;
     ConditionTracker *survival_ = nullptr;
-    EntityId host_player_id_ = invalid_entity;
     size_t last_event_count_ = 0;
     int soldier_idx_ = 0;
-    float pending_mx_ = 0.f;
-    float pending_my_ = 0.f;
-    EntityId pending_player_ = invalid_entity;
+
+    struct DeltaPos {
+        EntityId pid;
+        float mx, my;
+    };
+    std::queue<DeltaPos> pending_inputs_;
 
     std::vector<std::unique_ptr<ITransport>> transports_;
 
     std::vector<uint8_t> build_sync_payload();
     void broadcast_sync();
-    void on_message(TransportMessage const &msg);
+    void on_message(TransportExMessage const &msg);
     void check_event_spawns();
 };

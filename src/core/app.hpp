@@ -67,7 +67,6 @@ class App {
     {
         return survival_;
     }
-    void recruit_soldier(EntityId player_id);
     CombatStats const *player_combat_stats() const;
     bool is_player_dead() const;
     bool show_load_menu() const
@@ -172,10 +171,10 @@ class App {
     FactionNetwork factions_;
     CombatSystem combat_;
     QuestManager quests_;
-    Server server_;
     Client client_;
 
     // Must stay unique_ptr — runtime deps or recreated
+    std::unique_ptr<Server> server_;
     std::unique_ptr<ResourceManager> resources_;
     std::unique_ptr<RenderSystem> render_system_;
     std::unique_ptr<UIManager> ui_manager_;

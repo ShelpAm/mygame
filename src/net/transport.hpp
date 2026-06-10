@@ -6,16 +6,13 @@
 #include <functional>
 #include <vector>
 
-// Wire format: type (4 bytes) + payload_size (4 bytes) + payload.
-// type values match NetPacket::Type — see net/net-packet.hpp.
-//
-// state_full     = 1   server → client: full entity snapshot (22 bytes per
-// entity) entity_update  = 2   client → server: player position + HP chat = 3
-// bidirectional: chat text combat_event   = 5   server → client: damage dealt
-// (13 bytes) recruit_soldier= 6   client → server: soldier spawn request
-// spawn_enemy_wave=7   client → server: enemy wave request
-// player_input   = 8   client → server: normalized move direction (mx, my as
-// floats)
+class ITransport;
+
+struct TransportExMessage {
+    ITransport *from;
+    NetPacket::Type type;
+    std::vector<uint8_t> payload;
+};
 
 struct TransportMessage {
     NetPacket::Type type;
@@ -36,7 +33,7 @@ struct TransportMessage {
 // update() must be called from the game loop thread.
 class ITransport {
   public:
-    using Callback = std::function<void(TransportMessage const &)>;
+    using Callback = std::function<void(TransportExMessage const &)>;
 
     virtual ~ITransport() = default;
 
@@ -49,7 +46,7 @@ class ITransport {
 
     // Drain the inbound queue, invoking the callback for each message.
     // Called once per frame from the game loop.
-    virtual void update() = 0;
+    virtual void do_receive() = 0;
 
     // Whether the transport is still connected to its peer.
     virtual bool is_connected() const = 0;

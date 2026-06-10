@@ -384,7 +384,9 @@ void UIManager::render_multiplayer_menu(App const &app)
         }
         ImGui::Separator();
         ImGui::Text("%s", loc.get("mp.join").c_str());
-        ImGui::InputText(loc.get("mp.ip").c_str(), host_ip_, sizeof(host_ip_));
+        host_ip_.reserve(64);
+        ImGui::InputText(loc.get("mp.ip").c_str(), host_ip_.data(),
+                         host_ip_.size());
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80);
         ImGui::InputInt("##port", &host_port_);
@@ -394,10 +396,8 @@ void UIManager::render_multiplayer_menu(App const &app)
             host_port_ = 65535;
         if (ImGui::Button(loc.get("mp.connect").c_str())) {
             mutApp.start_client_session(host_ip_, host_port_);
-            std::string entry =
-                std::string(host_ip_) + ":" + std::to_string(host_port_);
-            if (std::find(server_list_.begin(), server_list_.end(), entry) ==
-                server_list_.end()) {
+            auto entry = host_ip_ + ":" + std::to_string(host_port_);
+            if (!std::ranges::contains(server_list_, entry)) {
                 server_list_.push_back(entry);
                 save_server_list();
             }
@@ -424,7 +424,7 @@ void UIManager::render_multiplayer_menu(App const &app)
                     else {
                         ip = server_list_[i];
                     }
-                    strncpy(host_ip_, ip.c_str(), sizeof(host_ip_) - 1);
+                    host_ip_ = ip;
                     host_port_ = port;
                     mutApp.start_client_session(ip, port);
                 }

@@ -25,11 +25,10 @@ struct NPCState;
 class GameMode {
   public:
     explicit GameMode(EntityManager &em);
-    EntityId init_world(WorldState &ws, KnowledgeGraph &kg, DialogueEngine &de,
-                        TopicRegistry &tr, RelationshipTable &rt,
-                        FactionNetwork &fn, EventSimulator &es,
-                        RumorPropagator &rp, CombatSystem &cs, QuestManager &qm,
-                        NetworkManager &net);
+    void init_world(WorldState &ws, KnowledgeGraph &kg, DialogueEngine &de,
+                    TopicRegistry &tr, RelationshipTable &rt,
+                    FactionNetwork &fn, EventSimulator &es, RumorPropagator &rp,
+                    CombatSystem &cs, QuestManager &qm, NetworkManager &net);
 
     EntityId spawn_player(float x, float y);
     void spawn_npc(std::string const &id, std::string const &name, float x,

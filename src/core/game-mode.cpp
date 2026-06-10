@@ -1,6 +1,5 @@
 #include "core/game-mode.hpp"
 
-#include "core/locale-manager.hpp"
 #include "dialogue/dialogue-engine.hpp"
 #include "dialogue/relationship-table.hpp"
 #include "dialogue/topic-registry.hpp"
@@ -34,12 +33,12 @@ GameMode::GameMode(EntityManager &em) : em_(em)
     dialogue_ = std::make_unique<DialogueState>();
 }
 
-EntityId GameMode::init_world(WorldState &ws, KnowledgeGraph &kg,
-                              DialogueEngine &de, TopicRegistry &tr,
-                              RelationshipTable &rt, FactionNetwork &fn,
-                              EventSimulator &es, RumorPropagator &rp,
-                              CombatSystem &cs, QuestManager &qm,
-                              NetworkManager &net)
+void GameMode::init_world(WorldState &ws, KnowledgeGraph &kg,
+                          DialogueEngine &de, TopicRegistry &tr,
+                          RelationshipTable &rt, FactionNetwork &fn,
+                          EventSimulator &es, RumorPropagator &rp,
+                          CombatSystem &cs, QuestManager &qm,
+                          NetworkManager &net)
 {
     ws_ = &ws;
     kg_ = &kg;
@@ -48,8 +47,6 @@ EntityId GameMode::init_world(WorldState &ws, KnowledgeGraph &kg,
     rt_ = &rt;
     cs_ = &cs;
     qm_ = &qm;
-
-    EntityId player = spawn_player(0, 0);
 
     // Topics
     tr.register_topic("ugarit_sack", "the Sack of Ugarit", "events");
@@ -172,7 +169,6 @@ EntityId GameMode::init_world(WorldState &ws, KnowledgeGraph &kg,
     }
 
     ws.reveal_radius({0, 0}, 8);
-    return player;
 }
 
 EntityId GameMode::spawn_player(float x, float y)

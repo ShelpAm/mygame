@@ -10,6 +10,7 @@
 #include "systems/quest-manager.hpp"
 #include "world/world-state.hpp"
 #include <cstring>
+#include <print>
 
 Server::Server() {}
 Server::~Server() {}
@@ -40,7 +41,8 @@ EntityId Server::spawn_player(int id)
 void Server::attach_local_pair(Client &client)
 {
     auto [srv, cli] = create_transport_pair();
-    srv->set_callback([this](TransportMessage const &msg) { on_message(msg); });
+    srv->set_callback(
+        [this](TransportExMessage const &msg) { on_message(msg); });
     client.attach_local(cli.release());
     transports_.push_back(std::move(srv));
 }
@@ -48,7 +50,7 @@ void Server::attach_local_pair(Client &client)
 void Server::attach_network(NetworkManager &net)
 {
     auto t = std::make_unique<NetworkTransport>(net);
-    t->set_callback([this](TransportMessage const &msg) { on_message(msg); });
+    t->set_callback([this](TransportExMessage const &msg) { on_message(msg); });
     transports_.push_back(std::move(t));
 }
 
@@ -57,9 +59,17 @@ void Server::clear_transports()
     transports_.clear();
 }
 
-void Server::on_message(TransportMessage const &msg)
+void Server::on_message(TransportExMessage const &msg)
 {
-    if (msg.type == NetPacket::entity_update) {
+    if (msg.type == NetPacket::join) {
+        assert(msg.payload.empty());
+        auto eid = add_player({0, 0});
+        std::vector<uint8_t> payload;
+        write_bytes(payload, eid); // player_id
+        msg.from->send({NetPacket::return_pid, payload});
+        std::println("New player joined with ID: {}", eid);
+    }
+    else if (msg.type == NetPacket::entity_update) {
         assert(msg.payload.size() >= 21);
         int id;
         float x, y;
@@ -72,14 +82,8 @@ void Server::on_message(TransportMessage const &msg)
         memcpy(&max_hp, msg.payload.data() + 16, 4);
         alive = msg.payload[20];
 
-        auto it = player_entities_.find(id);
-        if (it == player_entities_.end()) {
-            auto eid = add_player({x, y});
-            player_entities_[id] = eid;
-        }
-        else {
-            update_player(it->second, {x, y}, hp, max_hp, (bool)alive);
-        }
+        assert(player_entities_.contains(id));
+        update_player(id, {x, y}, hp, max_hp, (bool)alive);
     }
     else if (msg.type == NetPacket::recruit_soldier) {
         assert(msg.payload.size() >= 4);
@@ -112,21 +116,14 @@ void Server::on_message(TransportMessage const &msg)
         memcpy(&mx, msg.payload.data() + 4, 4);
         memcpy(&my, msg.payload.data() + 8, 4);
 
-        auto *pp = em_.get_component<Position>(pid);
-        if (pp) {
-            pending_mx_ = mx;
-            pending_my_ = my;
-            pending_player_ = pid;
-        }
+        pending_inputs_.push({pid, mx, my});
     }
     else if (msg.type == NetPacket::interact) {
         assert(msg.payload.size() >= 4);
         uint32_t pid;
         memcpy(&pid, msg.payload.data(), 4);
-        EntityId player = (pid == 0) ? host_player_id_
-                                     : player_entities_[static_cast<int>(pid)];
-        if (player != invalid_entity)
-            game_mode_->handle_interaction(player);
+        assert(pid != invalid_entity);
+        game_mode_->handle_interaction(pid);
     }
     else if (msg.type == NetPacket::rest) {
         assert(msg.payload.size() >= 4);
@@ -158,18 +155,20 @@ void Server::update(float dt)
         return;
 
     for (auto &t : transports_)
-        t->update();
+        t->do_receive();
 
-    float mx = std::exchange(pending_mx_, 0);
-    float my = std::exchange(pending_my_, 0);
-    EntityId mover = std::exchange(pending_player_, invalid_entity);
-    if ((mx != 0.f || my != 0.f) && game_mode_ && mover != invalid_entity) {
-        auto *pp = em_.get_component<Position>(mover);
-        if (pp) {
-            Vec2f new_pos{pp->world_pos.x + mx * 200.f * dt,
-                          pp->world_pos.y + my * 200.f * dt};
-            game_mode_->apply_player_movement(mover, new_pos);
-        }
+    // Processes user input
+    while (!pending_inputs_.empty()) {
+        auto const &[pid, mx, my] = pending_inputs_.front();
+        assert(pid != invalid_entity);
+        auto *pp = em_.get_component<Position>(pid);
+        assert(pp);
+        assert(game_mode_);
+
+        Vec2f new_pos{pp->world_pos.x + mx * 200.f * dt,
+                      pp->world_pos.y + my * 200.f * dt};
+        game_mode_->apply_player_movement(pid, new_pos);
+        pending_inputs_.pop();
     }
 
     cs_->update(em_, dt);
@@ -204,13 +203,15 @@ void Server::check_event_spawns()
     auto cnt = events_->triggered_events().size();
     if (cnt > last_event_count_) {
         last_event_count_ = cnt;
-        auto *pos = em_.get_component<Position>(host_player_id_);
-        Vec2f center = pos ? pos->world_pos : Vec2f{};
-        auto &latest = events_->triggered_events().back();
-        if (latest.type == GameEvent::Type::battle ||
-            latest.type == GameEvent::Type::refugee_wave)
-            cs_->spawn_enemy_wave(em_, 2 + rand() % 4, center, 400.f,
-                                  Team::enemy);
+        for (auto pid : player_entities_) {
+            auto *pos = em_.get_component<Position>(pid);
+            Vec2f center = pos ? pos->world_pos : Vec2f{};
+            auto &latest = events_->triggered_events().back();
+            if (latest.type == GameEvent::Type::battle ||
+                latest.type == GameEvent::Type::refugee_wave)
+                cs_->spawn_enemy_wave(em_, 2 + rand() % 4, center, 400.f,
+                                      Team::enemy);
+        }
     }
 }
 
@@ -238,6 +239,7 @@ void Server::handle_combat_event(int attacker_id, int defender_id, int damage,
 EntityId Server::add_player(Vec2f pos)
 {
     auto eid = em_.create_entity();
+    std::println("Adding player {} at position ({}, {})", eid, pos.x, pos.y);
     em_.add_component<Position>(eid, Position{pos, {0, 0}, 1.f});
     em_.add_component<CombatStats>(
         eid, CombatStats{Team::player, 20, 20, 4, 3, 80.f});
@@ -272,8 +274,6 @@ std::vector<uint8_t> Server::build_sync_payload()
     };
 
     for (auto id : em_.all_entities()) {
-        int nid = (id == host_player_id_) ? 0 : static_cast<int>(id);
-
         auto *ep = em_.get_component<Position>(id);
         auto *ec = em_.get_component<CombatStats>(id);
         if (!ep || !ec)
@@ -282,7 +282,7 @@ std::vector<uint8_t> Server::build_sync_payload()
         int hp = ec->hp, max_hp = ec->max_hp;
         uint8_t alive = ec->alive ? 1 : 0;
         uint8_t team = static_cast<uint8_t>(ec->team);
-        push(nid);
+        push(id);
         push(x);
         push(y);
         push(hp);

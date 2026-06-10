@@ -14,7 +14,6 @@ class NetworkManager;
 class Client {
   public:
     Client();
-    void set_managers(CombatSystem *cs, WorldState *ws, QuestManager *qm);
 
     void update(float dt);
     void handle_combat_event(int attacker_id, int defender_id, int damage,
@@ -33,6 +32,7 @@ class Client {
         return player_id_;
     }
 
+    void send_join_request();
     void send_player_direction(Vec2f dir);
     void send_interact();
     void send_rest();
@@ -58,5 +58,5 @@ class Client {
     std::unique_ptr<ITransport> transport_;
 
     void apply_sync(std::vector<uint8_t> const &data);
-    void on_message(TransportMessage const &msg);
+    void on_message(TransportExMessage const &msg);
 };

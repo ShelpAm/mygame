@@ -21,7 +21,8 @@ struct NetPacket {
         spawn_enemy_wave = 7,
         player_input = 8,
         interact = 9,
-        rest = 10
+        rest = 10,
+        return_pid,
     };
     Type type;
     std::vector<uint8_t> payload; // 4 bytes size, left: real payload
