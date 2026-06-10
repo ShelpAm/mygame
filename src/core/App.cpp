@@ -19,6 +19,8 @@
 #include "save/SaveManager.hpp"
 #include "systems/QuestManager.hpp"
 #include "net/NetworkManager.hpp"
+#include "net/Server.hpp"
+#include "net/Client.hpp"
 #include "ui/UIManager.hpp"
 #include "world/WorldState.hpp"
 #include <imgui.h>
@@ -54,31 +56,29 @@ bool App::init() {
     m_combat = std::make_unique<CombatSystem>();
     m_quests = std::make_unique<QuestManager>();
     m_network = std::make_unique<NetworkManager>();
+    m_server = std::make_unique<Server>();
+    m_client = std::make_unique<Client>();
+    m_server->setManagers(m_combat.get(), m_worldState.get(), m_quests.get());
+    m_client->setManagers(m_combat.get(), m_worldState.get(), m_quests.get());
 
     m_locale->discoverLanguages("assets/locale");
-    m_locale->setLanguage(0);  // Default to first discovered language
+    m_locale->setLanguage(0);
     m_dialogueEngine->discoverLanguages("assets/dialogue");
     m_quests->loadFromJson("assets/data/quests.json");
 
+    // Network callback: route combat events to server/client
     m_network->setCallback([this](const NetMessage& msg) {
         if (msg.type == NetMessage::CombatEvent && msg.data.size() >= 13) {
-            int attId, defId, dmg; uint8_t killed;
-            memcpy(&attId, msg.data.data(), 4);
-            memcpy(&defId, msg.data.data() + 4, 4);
-            memcpy(&dmg, msg.data.data() + 8, 4);
-            killed = msg.data[12];
-            auto* cs = m_entityManager->getComponent<CombatStats>(static_cast<EntityId>(defId - 1000));
-            if (cs) { cs->hp -= dmg; if (killed) cs->alive = false; }
-            else {
-                auto* pcs = m_entityManager->getComponent<CombatStats>(m_gameMode->playerEntity());
-                if (pcs) { pcs->hp -= dmg; if (killed) pcs->alive = false; }
-            }
+            auto read = [&](int o) { int v; memcpy(&v, msg.data.data()+o, 4); return v; };
+            int att = read(0), def = read(4), dmg = read(8); bool k = msg.data[12];
+            if (m_server) m_server->handleCombatEvent(att, def, dmg, k);
+            if (m_client) m_client->handleCombatEvent(att, def, dmg, k);
         }
     });
 
     m_events = std::make_unique<EventSimulator>(*m_factions, *m_knowledge, *m_worldState);
     m_rumors = std::make_unique<RumorPropagator>(*m_knowledge);
-    m_gameMode = std::make_unique<GameMode>(*m_entityManager);
+    m_gameMode = std::make_unique<GameMode>(m_server->entities());
     m_gameMode->initWorld(*m_worldState, *m_knowledge, *m_dialogueEngine,
                           *m_topicRegistry, *m_relationships, *m_factions,
                           *m_events, *m_rumors, *m_combat, *m_quests, *m_network);
@@ -100,8 +100,12 @@ void App::run() {
 
 void App::shutdown() {
     m_running = false;
-    m_network->disconnect();
-    m_network.reset();
+    // Stop networking first, then destroy game logic, then render/IO
+    if (m_network) { m_network->disconnect(); m_network.reset(); }
+    m_combat.reset();
+    m_events.reset();
+    m_gameMode.reset();
+    m_quests.reset();
     m_gameMode.reset();
     m_combat.reset();
     m_quests.reset();
@@ -157,20 +161,39 @@ void App::update(float dt) {
     m_survival->update(dt, false, false);
     m_worldState->update(dt);
     m_events->update(m_worldState->day());
-    if (m_events->triggeredEvents().size() > 0) {
-        auto* pos = m_entityManager->getComponent<Position>(m_gameMode->playerEntity());
-        Vec2f center = pos ? pos->worldPos : Vec2f{};
-        auto& latest = m_events->triggeredEvents().back();
-        if (latest.type == GameEvent::Type::Battle || latest.type == GameEvent::Type::RefugeeWave)
-            m_combat->spawnEnemyWave(*m_entityManager, 2 + rand() % 4, center, 400.f, Team::Enemy);
+
+    // Network handling
+    if (m_network->isConnected()) {
+        m_network->update();
+        if (m_network->isHosting()) {
+            // Server: authoritative combat + sync (Server owns the combat loop)
+            m_server->update(dt, *m_network);
+        } else {
+            // Client: receive sync
+            m_client->update(dt, *m_network);
+        }
+        m_network->interpolateEntities(dt);
     }
+
+    // Single-player or host: spawn enemies from events
+    if (!m_network->isConnected() || m_network->isHosting()) {
+        auto prevCount = m_events->triggeredEvents().size();
+        if (prevCount > 0) {
+            auto* pos = m_server->entities().getComponent<Position>(m_gameMode->playerEntity());
+            Vec2f center = pos ? pos->worldPos : Vec2f{};
+            auto& latest = m_events->triggeredEvents().back();
+            if (latest.type == GameEvent::Type::Battle || latest.type == GameEvent::Type::RefugeeWave)
+                m_combat->spawnEnemyWave(m_server->entities(), 2 + rand() % 4, center, 400.f, Team::Enemy);
+        }
+    }
+
     if (m_survival->state().food <= 0 || m_survival->state().water <= 0) {
-        auto* pcs = m_entityManager->getComponent<CombatStats>(m_gameMode->playerEntity());
+        auto* pcs = m_server->entities().getComponent<CombatStats>(m_gameMode->playerEntity());
         if (pcs && pcs->alive) pcs->hp = std::max(0, pcs->hp - 1);
     }
-    if (m_network->isConnected()) { m_network->update(); m_network->interpolateEntities(dt); }
+
     m_gameMode->update(dt, *m_input, *m_locale, *m_worldState);
-    auto* ppos = m_entityManager->getComponent<Position>(m_gameMode->playerEntity());
+    auto* ppos = m_server->entities().getComponent<Position>(m_gameMode->playerEntity());
     if (ppos) m_cameraSystem->setTarget(ppos->worldPos);
     m_cameraSystem->update(dt);
     m_uiManager->update(dt);
@@ -179,7 +202,10 @@ void App::update(float dt) {
 void App::render() {
     SDL_SetRenderDrawColor(m_renderer, 10, 10, 15, 255);
     SDL_RenderClear(m_renderer);
-    m_renderSystem->render(*m_entityManager, *m_worldState, *m_navigationSystem,
+    // Render from server (single/host) or client (join)
+    auto& renderEm = (m_network->isConnected() && !m_network->isHosting())
+        ? m_client->entities() : m_server->entities();
+    m_renderSystem->render(renderEm, *m_worldState, *m_navigationSystem,
                             m_combat->events(), m_network->remoteEntities());
     m_combat->clearEvents();
     m_uiManager->render(*m_worldState, *this);
@@ -192,16 +218,16 @@ void App::setUILanguage(int langIndex) {
 }
 
 bool App::isPlayerDead() const {
-    auto* cs = m_entityManager->getComponent<CombatStats>(m_gameMode->playerEntity());
+    auto* cs = m_server->entities().getComponent<CombatStats>(m_gameMode->playerEntity());
     return cs && !cs->alive;
 }
 
 const CombatStats* App::playerCombatStats() const {
-    return m_entityManager->getComponent<CombatStats>(m_gameMode->playerEntity());
+    return m_server->entities().getComponent<CombatStats>(m_gameMode->playerEntity());
 }
 
 void App::doRest() {
-    auto* pcs = m_entityManager->getComponent<CombatStats>(m_gameMode->playerEntity());
+    auto* pcs = m_server->entities().getComponent<CombatStats>(m_gameMode->playerEntity());
     if (pcs && pcs->alive) {
         pcs->hp = std::min(pcs->maxHp, pcs->hp + 5);
         m_survival->heal(5.f);
@@ -211,15 +237,15 @@ void App::doRest() {
 void App::quickSave() { saveToSlot(m_nextSaveSlot++); }
 
 void App::saveToSlot(int slot) {
-    auto* pos = m_entityManager->getComponent<Position>(m_gameMode->playerEntity());
-    auto* cs = m_entityManager->getComponent<CombatStats>(m_gameMode->playerEntity());
+    auto* pos = m_server->entities().getComponent<Position>(m_gameMode->playerEntity());
+    auto* cs = m_server->entities().getComponent<CombatStats>(m_gameMode->playerEntity());
     Vec2f pp = pos ? pos->worldPos : Vec2f{};
 
     std::vector<SaveManager::NPCData> npcData;
     for (auto eid : m_gameMode->npcEntities()) {
-        auto* np = m_entityManager->getComponent<Position>(eid);
-        auto* ns = m_entityManager->getComponent<NPCState>(eid);
-        auto* ncs = m_entityManager->getComponent<CombatStats>(eid);
+        auto* np = m_server->entities().getComponent<Position>(eid);
+        auto* ns = m_server->entities().getComponent<NPCState>(eid);
+        auto* ncs = m_server->entities().getComponent<CombatStats>(eid);
         if (!np || !ns) continue;
         SaveManager::NPCData nd;
         nd.id = ns->npcId; nd.name = ns->displayName; nd.personality = ns->personality;
@@ -247,12 +273,12 @@ void App::loadFromSlot(int slot) {
     if (!SaveManager::load(path, data)) return;
 
     // Reset
-    while (!m_entityManager->allEntities().empty())
-        m_entityManager->destroyEntity(m_entityManager->allEntities().back());
+    while (!m_server->entities().allEntities().empty())
+        m_server->entities().destroyEntity(m_server->entities().allEntities().back());
     m_gameMode = std::make_unique<GameMode>(*m_entityManager);
 
     auto pid = m_gameMode->spawnPlayer(data.playerPos.x, data.playerPos.y);
-    auto* cs = m_entityManager->getComponent<CombatStats>(pid);
+    auto* cs = m_server->entities().getComponent<CombatStats>(pid);
     if (cs) { cs->hp = data.playerHp; cs->maxHp = data.playerMaxHp; }
 
     m_worldState->setDay(data.day); m_worldState->setSeason(data.season);
@@ -270,11 +296,11 @@ void App::loadFromSlot(int slot) {
         for (const auto& [fid, ver] : nd.knowledge) facts.push_back({fid, ver, 70, false, ""});
         m_gameMode->spawnNPC(nd.id, nd.name, nd.position.x, nd.position.y, nd.personality, facts);
         auto& eid = m_gameMode->npcEntities().back();
-        auto* ncs = m_entityManager->getComponent<CombatStats>(eid);
+        auto* ncs = m_server->entities().getComponent<CombatStats>(eid);
         if (ncs) { ncs->hp = nd.hp; ncs->maxHp = nd.maxHp; ncs->alive = nd.alive; }
     }
 
-    auto* pos = m_entityManager->getComponent<Position>(pid);
+    auto* pos = m_server->entities().getComponent<Position>(pid);
     if (pos) m_cameraSystem->centerOn(pos->worldPos);
 }
 

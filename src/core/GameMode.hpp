@@ -5,6 +5,8 @@
 #include "entities/components/CombatStats.hpp"
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 #include <memory>
 
 class EntityManager;
@@ -26,6 +28,7 @@ struct NPCState;
 class GameMode {
 public:
     explicit GameMode(EntityManager& em);
+    void setEntityManager(EntityManager& em) { m_emPtr = &em; }
     void initWorld(WorldState& ws, KnowledgeGraph& kg, DialogueEngine& de,
                    TopicRegistry& tr, RelationshipTable& rt, FactionNetwork& fn,
                    EventSimulator& es, RumorPropagator& rp, CombatSystem& cs,
@@ -43,16 +46,16 @@ public:
     void doDialogueAction(const std::string& action, LocaleManager& loc);
     void endDialogue();
 
-    void applyRemoteEntities(const NetworkManager& net);
-    void syncCombatEvents(NetworkManager& net);
-
     DialogueState& dialogue() { return *m_dialogue; }
     const DialogueState& dialogue() const { return *m_dialogue; }
     EntityId playerEntity() const { return m_playerEntity; }
     const std::vector<EntityId>& npcEntities() const { return m_npcEntities; }
 
+    std::unordered_map<int, EntityId> remoteIdMap;
+
 private:
     EntityManager& m_em;
+    EntityManager* m_emPtr = nullptr;  // Allow switching EntityManager
     EntityId m_playerEntity = INVALID_ENTITY;
     std::vector<EntityId> m_npcEntities;
     std::unique_ptr<DialogueState> m_dialogue;
@@ -63,7 +66,6 @@ private:
     RelationshipTable* m_rt = nullptr;
     CombatSystem* m_cs = nullptr;
     QuestManager* m_qm = nullptr;
-    NetworkManager* m_net = nullptr;
     WorldState* m_ws = nullptr;
 
     EntityId findNearestInteractable(Vec2f playerPos) const;

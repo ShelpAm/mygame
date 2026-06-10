@@ -37,7 +37,7 @@ void GameMode::initWorld(WorldState& ws, KnowledgeGraph& kg, DialogueEngine& de,
                           EventSimulator& es, RumorPropagator& rp, CombatSystem& cs,
                           QuestManager& qm, NetworkManager& net) {
     m_ws = &ws; m_kg = &kg; m_de = &de; m_tr = &tr; m_rt = &rt;
-    m_cs = &cs; m_qm = &qm; m_net = &net;
+    m_cs = &cs; m_qm = &qm;
 
     // Player
     m_playerEntity = spawnPlayer(0, 0);
@@ -196,55 +196,6 @@ void GameMode::spawnGuards(EntityId captainEid, int count, Team team) {
         m_em.addComponent<SoldierAI>(eid, SoldierAI{captainEid, {gp.x-center.x, gp.y-center.y}, 32.f, 180.f});
     }
 }
-
-void GameMode::applyRemoteEntities(const NetworkManager& net) {
-    static std::unordered_map<int, EntityId> idMap;
-    for (const auto& re : net.remoteEntities()) {
-        if (re.id < 1000 && re.team == 0) continue;
-        auto it = idMap.find(re.id);
-        EntityId localId;
-        if (it == idMap.end()) {
-            localId = m_em.createEntity();
-            idMap[re.id] = localId;
-            m_em.addComponent<Position>(localId, Position{re.position, {0,0}, 0.5f});
-            m_em.addComponent<Sprite>(localId, Sprite{"", {}, {12,12}, {1,1,1,1}, 0.8f, true});
-            Team t = re.team == 1 ? Team::Enemy : (re.team == 2 ? Team::Neutral : Team::Enemy);
-            m_em.addComponent<CombatStats>(localId, CombatStats{t, re.maxHp, re.hp, 3, 2, 80.f});
-        } else {
-            localId = it->second;
-            auto* p = m_em.getComponent<Position>(localId);
-            auto* c = m_em.getComponent<CombatStats>(localId);
-            if (p) p->worldPos = re.position;
-            if (c) { c->hp = re.hp; c->alive = re.alive; }
-        }
-    }
-}
-
-void GameMode::syncCombatEvents(NetworkManager& net) {
-    for (const auto& ev : m_cs->events()) {
-        if (ev.damage > 0)
-            net.sendCombatEvent(static_cast<int>(ev.attackerId) + 1000,
-                                static_cast<int>(ev.defenderId) + 1000,
-                                ev.damage, ev.killed);
-    }
-}
-
-EntityId GameMode::findNearestInteractable(Vec2f playerPos) const {
-    EntityId nearest = INVALID_ENTITY;
-    float nearestDist = 80.f;
-    for (auto eid : m_em.allEntities()) {
-        if (eid == m_playerEntity) continue;
-        if (!m_em.getComponent<Interactable>(eid)) continue;
-        auto* npcCs = m_em.getComponent<CombatStats>(eid);
-        if (npcCs && !npcCs->alive) continue;
-        auto* pos = m_em.getComponent<Position>(eid);
-        if (!pos) continue;
-        float d = std::hypot(pos->worldPos.x - playerPos.x, pos->worldPos.y - playerPos.y);
-        if (d < nearestDist) { nearestDist = d; nearest = eid; }
-    }
-    return nearest;
-}
-
 void GameMode::handleInteraction(LocaleManager& loc) {
     if (m_dialogue->active) { endDialogue(); return; }
     auto* pp = m_em.getComponent<Position>(m_playerEntity);
@@ -253,38 +204,36 @@ void GameMode::handleInteraction(LocaleManager& loc) {
     if (eid == INVALID_ENTITY) return;
     auto* npc = m_em.getComponent<NPCState>(eid);
     if (!npc) return;
-
     auto* rel = m_rt->getRelation(npc->npcId);
     int trust = rel ? rel->trust : 0;
     auto resp = m_de->generateGreeting(*npc, trust);
     m_dialogue->active = true;
-    m_dialogue->npcEntity = eid;
-    m_dialogue->npcId = npc->npcId;
-    m_dialogue->npcName = npc->displayName;
-    m_dialogue->history.clear();
-    m_dialogue->availableTopics.clear();
-    m_dialogue->availableActions.clear();
-    m_dialogue->canGift = false;
-    m_dialogue->canThreaten = false;
-
+    m_dialogue->npcEntity = eid; m_dialogue->npcId = npc->npcId; m_dialogue->npcName = npc->displayName;
+    m_dialogue->history.clear(); m_dialogue->availableTopics.clear(); m_dialogue->availableActions.clear();
+    m_dialogue->canGift = false; m_dialogue->canThreaten = false;
     m_dialogue->history.push_back({DialogueLine::NPC, "", resp.text, true, npc->displayName});
     m_dialogue->npcTrust = trust;
-
-    for (const auto& [tid, _] : npc->knowledge)
-        m_dialogue->availableTopics.push_back(tid);
-    for (const auto& t : m_kg->knownTopics())
-        if (!npc->knowledge.contains(t))
-            m_dialogue->availableActions.push_back("tell:" + t);
-    if (npc->personality == "hostile") {
-        m_dialogue->availableTopics.push_back("__attack__");
-        m_dialogue->canThreaten = true;
-    }
+    for (const auto& [tid, _] : npc->knowledge) m_dialogue->availableTopics.push_back(tid);
+    for (const auto& t : m_kg->knownTopics()) if (!npc->knowledge.contains(t)) m_dialogue->availableActions.push_back("tell:" + t);
+    if (npc->personality == "hostile") { m_dialogue->availableTopics.push_back("__attack__"); m_dialogue->canThreaten = true; }
     m_dialogue->canGift = true;
-    // Check quests
-    for (const auto* q : m_qm->availableQuests())
-        if (q->giver == npc->npcId) { m_dialogue->availableTopics.push_back("__quest__"); break; }
-    for (const auto* q : m_qm->activeQuests())
-        if (q->giver == npc->npcId) { m_dialogue->availableTopics.push_back("__quest_turnin__"); break; }
+    for (const auto* q : m_qm->availableQuests()) if (q->giver == npc->npcId) { m_dialogue->availableTopics.push_back("__quest__"); break; }
+    for (const auto* q : m_qm->activeQuests()) if (q->giver == npc->npcId) { m_dialogue->availableTopics.push_back("__quest_turnin__"); break; }
+}
+
+EntityId GameMode::findNearestInteractable(Vec2f playerPos) const {
+    EntityId nearest = INVALID_ENTITY; float nearestDist = 80.f;
+    for (auto eid : m_em.allEntities()) {
+        if (eid == m_playerEntity) continue;
+        if (!m_em.getComponent<Interactable>(eid)) continue;
+        auto* cs = m_em.getComponent<CombatStats>(eid);
+        if (cs && !cs->alive) continue;
+        auto* pos = m_em.getComponent<Position>(eid);
+        if (!pos) continue;
+        float d = std::hypot(pos->worldPos.x - playerPos.x, pos->worldPos.y - playerPos.y);
+        if (d < nearestDist) { nearestDist = d; nearest = eid; }
+    }
+    return nearest;
 }
 
 void GameMode::doDialogueAction(const std::string& action, LocaleManager& loc) {
@@ -417,41 +366,10 @@ void GameMode::update(float dt, InputManager& input, LocaleManager& loc, WorldSt
         }
     }
 
-    // Update systems
+    // Update systems — both sides run combat for responsive damage
     m_cs->update(m_em, dt);
     for (const auto& ev : m_cs->events())
         if (ev.killed) m_qm->reportKill("enemy");
 
     if (dead && m_dialogue->active) endDialogue();
-
-    // Network sync
-    if (m_net->isConnected()) {
-        static float timer = 0;
-        timer += dt;
-        if (timer >= 0.05f) {
-            timer = 0;
-            auto* ps = m_em.getComponent<CombatStats>(m_playerEntity);
-            if (ps && pos) m_net->sendEntityUpdate(0, pos->worldPos, ps->hp, ps->maxHp, ps->alive);
-            std::vector<uint8_t> state;
-            for (auto id : m_em.allEntities()) {
-                if (id == m_playerEntity) continue;
-                auto* ep = m_em.getComponent<Position>(id);
-                auto* ec = m_em.getComponent<CombatStats>(id);
-                if (!ep || !ec) continue;
-                int nid = static_cast<int>(id) + 1000;
-                float x = ep->worldPos.x, y = ep->worldPos.y;
-                state.insert(state.end(), (uint8_t*)&nid, (uint8_t*)&nid + 4);
-                state.insert(state.end(), (uint8_t*)&x, (uint8_t*)&x + 4);
-                state.insert(state.end(), (uint8_t*)&y, (uint8_t*)&y + 4);
-                state.insert(state.end(), (uint8_t*)&ec->hp, (uint8_t*)&ec->hp + 4);
-                state.insert(state.end(), (uint8_t*)&ec->maxHp, (uint8_t*)&ec->maxHp + 4);
-                state.push_back(ec->alive ? 1 : 0);
-                state.push_back(static_cast<uint8_t>(ec->team));
-            }
-            if (!state.empty()) m_net->sendFullSync(state);
-        }
-        m_net->interpolateEntities(dt);
-        applyRemoteEntities(*m_net);
-        syncCombatEvents(*m_net);
-    }
 }

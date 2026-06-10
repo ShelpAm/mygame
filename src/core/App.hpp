@@ -27,6 +27,8 @@ class RumorPropagator;
 class CombatSystem;
 class QuestManager;
 class NetworkManager;
+class Server;
+class Client;
 #include "core/GameMode.hpp"
 struct CombatStats;
 
@@ -100,6 +102,8 @@ private:
     std::unique_ptr<QuestManager> m_quests;
     std::unique_ptr<NetworkManager> m_network;
     std::unique_ptr<GameMode> m_gameMode;
+    std::unique_ptr<Server> m_server;
+    std::unique_ptr<Client> m_client;
 
     bool m_showLoadMenu = false;
     bool m_showHelp = false;

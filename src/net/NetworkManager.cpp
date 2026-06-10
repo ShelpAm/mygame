@@ -172,8 +172,8 @@ void NetworkManager::sendCombatEvent(int attackerId, int defenderId, int damage,
 void NetworkManager::interpolateEntities(float dt) {
     for (auto& e : m_remoteEntities) {
         float t = std::min(1.f, dt * 15.f);
-        e.position.x += (e.targetPos.x - e.position.x) * t;
-        e.position.y += (e.targetPos.y - e.position.y) * t;
+        e.position.x += (e.targetPos.x - e.position.x) * std::min(1.f, dt * 30.f);
+        e.position.y += (e.targetPos.y - e.position.y) * std::min(1.f, dt * 30.f);
     }
 }
 

@@ -35,6 +35,8 @@ set(SOURCES
     src/systems/CombatSystem.cpp
     src/systems/QuestManager.cpp
     src/net/NetworkManager.cpp
+    src/net/Server.cpp
+    src/net/Client.cpp
     src/core/LocaleManager.cpp
     src/ui/UIManager.cpp
     src/ui/HUD.cpp
