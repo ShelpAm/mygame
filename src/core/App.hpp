@@ -1,7 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
-#include "entities/components/Position.hpp"
+#include "core/GameTypes.hpp"
 #include "core/LocaleManager.hpp"
 #include <memory>
 #include <string>
@@ -27,99 +27,54 @@ class RumorPropagator;
 class CombatSystem;
 class QuestManager;
 class NetworkManager;
+#include "core/GameMode.hpp"
 struct CombatStats;
-
-struct DialogueLine {
-    enum Speaker { Player, NPC };
-    Speaker speaker = NPC;
-    std::string textKey;   // locale key (for translatable lines)
-    std::string rawText;   // fallback direct text (for procedurally generated lines)
-    bool useRaw = false;   // true = display rawText, false = display locale.get(textKey)
-    std::string npcName;   // only used when speaker == NPC
-};
-
-struct DialogueState {
-    bool active = false;
-    EntityId npcEntity = INVALID_ENTITY;
-    std::string npcId;
-    std::string npcName;
-    std::vector<DialogueLine> history;
-    std::vector<std::string> availableTopics;  // Topics to ask about
-    std::vector<std::string> availableActions;  // tell/gift/threaten/etc
-    int npcTrust = 0;
-    int npcFear = 0;
-    bool canTrade = false;
-    bool canGift = false;
-    bool canThreaten = false;
-};
 
 class App {
 public:
     App();
     ~App();
-
     bool init();
     void run();
     void shutdown();
 
     SDL_Window* window() { return m_window; }
     SDL_Renderer* renderer() { return m_renderer; }
-    ResourceManager& resources() { return *m_resources; }
     InputManager& input() { return *m_input; }
-    GameClock& clock() { return *m_gameClock; }
-
-    // Dialogue state access
-    const DialogueState& dialogueState() const { return m_dialogueState; }
-    DialogueState& dialogueStateMut() { return m_dialogueState; }
-    void startDialogue(EntityId npcEntity, const std::string& npcId,
-                       const std::string& npcName);
-    void endDialogue();
-    void askTopic(const std::string& topicId);
-    void doDialogueAction(const std::string& action);
-    void setUILanguage(int langIndex);
-    void quickSave();
-    void quickLoad(const std::string& path);
-    void saveToSlot(int slot);
-    void loadFromSlot(int slot);
-    std::vector<int> availableSaveSlots() const;
-    void recruitSoldier();
-    void spawnTestEnemies();
-    void applyRemoteEntities();
-    void syncCombatEvents();
-    void doRest();
-
     LocaleManager& locale() { return *m_locale; }
     const LocaleManager& locale() const { return *m_locale; }
     const ConditionTracker& survival() const { return *m_survival; }
+    void doRest();
+    void recruitSoldier();
     const CombatStats* playerCombatStats() const;
     bool isPlayerDead() const;
     bool showLoadMenu() const { return m_showLoadMenu; }
     void setShowLoadMenu(bool v) { m_showLoadMenu = v; }
     bool showHelp() const { return m_showHelp; }
-    const QuestManager& quests() const { return *m_quests; }
-    QuestManager& questsMut() { return *m_quests; }
+    void setShowHelp(bool v) { m_showHelp = v; }
     bool showMultiplayer() const { return m_showMultiplayer; }
     void setShowMultiplayer(bool v) { m_showMultiplayer = v; }
-    const NetworkManager* network() const { return m_network.get(); }
     NetworkManager* networkMut() { return m_network.get(); }
+    const NetworkManager* network() const { return m_network.get(); }
+    QuestManager& questsMut() { return *m_quests; }
+    const QuestManager& quests() const { return *m_quests; }
+    GameMode& gameMode() { return *m_gameMode; }
+    const GameMode& gameMode() const { return *m_gameMode; }
+
+    void setUILanguage(int langIndex);
+    void endDialogue() { m_gameMode->endDialogue(); }
+    void askTopic(const std::string& t) { m_gameMode->doDialogueAction(t, *m_locale); }
+    void doDialogueAction(const std::string& a) { m_gameMode->doDialogueAction(a, *m_locale); }
+
+    void quickSave();
+    void saveToSlot(int slot);
+    void loadFromSlot(int slot);
+    std::vector<int> availableSaveSlots() const;
 
 private:
     void processEvents();
     void update(float dt);
     void render();
-
-    struct NPCKnowledgeEntry {
-        std::string factId;
-        std::string version;
-        int confidence = 70;
-        bool witnessed = false;
-        std::string source;
-    };
-    void spawnNPC(const std::string& id, const std::string& name,
-                  float x, float y, const std::string& personality,
-                  const std::vector<NPCKnowledgeEntry>& knownFacts);
-    EntityId findNearestInteractable() const;
-    void handleInteraction();
 
     SDL_Window* m_window = nullptr;
     SDL_Renderer* m_renderer = nullptr;
@@ -144,18 +99,14 @@ private:
     std::unique_ptr<CombatSystem> m_combat;
     std::unique_ptr<QuestManager> m_quests;
     std::unique_ptr<NetworkManager> m_network;
-    bool m_showMultiplayer = false;
-    float m_netSyncTimer = 0.f;
+    std::unique_ptr<GameMode> m_gameMode;
 
-    EntityId m_playerEntity = INVALID_ENTITY;
-    std::vector<EntityId> m_npcEntities;
-    Vec2f m_playerFacing{0.f, -1.f};
     bool m_showLoadMenu = false;
     bool m_showHelp = false;
-    int m_nextSaveSlot = 1;  // Last movement direction
-    DialogueState m_dialogueState;
-
+    bool m_showMultiplayer = false;
     bool m_running = false;
+    int m_nextSaveSlot = 1;
+
     static constexpr int WINDOW_WIDTH = 1280;
     static constexpr int WINDOW_HEIGHT = 720;
     static constexpr const char* WINDOW_TITLE = "The Sunset Straits";

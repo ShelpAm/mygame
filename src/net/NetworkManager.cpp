@@ -1,6 +1,6 @@
 #include "net/NetworkManager.hpp"
+#include "net/NetPacket.hpp"
 #include <iostream>
-#include <cstring>
 
 NetworkManager::NetworkManager() {}
 NetworkManager::~NetworkManager() { disconnect(); }
@@ -22,18 +22,18 @@ bool NetworkManager::host(int port) {
 bool NetworkManager::connect(const std::string& ip, int port) {
     try {
         m_socket = std::make_unique<tcp::socket>(m_io);
-        m_connected = true;  // Mark connected immediately so UI updates
+        m_connecting = true;
         m_thread = std::thread(&NetworkManager::ioThread, this);
-        // Post async connect to IO thread
         boost::asio::post(m_io, [this, ip, port]() {
             m_socket->async_connect(
                 tcp::endpoint(boost::asio::ip::make_address(ip), port),
                 [this](boost::system::error_code ec) {
+                    m_connecting = false;
                     if (ec) {
                         std::cerr << "Connect failed: " << ec.message() << '\n';
-                        m_connected = false;
                         return;
                     }
+                    m_connected = true;
                     std::cout << "Connected!\n";
                     startRead();
                 });
@@ -61,8 +61,9 @@ void NetworkManager::ioThread() {
 }
 
 void NetworkManager::disconnect() {
-    if (!m_connected && !m_hosting) return;
+    if (!m_connected && !m_hosting && !m_connecting) return;
     m_connected = false;
+    m_connecting = false;
     m_hosting = false;
     try { m_io.stop(); } catch (...) {}
     if (m_thread.joinable()) m_thread.join();
@@ -139,63 +140,32 @@ void NetworkManager::handleMessage(const NetMessage& msg) {
 }
 
 void NetworkManager::queueSend(std::vector<uint8_t> data) {
-    if (!m_socket || !m_socket->is_open()) return;
+    if (!m_connected || m_connecting || !m_socket || !m_socket->is_open()) return;
     auto buf = std::make_shared<std::vector<uint8_t>>(std::move(data));
     boost::asio::async_write(*m_socket, boost::asio::buffer(*buf),
         [buf](boost::system::error_code, size_t) {});
 }
 
+
 void NetworkManager::sendEntityUpdate(int playerId, Vec2f pos, int hp, int maxHp, bool alive) {
-    if (!m_connected) return;
-    std::vector<uint8_t> data(25);
-    uint32_t type = NetMessage::EntityUpdate;
-    uint32_t size = 21;
-    memcpy(data.data(), &type, 4);
-    memcpy(data.data() + 4, &size, 4);
-    memcpy(data.data() + 8, &playerId, 4);
-    memcpy(data.data() + 12, &pos.x, 4);
-    memcpy(data.data() + 16, &pos.y, 4);
-    memcpy(data.data() + 20, &hp, 4);
-    memcpy(data.data() + 24, &maxHp, 4);
-    data[28] = alive ? 1 : 0;
-    queueSend(std::move(data));
+    if (!m_connected || m_connecting) return;
+    queueSend(makeEntityUpdate(playerId, pos.x, pos.y, hp, maxHp, alive));
 }
 
 void NetworkManager::sendFullSync(const std::vector<uint8_t>& payload) {
-    if (!m_connected) return;
-    std::vector<uint8_t> data(8 + payload.size());
-    uint32_t type = NetMessage::StateFull;
-    uint32_t size = payload.size();
-    memcpy(data.data(), &type, 4);
-    memcpy(data.data() + 4, &size, 4);
-    memcpy(data.data() + 8, payload.data(), size);
-    queueSend(std::move(data));
+    if (!m_connected || m_connecting) return;
+    queueSend(makeFullSync(payload));
 }
 
 void NetworkManager::sendChat(const std::string& msg) {
-    if (!m_connected) return;
+    if (!m_connected || m_connecting) return;
     m_chatHistory.push_back("You: " + msg);
-    std::vector<uint8_t> data(8 + msg.size());
-    uint32_t type = NetMessage::Chat;
-    uint32_t size = msg.size();
-    memcpy(data.data(), &type, 4);
-    memcpy(data.data() + 4, &size, 4);
-    memcpy(data.data() + 8, msg.data(), size);
-    queueSend(std::move(data));
+    queueSend(makeChat(msg));
 }
 
 void NetworkManager::sendCombatEvent(int attackerId, int defenderId, int damage, bool killed) {
-    if (!m_connected) return;
-    std::vector<uint8_t> data(25);
-    uint32_t type = NetMessage::CombatEvent;
-    uint32_t size = 17;
-    memcpy(data.data(), &type, 4);
-    memcpy(data.data() + 4, &size, 4);
-    memcpy(data.data() + 8, &attackerId, 4);
-    memcpy(data.data() + 12, &defenderId, 4);
-    memcpy(data.data() + 16, &damage, 4);
-    data[20] = killed ? 1 : 0;
-    queueSend(std::move(data));
+    if (!m_connected || m_connecting) return;
+    queueSend(makeCombatEvent(attackerId, defenderId, damage, killed));
 }
 
 void NetworkManager::interpolateEntities(float dt) {

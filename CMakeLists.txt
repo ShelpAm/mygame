@@ -13,6 +13,7 @@ find_package(imgui REQUIRED)
 set(SOURCES
     src/main.cpp
     src/core/App.cpp
+    src/core/GameMode.cpp
     src/core/ResourceManager.cpp
     src/core/InputManager.cpp
     src/core/GameClock.cpp

@@ -36,7 +36,7 @@ public:
     bool host(int port = 27015);
     bool connect(const std::string& ip, int port = 27015);
     void disconnect();
-    bool isConnected() const { return m_connected; }
+    bool isConnected() const { return m_connected && !m_connecting; }
     bool isHosting() const { return m_hosting; }
 
     void update();
@@ -60,6 +60,7 @@ private:
 
     bool m_hosting = false;
     bool m_connected = false;
+    bool m_connecting = false;
     std::vector<RemoteEntity> m_remoteEntities;
     std::vector<std::string> m_chatHistory;
     MsgCallback m_callback;

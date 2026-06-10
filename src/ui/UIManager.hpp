@@ -7,6 +7,7 @@
 class WorldState;
 class App;
 class LocaleManager;
+class GameMode;
 
 class UIManager {
 public:

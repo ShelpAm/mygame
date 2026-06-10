@@ -2,6 +2,7 @@
 #include "ui/imgui_impl_sdl3.h"
 #include "world/WorldState.hpp"
 #include "core/App.hpp"
+#include "core/GameMode.hpp"
 #include "core/LocaleManager.hpp"
 #include "survival/ConditionTracker.hpp"
 #include "entities/components/CombatStats.hpp"
@@ -87,7 +88,7 @@ void UIManager::render(const WorldState& worldState, const App& app) {
     ImGui::NewFrame();
 
     renderHUD(worldState, app);
-    if (app.dialogueState().active) {
+    if (app.gameMode().dialogue().active) {
         renderDialogue(app);
     }
     if (m_showJournal) renderJournal(app);
@@ -167,7 +168,7 @@ void UIManager::renderHUD(const WorldState& worldState, const App& app) {
 }
 
 void UIManager::renderDialogue(const App& app) {
-    const auto& ds = app.dialogueState();
+    const auto& ds = app.gameMode().dialogue();
     const auto& loc = app.locale();
 
     ImGui::SetNextWindowSize(ImVec2(500, 480), ImGuiCond_Appearing);
