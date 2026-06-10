@@ -11,11 +11,13 @@
 
 using boost::asio::ip::tcp;
 
-struct RemotePlayer {
+struct RemoteEntity {
     int id = 0;
-    Vec2f position;
+    Vec2f position;       // Current (interpolated) position
+    Vec2f targetPos;      // Target from latest network update
     int hp = 20, maxHp = 20;
     bool alive = true;
+    int team = 0;
 };
 
 struct NetMessage {
@@ -39,10 +41,12 @@ public:
 
     void update();
     void sendEntityUpdate(int playerId, Vec2f pos, int hp, int maxHp, bool alive);
+    void sendFullSync(const std::vector<uint8_t>& data);
     void sendChat(const std::string& msg);
+    void interpolateEntities(float dt);
     void setCallback(MsgCallback cb) { m_callback = std::move(cb); }
 
-    const std::vector<RemotePlayer>& remotePlayers() const { return m_remotePlayers; }
+    const std::vector<RemoteEntity>& remoteEntities() const { return m_remoteEntities; }
 
 private:
     boost::asio::io_context m_io;
@@ -53,7 +57,7 @@ private:
 
     bool m_hosting = false;
     bool m_connected = false;
-    std::vector<RemotePlayer> m_remotePlayers;
+    std::vector<RemoteEntity> m_remoteEntities;
     MsgCallback m_callback;
     std::vector<uint8_t> m_readBuf;
 

@@ -18,7 +18,7 @@ RenderSystem::RenderSystem(SDL_Renderer* renderer, ResourceManager& resources, C
 void RenderSystem::render(EntityManager& entities, const WorldState& worldState,
                            const NavigationSystem& nav,
                            const std::vector<CombatEvent>& combatEvents,
-                           const std::vector<RemotePlayer>& remotePlayers) {
+                           const std::vector<RemoteEntity>& remotePlayers) {
     renderTileMap(worldState, nav);
     renderEntities(entities);
     renderHealthBars(entities);

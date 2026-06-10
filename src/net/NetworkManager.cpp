@@ -92,13 +92,13 @@ void NetworkManager::handleMessage(const NetMessage& msg) {
         memcpy(&maxHp, msg.data.data() + 16, 4);
         memcpy(&alive, msg.data.data() + 20, 1);
 
-        for (auto& rp : m_remotePlayers) {
+        for (auto& rp : m_remoteEntities) {
             if (rp.id == id) {
-                rp.position = {x, y}; rp.hp = hp;
+                rp.targetPos = {x, y}; rp.hp = hp;
                 rp.maxHp = maxHp; rp.alive = alive; return;
             }
         }
-        m_remotePlayers.push_back({id, {x, y}, hp, maxHp, (bool)alive});
+        m_remoteEntities.push_back({id, {x, y}, {x, y}, hp, maxHp, (bool)alive});
     }
 }
 
@@ -129,6 +129,24 @@ void NetworkManager::sendChat(const std::string& msg) {
         boost::asio::write(*m_socket, boost::asio::buffer(&size, 4));
         boost::asio::write(*m_socket, boost::asio::buffer(msg.data(), size));
     } catch (...) {}
+}
+
+void NetworkManager::sendFullSync(const std::vector<uint8_t>& data) {
+    if (!m_connected || !m_socket || !m_socket->is_open()) return;
+    uint32_t type = NetMessage::StateFull;
+    uint32_t size = data.size();
+    try {
+        boost::asio::write(*m_socket, boost::asio::buffer(&type, 4));
+        boost::asio::write(*m_socket, boost::asio::buffer(&size, 4));
+        boost::asio::write(*m_socket, boost::asio::buffer(data.data(), size));
+    } catch (...) {}
+}
+
+void NetworkManager::interpolateEntities(float dt) {
+    for (auto& e : m_remoteEntities) {
+        e.position.x += (e.targetPos.x - e.position.x) * std::min(1.f, dt * 15.f);
+        e.position.y += (e.targetPos.y - e.position.y) * std::min(1.f, dt * 15.f);
+    }
 }
 
 void NetworkManager::update() {}

@@ -600,17 +600,43 @@ void App::update(float dt) {
     }
     m_survival->update(dt, false, false);
 
-    // Network sync (every 100ms)
+    // Network sync
     if (m_network->isConnected()) {
         m_netSyncTimer += dt;
-        if (m_netSyncTimer >= 0.1f) {
+        if (m_netSyncTimer >= 0.05f) {
             m_netSyncTimer = 0.f;
+            // Send player
             auto* ps = m_entityManager->getComponent<CombatStats>(m_playerEntity);
             auto* pp = m_entityManager->getComponent<Position>(m_playerEntity);
             if (ps && pp)
                 m_network->sendEntityUpdate(0, pp->worldPos, ps->hp, ps->maxHp, ps->alive);
+            // Send all combat entities (NPCs, enemies)
+            std::vector<uint8_t> fullState;
+            int count = 0;
+            for (auto id : m_entityManager->allEntities()) {
+                if (id == m_playerEntity) continue;
+                auto* ep = m_entityManager->getComponent<Position>(id);
+                auto* ec = m_entityManager->getComponent<CombatStats>(id);
+                if (!ep || !ec) continue;
+                int eid = static_cast<int>(id) + 1000; // offset to avoid collision with player 0
+                float x = ep->worldPos.x, y = ep->worldPos.y;
+                int hp = ec->hp, maxHp = ec->maxHp;
+                uint8_t alive = ec->alive ? 1 : 0;
+                uint8_t team = static_cast<uint8_t>(ec->team);
+                fullState.insert(fullState.end(), (uint8_t*)&eid, (uint8_t*)&eid + 4);
+                fullState.insert(fullState.end(), (uint8_t*)&x, (uint8_t*)&x + 4);
+                fullState.insert(fullState.end(), (uint8_t*)&y, (uint8_t*)&y + 4);
+                fullState.insert(fullState.end(), (uint8_t*)&hp, (uint8_t*)&hp + 4);
+                fullState.insert(fullState.end(), (uint8_t*)&maxHp, (uint8_t*)&maxHp + 4);
+                fullState.push_back(alive);
+                fullState.push_back(team);
+                count++;
+            }
+            if (count > 0)
+                m_network->sendFullSync(fullState);
         }
         m_network->update();
+        m_network->interpolateEntities(dt);
     }
 
     // Starvation damages combat HP
@@ -695,7 +721,7 @@ void App::render() {
     SDL_SetRenderDrawColor(m_renderer, 10, 10, 15, 255);
     SDL_RenderClear(m_renderer);
     m_renderSystem->render(*m_entityManager, *m_worldState, *m_navigationSystem,
-                            m_combat->events(), m_network->remotePlayers());
+                            m_combat->events(), m_network->remoteEntities());
     m_combat->clearEvents();
     m_uiManager->render(*m_worldState, *this);
     SDL_RenderPresent(m_renderer);

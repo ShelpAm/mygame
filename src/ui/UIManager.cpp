@@ -63,6 +63,7 @@ UIManager::UIManager(SDL_Window* window, SDL_Renderer* renderer)
 
     ImGui_ImplSDL3_Init(window);
     ImGui_ImplSDLRenderer3_Init(renderer);
+    SDL_StartTextInput(window);
 }
 
 UIManager::~UIManager() {
@@ -330,7 +331,7 @@ void UIManager::renderMultiplayerMenu(const App& app) {
         } else {
             ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "Connected!");
         }
-        ImGui::Text("Players: %zu", net->remotePlayers().size() + 1);
+        ImGui::Text("Players: %zu", net->remoteEntities().size() + 1);
         if (ImGui::Button("Disconnect")) {
             net->disconnect();
         }

@@ -11,7 +11,7 @@ class WorldState;
 class NavigationSystem;
 
 struct CombatEvent;
-struct RemotePlayer;
+struct RemoteEntity;
 
 class RenderSystem {
 public:
@@ -20,7 +20,7 @@ public:
     void render(EntityManager& entities, const WorldState& worldState,
                 const NavigationSystem& nav,
                 const std::vector<CombatEvent>& combatEvents,
-                const std::vector<RemotePlayer>& remotePlayers);
+                const std::vector<RemoteEntity>& remotePlayers);
 
 private:
     SDL_Renderer* m_renderer;
