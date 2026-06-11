@@ -35,7 +35,6 @@ set(SOURCES
     src/save/save-manager.cpp
     src/systems/combat-system.cpp
     src/systems/quest-manager.cpp
-    src/net/network-manager.cpp
     src/net/server.cpp
     src/net/client.cpp
     src/net/local-transport.cpp
@@ -142,6 +141,7 @@ set(TEST_SOURCES
     tests/test_factions.cpp
     tests/test_survival.cpp
     tests/test_combat.cpp
+    tests/test_network.cpp
     src/core/input-manager.cpp
     src/core/game-clock.cpp
     src/entities/entity-manager.cpp
@@ -158,6 +158,8 @@ set(TEST_SOURCES
     src/survival/condition-tracker.cpp
     src/save/save-manager.cpp
     src/systems/combat-system.cpp
+    src/net/local-transport.cpp
+    src/net/network-transport.cpp
 )
 
 add_executable(TheSunsetStraits_tests ${TEST_SOURCES})
@@ -166,6 +168,7 @@ target_link_libraries(TheSunsetStraits_tests PRIVATE
     SDL3::SDL3
     Boost::unit_test_framework
     Boost::json
+    spdlog::spdlog
 )
 
 # Register with CTest

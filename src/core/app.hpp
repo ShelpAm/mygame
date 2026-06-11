@@ -5,9 +5,6 @@
 #include "core/input-manager.hpp"
 #include "core/locale-manager.hpp"
 #include "dialogue/dialogue-engine.hpp"
-#include "dialogue/relationship-table.hpp"
-#include "dialogue/topic-registry.hpp"
-#include "entities/entity-manager.hpp"
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "net/client.hpp"
@@ -30,7 +27,6 @@ class RenderSystem;
 class UIManager;
 class EventSimulator;
 class RumorPropagator;
-class NetworkManager;
 struct CombatStats;
 
 enum class SessionMode { local, host, client };
@@ -43,22 +39,6 @@ class App {
     void run();
     void shutdown();
 
-    SDL_Window *window()
-    {
-        return window_;
-    }
-    SDL_Renderer *renderer()
-    {
-        return renderer_;
-    }
-    InputManager &input()
-    {
-        return input_;
-    }
-    LocaleManager &locale()
-    {
-        return locale_;
-    }
     LocaleManager const &locale() const
     {
         return locale_;
@@ -68,7 +48,6 @@ class App {
         return survival_;
     }
     CombatStats const *player_combat_stats() const;
-    bool is_player_dead() const;
     bool show_load_menu() const
     {
         return show_load_menu_;
@@ -101,14 +80,6 @@ class App {
     {
         return client_;
     }
-    NetworkManager &network()
-    {
-        return *network_;
-    }
-    NetworkManager const &network() const
-    {
-        return *network_;
-    }
     QuestManager &quests_mut()
     {
         return quests_;
@@ -132,8 +103,8 @@ class App {
     }
 
     void start_local_session();
-    void start_host_session(int port);
-    void start_client_session(std::string const &ip, int port);
+    awaitable<void> start_host_session(int port);
+    awaitable<void> start_client_session(std::string const &ip, int port);
     void stop_session();
 
     void set_ui_language(int lang_index);
@@ -166,14 +137,11 @@ class App {
     // Plain members
     InputManager input_;
     GameClock game_clock_;
-    EntityManager entity_manager_;
     CameraSystem camera_system_{window_width, window_height};
     NavigationSystem navigation_system_;
     WorldState world_state_;
     KnowledgeGraph knowledge_;
     DialogueEngine dialogue_engine_;
-    TopicRegistry topic_registry_;
-    RelationshipTable relationships_;
     LocaleManager locale_;
     ConditionTracker survival_;
     FactionNetwork factions_;
@@ -189,7 +157,6 @@ class App {
     std::unique_ptr<EventSimulator> events_;
     std::unique_ptr<RumorPropagator> rumors_;
     std::unique_ptr<GameMode> game_mode_;
-    std::unique_ptr<NetworkManager> network_;
 
     SessionMode session_mode_ = SessionMode::local;
 
@@ -199,7 +166,7 @@ class App {
     bool running_ = false;
     int next_save_slot_ = 1;
 
-    static constexpr int window_width = 1280;
-    static constexpr int window_height = 720;
+    static constexpr int window_width = 960;
+    static constexpr int window_height = 540;
     static constexpr char const *window_title = "The Sunset Straits";
 };

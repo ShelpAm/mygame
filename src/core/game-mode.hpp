@@ -2,29 +2,28 @@
 
 #include "core/game-types.hpp"
 #include "core/math.hpp"
+#include "dialogue/relationship-table.hpp"
+#include "dialogue/topic-registry.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/entity-manager.hpp"
+#include "save/save-manager.hpp"
 #include <memory>
 #include <string>
 #include <vector>
 class KnowledgeGraph;
 class DialogueEngine;
-class TopicRegistry;
-class RelationshipTable;
 class FactionNetwork;
 class EventSimulator;
 class RumorPropagator;
 class CombatSystem;
 class QuestManager;
 class WorldState;
-class LocaleManager;
 struct NPCState;
 
 class GameMode {
   public:
     GameMode();
     void init_world(WorldState &ws, KnowledgeGraph &kg, DialogueEngine &de,
-                    TopicRegistry &tr, RelationshipTable &rt,
                     FactionNetwork &fn, EventSimulator &es, RumorPropagator &rp,
                     CombatSystem &cs, QuestManager &qm);
 
@@ -40,6 +39,9 @@ class GameMode {
     void handle_interaction(EntityId player);
     void do_dialogue_action(std::string const &action);
     void end_dialogue();
+
+    EntityId load_world(SaveManager::SaveData const &data);
+    std::vector<SaveManager::NPCData> collect_npc_save_data();
 
     DialogueState &dialogue()
     {
@@ -70,11 +72,11 @@ class GameMode {
     EntityManager em_;
     std::vector<EntityId> npc_entities_;
     std::unique_ptr<DialogueState> dialogue_ = std::make_unique<DialogueState>();
+    TopicRegistry topic_registry_;
+    RelationshipTable relationships_;
 
     KnowledgeGraph *kg_ = nullptr;
     DialogueEngine *de_ = nullptr;
-    TopicRegistry *tr_ = nullptr;
-    RelationshipTable *rt_ = nullptr;
     CombatSystem *cs_ = nullptr;
     QuestManager *qm_ = nullptr;
     WorldState *ws_ = nullptr;

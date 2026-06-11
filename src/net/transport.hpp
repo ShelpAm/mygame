@@ -46,7 +46,7 @@ class ITransport {
 
     // Drain the inbound queue, invoking the callback for each message.
     // Called once per frame from the game loop.
-    virtual void do_receive() = 0;
+    virtual void consume() = 0;
 
     // Whether the transport is still connected to its peer.
     virtual bool is_connected() const = 0;

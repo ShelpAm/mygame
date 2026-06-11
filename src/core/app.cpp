@@ -3,19 +3,17 @@
 #include "core/game-mode.hpp"
 #include "core/resource-manager.hpp"
 #include "dialogue/dialogue-engine.hpp"
-#include "dialogue/relationship-table.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/position.hpp"
 #include "factions/event-simulator.hpp"
 #include "knowledge/rumor-propagator.hpp"
-#include "net/network-manager.hpp"
+#include "net/network-transport.hpp"
 #include "save/save-manager.hpp"
 #include "systems/render-system.hpp"
 #include "ui/ui-manager.hpp"
 #include <boost/asio.hpp>
 #include <fstream>
 #include <imgui.h>
-#include <print>
 #include <spdlog/spdlog.h>
 
 App::App() = default;
@@ -47,7 +45,6 @@ void App::init()
     // Ensure fresh state (no-op, keeps pattern)
     navigation_system_ = NavigationSystem{};
     ui_manager_ = std::make_unique<UIManager>(window_, renderer_);
-    network_ = std::make_unique<NetworkManager>();
 
     locale_.discover_languages("assets/locale");
     locale_.set_language(0);
@@ -65,8 +62,7 @@ void App::init()
 
     game_mode_ = std::make_unique<GameMode>();
     game_mode_->init_world(world_state_, knowledge_, dialogue_engine_,
-                           topic_registry_, relationships_, factions_, *events_,
-                           *rumors_, combat_, quests_);
+                           factions_, *events_, *rumors_, combat_, quests_);
 
     server_->set_game_mode(game_mode_.get());
 
@@ -89,20 +85,20 @@ void App::start_local_session()
     session_mode_ = SessionMode::local;
 }
 
-void App::start_host_session(int port)
+awaitable<void> App::start_host_session(int port)
 {
     start_local_session();
 
-    network_->host(port);
-    server_->attach_network(*network_);
-
     session_mode_ = SessionMode::host;
+    server_->listen(port);
+    co_return;
 }
 
-void App::start_client_session(std::string const &host, int port)
+awaitable<void> App::start_client_session(std::string const &host, int port)
 {
     server_.reset();
 
+    // Resolve domain name if needed.
     std::string resolved_ip = host;
     try {
         boost::asio::ip::make_address(host);
@@ -121,17 +117,19 @@ void App::start_client_session(std::string const &host, int port)
         }
     }
 
-    network_->connect(resolved_ip, port);
-    client_.attach_network(*network_);
+    try {
+        auto peer = co_await NetworkTransport::connect(resolved_ip, port);
+        client_.attach_transport(std::move(peer));
 
-    client_.send_join_request();
-    session_mode_ = SessionMode::client;
+        client_.send_join_request();
+        session_mode_ = SessionMode::client;
+    }
+    catch (std::exception &e) {
+    }
 }
 
 void App::stop_session()
 {
-    if (network_)
-        network_->disconnect();
     server_.reset();
     client_.detach_transport();
 }
@@ -150,9 +148,7 @@ void App::run()
 
 void App::shutdown()
 {
-    running_ = false;
     stop_session();
-    network_.reset();
     server_.reset();
     game_mode_.reset();
     events_.reset();
@@ -269,11 +265,6 @@ void App::set_ui_language(int lang_index)
     dialogue_engine_.set_language(lang_index);
 }
 
-bool App::is_player_dead() const
-{
-    return const_cast<Client &>(client_).is_player_dead();
-}
-
 CombatStats const *App::player_combat_stats() const
 {
     return const_cast<Client &>(client_).player_stats();
@@ -281,7 +272,7 @@ CombatStats const *App::player_combat_stats() const
 
 void App::quick_save()
 {
-    std::println("Unimplemented: quick save");
+    spdlog::warn("Unimplemented: quick save");
     return;
     save_to_slot(next_save_slot_++);
 }
@@ -297,25 +288,7 @@ void App::save_to_slot(int slot)
     //     server_.entities().get_component<CombatStats>(server_.host_player_id());
     // Vec2f pp = pos ? pos->world_pos : Vec2f{};
     //
-    // std::vector<SaveManager::NPCData> npcData;
-    // for (auto eid : game_mode_->npc_entities()) {
-    //     auto *np = server_.entities().get_component<Position>(eid);
-    //     auto *ns = server_.entities().get_component<NPCState>(eid);
-    //     auto *ncs = server_.entities().get_component<CombatStats>(eid);
-    //     if (!np || !ns)
-    //         continue;
-    //     SaveManager::NPCData nd;
-    //     nd.id = ns->npc_id;
-    //     nd.name = ns->display_name;
-    //     nd.personality = ns->personality;
-    //     nd.position = np->world_pos;
-    //     nd.hp = ncs ? ncs->hp : 10;
-    //     nd.max_hp = ncs ? ncs->max_hp : 10;
-    //     nd.alive = ncs ? ncs->alive : true;
-    //     for (auto const &[fid, kf] : ns->knowledge)
-    //         nd.knowledge[fid] = kf.npc_version;
-    //     npcData.push_back(std::move(nd));
-    // }
+    // auto npcData = game_mode_->collect_npc_save_data();
     // SaveManager::save("saves/save_" + std::to_string(slot) + ".json",
     //                   world_state_, knowledge_, relationships_, pp,
     //                   cs ? cs->hp : 20, cs ? cs->max_hp : 20, npcData);
@@ -339,47 +312,7 @@ void App::load_from_slot(int slot)
     if (!SaveManager::load(path, data))
         return;
 
-    while (!game_mode_->entities().all_entities().empty())
-        game_mode_->entities().destroy_entity(
-            game_mode_->entities().all_entities().back());
-    game_mode_->clear_npc_list();
-
-    auto pid = game_mode_->spawn_player(data.player_pos.x, data.player_pos.y);
-    auto *cs = game_mode_->entities().get_component<CombatStats>(pid);
-    if (cs) {
-        cs->hp = data.player_hp;
-        cs->max_hp = data.player_max_hp;
-    }
-
-    world_state_.set_day(data.day);
-    world_state_.set_season(data.season);
-    for (auto const &t : data.seen_tiles)
-        world_state_.reveal_tile(t);
-    knowledge_.mark_topic_known("ugarit_sack");
-    knowledge_.mark_topic_known("sea_peoples");
-    knowledge_.mark_topic_known("byblos_king");
-    for (auto const &t : data.known_topics)
-        knowledge_.mark_topic_known(t);
-    relationships_ = {};
-    for (auto const &[nid, rel] : data.relations)
-        relationships_.set_relation(nid, {rel[0], rel[1], rel[2]});
-
-    for (auto const &nd : data.npcs) {
-        std::vector<NPCKnowledgeEntry> facts;
-        for (auto const &[fid, ver] : nd.knowledge)
-            facts.push_back({fid, ver, 70, false, ""});
-        game_mode_->spawn_npc(nd.id, nd.name, nd.position.x, nd.position.y,
-                              nd.personality, facts);
-        auto &eid = game_mode_->npc_entities().back();
-        auto *ncs = game_mode_->entities().get_component<CombatStats>(eid);
-        if (ncs) {
-            ncs->hp = nd.hp;
-            ncs->max_hp = nd.max_hp;
-            ncs->alive = nd.alive;
-        }
-    }
-
-    server_->set_game_mode(game_mode_.get());
+    auto pid = game_mode_->load_world(data);
 
     stop_session();
     client_.reset();

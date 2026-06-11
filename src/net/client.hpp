@@ -29,9 +29,6 @@ class Client {
     void update(float dt);
     void handle_combat_event(int attacker_id, int defender_id, int damage,
                              bool killed);
-    void attach_local(ITransport *t);
-    void attach_network(NetworkManager &net);
-    void detach_transport();
     void reset();
 
     void set_player_id(EntityId id)
@@ -62,6 +59,9 @@ class Client {
     Vec2f player_position();
     bool is_player_dead();
     CombatStats const *player_stats();
+
+    void attach_transport(std::unique_ptr<ITransport> t);
+    void detach_transport();
 
     void interpolate_entities(float dt);
     std::vector<RemoteEntity> const &remote_entities() const

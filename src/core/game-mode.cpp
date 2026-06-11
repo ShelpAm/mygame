@@ -31,24 +31,21 @@ static std::string readFile(std::string const &path)
 GameMode::GameMode() = default;
 
 void GameMode::init_world(WorldState &ws, KnowledgeGraph &kg,
-                          DialogueEngine &de, TopicRegistry &tr,
-                          RelationshipTable &rt, FactionNetwork &fn,
+                          DialogueEngine &de, FactionNetwork &fn,
                           EventSimulator &es, RumorPropagator &rp,
                           CombatSystem &cs, QuestManager &qm)
 {
     ws_ = &ws;
     kg_ = &kg;
     de_ = &de;
-    tr_ = &tr;
-    rt_ = &rt;
     cs_ = &cs;
     qm_ = &qm;
 
     // Topics
-    tr.register_topic("ugarit_sack", "the Sack of Ugarit", "events");
-    tr.register_topic("sea_peoples", "the Sea Peoples", "factions");
-    tr.register_topic("byblos_king", "the King of Byblos", "people");
-    tr.register_topic("copper_trade", "the Copper Trade", "resources");
+    topic_registry_.register_topic("ugarit_sack", "the Sack of Ugarit", "events");
+    topic_registry_.register_topic("sea_peoples", "the Sea Peoples", "factions");
+    topic_registry_.register_topic("byblos_king", "the King of Byblos", "people");
+    topic_registry_.register_topic("copper_trade", "the Copper Trade", "resources");
     kg.mark_topic_known("ugarit_sack");
     kg.mark_topic_known("sea_peoples");
     kg.mark_topic_known("byblos_king");
@@ -207,7 +204,7 @@ void GameMode::spawn_npc(std::string const &id, std::string const &name,
     em_.add_component<NPCState>(eid, npc);
     em_.add_component<CombatStats>(
         eid, CombatStats{Team::neutral, 15, 15, 2, 1, 60.f});
-    rt_->set_relation(id, {});
+    relationships_.set_relation(id, {});
     npc_entities_.push_back(eid);
 }
 
@@ -281,7 +278,7 @@ void GameMode::handle_interaction(EntityId player)
     auto *npc = em_.get_component<NPCState>(eid);
     if (!npc)
         return;
-    auto *rel = rt_->get_relation(npc->npc_id);
+    auto *rel = relationships_.get_relation(npc->npc_id);
     int trust = rel ? rel->trust : 0;
     auto resp = de_->generate_greeting(*npc, trust);
     dialogue_->active = true;
@@ -372,7 +369,7 @@ void GameMode::do_dialogue_action(std::string const &action)
         return;
     }
     if (action == "__gift__") {
-        rt_->modify_trust(npc->npc_id, 8);
+        relationships_.modify_trust(npc->npc_id, 8);
         dialogue_->npc_trust += 8;
         addHistory(DialogueLine::player, "resp.gift_you");
         addHistory(DialogueLine::npc, npc->personality == "friendly"
@@ -381,7 +378,7 @@ void GameMode::do_dialogue_action(std::string const &action)
         return;
     }
     if (action == "__threaten__") {
-        rt_->modify_fear(npc->npc_id, 15);
+        relationships_.modify_fear(npc->npc_id, 15);
         dialogue_->npc_fear += 15;
         addHistory(DialogueLine::player, "resp.threaten_you");
         addHistory(DialogueLine::npc, npc->personality == "hostile"
@@ -415,7 +412,7 @@ void GameMode::do_dialogue_action(std::string const &action)
             addHistory(DialogueLine::player, "quest.turnin");
             if (done) {
                 qm_->complete_quest(q->id);
-                rt_->modify_trust(npc->npc_id, q->reward_trust);
+                relationships_.modify_trust(npc->npc_id, q->reward_trust);
                 dialogue_->npc_trust += q->reward_trust;
                 addHistory(DialogueLine::npc, "quest.reward");
             }
@@ -428,29 +425,29 @@ void GameMode::do_dialogue_action(std::string const &action)
     }
     if (action.starts_with("tell:")) {
         std::string tid = action.substr(5);
-        auto &dn = tr_->display_name(tid);
+        auto &dn = topic_registry_.display_name(tid);
         addHistory(DialogueLine::player, "dialogue.tell_prefix");
         bool known = npc->knowledge.contains(tid);
         addHistory(DialogueLine::npc,
                    known ? "resp.already_known" : "resp.learned");
         if (!known) {
-            rt_->modify_trust(npc->npc_id, 5);
+            relationships_.modify_trust(npc->npc_id, 5);
             dialogue_->npc_trust += 5;
         }
         return;
     }
 
     // Ask about topic
-    auto *rel = rt_->get_relation(npc->npc_id);
+    auto *rel = relationships_.get_relation(npc->npc_id);
     int trust = rel ? rel->trust : 0;
-    auto &dn = tr_->display_name(action);
+    auto &dn = topic_registry_.display_name(action);
     auto resp = de_->generate_ask_response(*npc, action,
                                            dn.empty() ? action : dn, trust);
     addHistory(DialogueLine::player, "dialogue.ask_prefix");
     addHistory(DialogueLine::npc, "", resp.text, true);
     qm_->report_talk(npc->npc_id);
     if (resp.trust_delta != 0) {
-        rt_->modify_trust(npc->npc_id, resp.trust_delta);
+        relationships_.modify_trust(npc->npc_id, resp.trust_delta);
         dialogue_->npc_trust += resp.trust_delta;
     }
     if (resp.is_truthful && !resp.fact_id.empty() &&
@@ -468,6 +465,76 @@ void GameMode::do_dialogue_action(std::string const &action)
 void GameMode::end_dialogue()
 {
     *dialogue_ = {};
+}
+
+EntityId GameMode::load_world(SaveManager::SaveData const &data)
+{
+    while (!em_.all_entities().empty())
+        em_.destroy_entity(em_.all_entities().back());
+    npc_entities_.clear();
+
+    auto pid = spawn_player(data.player_pos.x, data.player_pos.y);
+    auto *pcs = em_.get_component<CombatStats>(pid);
+    if (pcs) {
+        pcs->hp = data.player_hp;
+        pcs->max_hp = data.player_max_hp;
+    }
+
+    ws_->set_day(data.day);
+    ws_->set_season(data.season);
+    for (auto const &t : data.seen_tiles)
+        ws_->reveal_tile(t);
+
+    kg_->mark_topic_known("ugarit_sack");
+    kg_->mark_topic_known("sea_peoples");
+    kg_->mark_topic_known("byblos_king");
+    for (auto const &t : data.known_topics)
+        kg_->mark_topic_known(t);
+
+    relationships_ = {};
+    for (auto const &[nid, rel] : data.relations)
+        relationships_.set_relation(nid, {rel[0], rel[1], rel[2]});
+
+    for (auto const &nd : data.npcs) {
+        std::vector<NPCKnowledgeEntry> facts;
+        for (auto const &[fid, ver] : nd.knowledge)
+            facts.push_back({fid, ver, 70, false, ""});
+        spawn_npc(nd.id, nd.name, nd.position.x, nd.position.y,
+                  nd.personality, facts);
+        EntityId eid = npc_entities_.back();
+        auto *ncs = em_.get_component<CombatStats>(eid);
+        if (ncs) {
+            ncs->hp = nd.hp;
+            ncs->max_hp = nd.max_hp;
+            ncs->alive = nd.alive;
+        }
+    }
+
+    return pid;
+}
+
+std::vector<SaveManager::NPCData> GameMode::collect_npc_save_data()
+{
+    std::vector<SaveManager::NPCData> npcData;
+    for (auto eid : npc_entities_) {
+        auto *np = em_.get_component<Position>(eid);
+        auto *ns = em_.get_component<NPCState>(eid);
+        auto *ncs = em_.get_component<CombatStats>(eid);
+        if (!np || !ns)
+            continue;
+        SaveManager::NPCData nd;
+        nd.id = ns->npc_id;
+        nd.name = ns->display_name;
+        nd.personality = ns->personality;
+        nd.position = np->world_pos;
+        nd.hp = ncs ? ncs->hp : 10;
+        nd.max_hp = ncs ? ncs->max_hp : 10;
+        nd.alive = ncs ? ncs->alive : true;
+        for (auto const &[fid, kf] : ns->knowledge)
+            nd.knowledge[fid] = kf.npc_version;
+        npcData.push_back(std::move(nd));
+    }
+    return npcData;
 }
 
 void GameMode::update(EntityId player, float dt)

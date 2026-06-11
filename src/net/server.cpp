@@ -4,12 +4,11 @@
 #include "factions/event-simulator.hpp"
 #include "net/client.hpp"
 #include "net/local-transport.hpp"
-#include "net/network-manager.hpp"
-#include "net/network-transport.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/quest-manager.hpp"
 #include "world/world-state.hpp"
+#include <cassert>
 #include <cstring>
 #include <print>
 
@@ -33,19 +32,27 @@ void Server::set_game_mode(GameMode *gm)
     game_mode_ = gm;
 }
 
+awaitable<void> Server::listen(std::uint16_t port)
+{
+    acceptor_ = std::make_unique<NetworkTransport::Acceptor>(port);
+    while (true) {
+        // TODO: Only accept once, but we should constantly call this.
+        auto t = co_await acceptor_->accept();
+        attach_transport(std::move(t));
+    }
+}
 
 void Server::attach_local_pair(Client &client)
 {
     auto [srv, cli] = create_transport_pair();
     srv->set_callback(
         [this](TransportExMessage const &msg) { on_message(msg); });
-    client.attach_local(cli.release());
+    client.attach_transport(std::move(cli));
     transports_.push_back(std::move(srv));
 }
 
-void Server::attach_network(NetworkManager &net)
+void Server::attach_transport(std::unique_ptr<ITransport> t)
 {
-    auto t = std::make_unique<NetworkTransport>(net);
     t->set_callback([this](TransportExMessage const &msg) { on_message(msg); });
     transports_.push_back(std::move(t));
 }
@@ -85,8 +92,8 @@ void Server::on_message(TransportExMessage const &msg)
     else if (msg.type == NetPacket::spawn_enemy_wave) {
         auto w = parse_enemy_wave(msg.payload);
         assert(cs_);
-        cs_->spawn_enemy_wave(game_mode_->entities(), w.count, {w.cx, w.cy}, 400.f,
-                              static_cast<Team>(w.team));
+        cs_->spawn_enemy_wave(game_mode_->entities(), w.count, {w.cx, w.cy},
+                              400.f, static_cast<Team>(w.team));
     }
     else if (msg.type == NetPacket::player_input) {
         auto in = parse_player_input(msg.payload);
@@ -124,7 +131,7 @@ void Server::update(float dt)
         return;
 
     for (auto &t : transports_)
-        t->do_receive();
+        t->consume();
 
     // Processes user input
     while (!pending_inputs_.empty()) {
@@ -179,8 +186,8 @@ void Server::check_event_spawns()
             auto &latest = events_->triggered_events().back();
             if (latest.type == GameEvent::Type::battle ||
                 latest.type == GameEvent::Type::refugee_wave)
-                cs_->spawn_enemy_wave(game_mode_->entities(), 2 + rand() % 4, center, 400.f,
-                                      Team::enemy);
+                cs_->spawn_enemy_wave(game_mode_->entities(), 2 + rand() % 4,
+                                      center, 400.f, Team::enemy);
         }
     }
 }
@@ -210,7 +217,8 @@ EntityId Server::add_player(Vec2f pos)
 {
     auto eid = game_mode_->entities().create_entity();
     std::println("Adding player {} at position ({}, {})", eid, pos.x, pos.y);
-    game_mode_->entities().add_component<Position>(eid, Position{pos, {0, 0}, 1.f});
+    game_mode_->entities().add_component<Position>(eid,
+                                                   Position{pos, {0, 0}, 1.f});
     game_mode_->entities().add_component<CombatStats>(
         eid, CombatStats{Team::player, 20, 20, 4, 3, 80.f});
     mark_needs_full_sync();

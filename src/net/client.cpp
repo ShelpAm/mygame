@@ -3,23 +3,17 @@
 #include "entities/components/position.hpp"
 #include "entities/components/sprite.hpp"
 #include "net/net-packet.hpp"
-#include "net/network-manager.hpp"
-#include "net/network-transport.hpp"
+#include <cassert>
 #include <cstring>
 #include <print>
 
 Client::Client() = default;
 
-void Client::attach_local(ITransport *t)
+void Client::attach_transport(std::unique_ptr<ITransport> t)
 {
-    transport_.reset(t);
-    transport_->set_callback(std::bind_front(&Client::on_message, this));
-}
-
-void Client::attach_network(NetworkManager &net)
-{
-    transport_ = std::make_unique<NetworkTransport>(net);
-    transport_->set_callback(std::bind_front(&Client::on_message, this));
+    transport_ = std::move(t);
+    transport_->set_callback(
+        [this](TransportExMessage const &msg) { on_message(msg); });
 }
 
 void Client::detach_transport()
@@ -142,7 +136,7 @@ void Client::handle_entity_update(NetPacket const &pkt)
 void Client::update(float dt)
 {
     if (transport_)
-        transport_->do_receive();
+        transport_->consume();
 }
 
 EntityId Client::local_player() const
@@ -181,8 +175,8 @@ void Client::apply_sync(std::vector<uint8_t> const &data)
         if (se.id == 0) {
             if (player_id_ == invalid_entity) {
                 player_id_ = em_.create_entity();
-                em_.add_component<Position>(player_id_,
-                                            Position{{se.x, se.y}, {0, 0}, 1.f});
+                em_.add_component<Position>(
+                    player_id_, Position{{se.x, se.y}, {0, 0}, 1.f});
                 em_.add_component<Sprite>(player_id_,
                                           Sprite{"player",
                                                  {},
@@ -212,7 +206,8 @@ void Client::apply_sync(std::vector<uint8_t> const &data)
         if (it == id_map_.end()) {
             auto eid = em_.create_entity();
             id_map_[se.id] = eid;
-            em_.add_component<Position>(eid, Position{{se.x, se.y}, {0, 0}, 0.5f});
+            em_.add_component<Position>(eid,
+                                        Position{{se.x, se.y}, {0, 0}, 0.5f});
             SDL_FColor color;
             if (se.team == 1)
                 color = {0.8f, 0.2f, 0.2f, 1.f};
@@ -223,11 +218,10 @@ void Client::apply_sync(std::vector<uint8_t> const &data)
             em_.add_component<Sprite>(
                 eid, Sprite{"", {}, {12, 12}, color, 0.8f, true});
             em_.add_component<CombatStats>(
-                eid, CombatStats{
-                         se.team == 1 ? Team::enemy
-                                      : (se.team == 2 ? Team::neutral
-                                                       : Team::player),
-                         se.max_hp, se.hp, 3, 2, 80.f});
+                eid, CombatStats{se.team == 1 ? Team::enemy
+                                              : (se.team == 2 ? Team::neutral
+                                                              : Team::player),
+                                 se.max_hp, se.hp, 3, 2, 80.f});
         }
         else {
             auto eid = it->second;
@@ -264,9 +258,13 @@ void Client::apply_sync(std::vector<uint8_t> const &data)
             }
         }
         if (!found)
-            remote_entities_.push_back(
-                {se.id, {se.x, se.y}, {se.x, se.y}, se.hp, se.max_hp, se.alive,
-                 se.team});
+            remote_entities_.push_back({se.id,
+                                        {se.x, se.y},
+                                        {se.x, se.y},
+                                        se.hp,
+                                        se.max_hp,
+                                        se.alive,
+                                        se.team});
     }
 }
 

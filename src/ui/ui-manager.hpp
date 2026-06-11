@@ -33,6 +33,12 @@ class UIManager {
     void render_help_panel(App const &app);
     void render_load_menu(App const &app);
     void render_multiplayer_menu(App const &app);
+
+    void render_hosting(App &app);
+    void render_local(App &app);
+    void render_client(App &app);
+    void render_chat(App &app);
+
     std::string host_ip_ = "127.0.0.1";
     int host_port_ = 27015;
     char chat_buf_[256] = {};

@@ -15,7 +15,7 @@ class LocalTransportEndpoint : public ITransport {
 
     void send(TransportMessage msg) override;
     void set_callback(Callback cb) override;
-    void do_receive() override;
+    void consume() override;
     bool is_connected() const override;
 
   private:

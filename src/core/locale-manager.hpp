@@ -1,8 +1,17 @@
 #pragma once
 
+#include <locale>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+class NeoLocale {
+  public:
+    NeoLocale() {}
+
+  private:
+    std::locale locale_;
+};
 
 class LocaleManager {
   public:

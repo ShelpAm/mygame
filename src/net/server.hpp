@@ -1,6 +1,7 @@
 #pragma once
 
 #include "entities/entity-manager.hpp"
+#include "net/network-transport.hpp"
 #include "net/transport.hpp"
 #include <memory>
 #include <queue>
@@ -16,7 +17,6 @@ class GameMode;
 class LocaleManager;
 class ConditionTracker;
 class Client;
-class NetworkManager;
 
 class Server {
   public:
@@ -31,12 +31,13 @@ class Server {
         survival_ = s;
     }
 
+    awaitable<void> listen(std::uint16_t port);
+
     void update(float dt);
     void handle_combat_event(int attacker_id, int defender_id, int damage,
                              bool killed);
 
     void attach_local_pair(Client &client);
-    void attach_network(NetworkManager &net);
     void clear_transports();
 
     EntityId add_player(Vec2f pos);
@@ -54,6 +55,8 @@ class Server {
     }
 
   private:
+    void attach_transport(std::unique_ptr<ITransport> t);
+
     std::unordered_set<EntityId> player_entities_;
     std::unordered_map<EntityId, bool> sent_initial_sync_;
     bool needs_full_sync_ = false;
@@ -72,6 +75,7 @@ class Server {
     };
     std::queue<DeltaPos> pending_inputs_;
 
+    std::unique_ptr<NetworkTransport::Acceptor> acceptor_;
     std::vector<std::unique_ptr<ITransport>> transports_;
 
     std::vector<uint8_t> build_sync_payload();
