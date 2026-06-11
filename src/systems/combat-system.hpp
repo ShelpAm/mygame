@@ -1,7 +1,7 @@
 #pragma once
 
 #include "entities/components/combat-stats.hpp"
-#include "entities/components/position.hpp"
+#include "entities/entity-manager.hpp"
 #include <string>
 #include <vector>
 

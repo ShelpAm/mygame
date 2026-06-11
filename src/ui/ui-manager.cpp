@@ -370,8 +370,8 @@ void UIManager::render_multiplayer_menu(App const &app)
 
     auto const &loc = app.locale();
     auto &mutApp = const_cast<App &>(app);
-    auto *net = mutApp.network_mut();
-    if (!net->is_connected()) {
+    auto &net = mutApp.network();
+    if (!net.is_connected()) {
         ImGui::Text("%s", loc.get("mp.host").c_str());
         ImGui::SetNextItemWidth(80);
         ImGui::InputInt("Port", &host_port_);
@@ -380,6 +380,7 @@ void UIManager::render_multiplayer_menu(App const &app)
         if (host_port_ > 65535)
             host_port_ = 65535;
         if (ImGui::Button(loc.get("mp.host_btn").c_str())) {
+            mutApp.stop_session();
             mutApp.start_host_session(host_port_);
         }
         ImGui::Separator();
@@ -390,11 +391,9 @@ void UIManager::render_multiplayer_menu(App const &app)
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80);
         ImGui::InputInt("##port", &host_port_);
-        if (host_port_ < 1)
-            host_port_ = 1;
-        if (host_port_ > 65535)
-            host_port_ = 65535;
+        host_port_ = std::clamp(host_port_, 1, 65535);
         if (ImGui::Button(loc.get("mp.connect").c_str())) {
+            mutApp.stop_session();
             mutApp.start_client_session(host_ip_, host_port_);
             auto entry = host_ip_ + ":" + std::to_string(host_port_);
             if (!std::ranges::contains(server_list_, entry)) {
@@ -426,6 +425,7 @@ void UIManager::render_multiplayer_menu(App const &app)
                     }
                     host_ip_ = ip;
                     host_port_ = port;
+                    mutApp.stop_session();
                     mutApp.start_client_session(ip, port);
                 }
                 ImGui::SameLine();
@@ -450,11 +450,11 @@ void UIManager::render_multiplayer_menu(App const &app)
                                loc.get("mp.connected").c_str());
         }
         ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
-                    net->remote_entities().size());
+                    app.client().remote_entities().size());
         ImGui::Separator();
         ImGui::Text("%s", loc.get("mp.chat").c_str());
         ImGui::BeginChild("ChatLog", ImVec2(0, 100), true);
-        for (auto const &msg : net->chat_history())
+        for (auto const &msg : app.client().chat_history())
             ImGui::TextWrapped("%s", msg.c_str());
         if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 5.f)
             ImGui::SetScrollHereY(1.f);
@@ -464,7 +464,7 @@ void UIManager::render_multiplayer_menu(App const &app)
         if (ImGui::IsItemDeactivatedAfterEdit() ||
             ImGui::IsKeyPressed(ImGuiKey_Enter)) {
             if (strlen(chat_buf_) > 0) {
-                net->send_chat(chat_buf_);
+                mutApp.client().send_chat(chat_buf_);
                 chat_buf_[0] = '\0';
                 ImGui::SetKeyboardFocusHere(-1);
             }
@@ -472,7 +472,7 @@ void UIManager::render_multiplayer_menu(App const &app)
         ImGui::SameLine();
         if (ImGui::Button(loc.get("mp.send").c_str())) {
             if (strlen(chat_buf_) > 0) {
-                net->send_chat(chat_buf_);
+                mutApp.client().send_chat(chat_buf_);
                 chat_buf_[0] = '\0';
             }
         }

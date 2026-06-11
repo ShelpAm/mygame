@@ -14,6 +14,7 @@ class TheSunsetStraits(ConanFile):
         self.requires("sdl/3.4.8")
         self.requires("boost/1.90.0")
         self.requires("imgui/1.91.8")
+        self.requires("spdlog/1.17.0")
 
     def configure(self):
         assert self.options is not None
@@ -29,6 +30,8 @@ class TheSunsetStraits(ConanFile):
         self.options["*"].with_x11 = False
         self.options["boost/*"].without_cobalt = True
         self.options["boost/*"].without_stacktrace = True
+        self.options["boost/*"].without_log = True
+        self.options["spdlog/*"].use_std_fmt = True
 
     def layout(self):
         cmake_layout(self)

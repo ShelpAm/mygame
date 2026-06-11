@@ -31,12 +31,6 @@ class Server {
         survival_ = s;
     }
 
-    EntityManager &entities()
-    {
-        return em_;
-    }
-    EntityId spawn_player(int id);
-
     void update(float dt);
     void handle_combat_event(int attacker_id, int defender_id, int damage,
                              bool killed);
@@ -60,7 +54,6 @@ class Server {
     }
 
   private:
-    EntityManager em_;
     std::unordered_set<EntityId> player_entities_;
     std::unordered_map<EntityId, bool> sent_initial_sync_;
     bool needs_full_sync_ = false;

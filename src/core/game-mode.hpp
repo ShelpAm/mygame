@@ -1,13 +1,12 @@
 #pragma once
 
 #include "core/game-types.hpp"
+#include "core/math.hpp"
 #include "entities/components/combat-stats.hpp"
-#include "entities/components/position.hpp"
+#include "entities/entity-manager.hpp"
 #include <memory>
 #include <string>
 #include <vector>
-
-class EntityManager;
 class KnowledgeGraph;
 class DialogueEngine;
 class TopicRegistry;
@@ -17,18 +16,17 @@ class EventSimulator;
 class RumorPropagator;
 class CombatSystem;
 class QuestManager;
-class NetworkManager;
 class WorldState;
 class LocaleManager;
 struct NPCState;
 
 class GameMode {
   public:
-    explicit GameMode(EntityManager &em);
+    GameMode();
     void init_world(WorldState &ws, KnowledgeGraph &kg, DialogueEngine &de,
                     TopicRegistry &tr, RelationshipTable &rt,
                     FactionNetwork &fn, EventSimulator &es, RumorPropagator &rp,
-                    CombatSystem &cs, QuestManager &qm, NetworkManager &net);
+                    CombatSystem &cs, QuestManager &qm);
 
     EntityId spawn_player(float x, float y);
     void spawn_npc(std::string const &id, std::string const &name, float x,
@@ -55,11 +53,23 @@ class GameMode {
     {
         return npc_entities_;
     }
+    void clear_npc_list()
+    {
+        npc_entities_.clear();
+    }
+    EntityManager &entities()
+    {
+        return em_;
+    }
+    EntityManager const &entities() const
+    {
+        return em_;
+    }
 
   private:
-    EntityManager &em_;
+    EntityManager em_;
     std::vector<EntityId> npc_entities_;
-    std::unique_ptr<DialogueState> dialogue_;
+    std::unique_ptr<DialogueState> dialogue_ = std::make_unique<DialogueState>();
 
     KnowledgeGraph *kg_ = nullptr;
     DialogueEngine *de_ = nullptr;
@@ -69,5 +79,5 @@ class GameMode {
     QuestManager *qm_ = nullptr;
     WorldState *ws_ = nullptr;
 
-    EntityId find_nearest_interactable(EntityId player, Vec2f player_pos) const;
+    EntityId find_nearest_interactable(EntityId player, Vec2f player_pos);
 };

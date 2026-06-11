@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(SDL3 REQUIRED)
 find_package(Boost REQUIRED)
 find_package(imgui REQUIRED)
+find_package(spdlog REQUIRED)
 
 set(SOURCES
     src/main.cpp
@@ -73,6 +74,11 @@ set(HEADERS
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
+target_compile_options(${PROJECT_NAME} PRIVATE
+    -Wall
+    # -Weverything
+)
+
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -80,6 +86,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Boost::boost
     Boost::json
     imgui::imgui
+    spdlog::spdlog
 )
 
 if(MINGW OR WIN32)
@@ -92,6 +99,22 @@ if(MINGW OR WIN32)
         -static
         -Wl,--allow-multiple-definition
     )
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # Sanitizers
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES
+        "GNU")
+        target_compile_options(TheSunsetStraits PRIVATE
+            # -fsanitize=thread
+            # -fsanitize=address
+            -O1)
+        target_link_options(TheSunsetStraits PRIVATE
+            # -fsanitize=thread
+            # -fsanitize=address
+        )
+        target_link_libraries(TheSunsetStraits PRIVATE pthread)
+    endif()
 endif()
 
 

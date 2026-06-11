@@ -6,6 +6,7 @@
 #include <bit>
 #include <concepts>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -135,4 +136,93 @@ inline std::vector<uint8_t> make_enemy_wave(Vec2f center, int count, Team team)
     write_bytes(p, static_cast<uint8_t>(team));
     p.push_back(0);
     return serialize_packet({NetPacket::spawn_enemy_wave, std::move(p)});
+}
+
+// --- Parse helpers ---
+
+struct EntityUpdateData {
+    int id;
+    float x, y;
+    int hp, max_hp;
+    bool alive;
+};
+
+inline EntityUpdateData parse_entity_update(std::vector<uint8_t> const &d,
+                                            size_t off = 0)
+{
+    EntityUpdateData r;
+    memcpy(&r.id, d.data() + off, 4);
+    memcpy(&r.x, d.data() + off + 4, 4);
+    memcpy(&r.y, d.data() + off + 8, 4);
+    memcpy(&r.hp, d.data() + off + 12, 4);
+    memcpy(&r.max_hp, d.data() + off + 16, 4);
+    r.alive = d[off + 20];
+    return r;
+}
+
+struct SyncEntityData {
+    int id;
+    float x, y;
+    int hp, max_hp;
+    bool alive;
+    int team;
+};
+
+inline SyncEntityData parse_sync_entity(std::vector<uint8_t> const &d,
+                                        size_t off = 0)
+{
+    SyncEntityData r;
+    memcpy(&r.id, d.data() + off, 4);
+    memcpy(&r.x, d.data() + off + 4, 4);
+    memcpy(&r.y, d.data() + off + 8, 4);
+    memcpy(&r.hp, d.data() + off + 12, 4);
+    memcpy(&r.max_hp, d.data() + off + 16, 4);
+    r.alive = d[off + 20];
+    r.team = d[off + 21];
+    return r;
+}
+
+struct CombatEventData {
+    int attacker_id, defender_id, damage;
+    bool killed;
+};
+
+inline CombatEventData parse_combat_event(std::vector<uint8_t> const &d)
+{
+    CombatEventData r;
+    memcpy(&r.attacker_id, d.data(), 4);
+    memcpy(&r.defender_id, d.data() + 4, 4);
+    memcpy(&r.damage, d.data() + 8, 4);
+    r.killed = d[12];
+    return r;
+}
+
+struct PlayerInputData {
+    uint32_t pid;
+    float mx, my;
+};
+
+inline PlayerInputData parse_player_input(std::vector<uint8_t> const &d)
+{
+    PlayerInputData r;
+    memcpy(&r.pid, d.data(), 4);
+    memcpy(&r.mx, d.data() + 4, 4);
+    memcpy(&r.my, d.data() + 8, 4);
+    return r;
+}
+
+struct EnemyWaveData {
+    float cx, cy;
+    int count;
+    uint8_t team;
+};
+
+inline EnemyWaveData parse_enemy_wave(std::vector<uint8_t> const &d)
+{
+    EnemyWaveData r;
+    memcpy(&r.cx, d.data(), 4);
+    memcpy(&r.cy, d.data() + 4, 4);
+    memcpy(&r.count, d.data() + 8, 4);
+    r.team = d[12];
+    return r;
 }

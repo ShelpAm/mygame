@@ -1,5 +1,6 @@
 #include "net/server.hpp"
 #include "core/game-mode.hpp"
+#include "entities/components/position.hpp"
 #include "factions/event-simulator.hpp"
 #include "net/client.hpp"
 #include "net/local-transport.hpp"
@@ -32,11 +33,6 @@ void Server::set_game_mode(GameMode *gm)
     game_mode_ = gm;
 }
 
-EntityId Server::spawn_player(int id)
-{
-    (void)id;
-    return em_.create_entity();
-}
 
 void Server::attach_local_pair(Client &client)
 {
@@ -64,59 +60,37 @@ void Server::on_message(TransportExMessage const &msg)
     if (msg.type == NetPacket::join) {
         assert(msg.payload.empty());
         auto eid = add_player({0, 0});
+        player_entities_.insert(eid);
         std::vector<uint8_t> payload;
         write_bytes(payload, eid); // player_id
         msg.from->send({NetPacket::return_pid, payload});
         std::println("New player joined with ID: {}", eid);
     }
     else if (msg.type == NetPacket::entity_update) {
-        assert(msg.payload.size() >= 21);
-        int id;
-        float x, y;
-        int hp, max_hp;
-        uint8_t alive;
-        memcpy(&id, msg.payload.data(), 4);
-        memcpy(&x, msg.payload.data() + 4, 4);
-        memcpy(&y, msg.payload.data() + 8, 4);
-        memcpy(&hp, msg.payload.data() + 12, 4);
-        memcpy(&max_hp, msg.payload.data() + 16, 4);
-        alive = msg.payload[20];
-
-        assert(player_entities_.contains(id));
-        update_player(id, {x, y}, hp, max_hp, (bool)alive);
+        auto u = parse_entity_update(msg.payload);
+        assert(player_entities_.contains(u.id));
+        update_player(u.id, {u.x, u.y}, u.hp, u.max_hp, u.alive);
     }
     else if (msg.type == NetPacket::recruit_soldier) {
         assert(msg.payload.size() >= 4);
         uint32_t pid;
         memcpy(&pid, msg.payload.data(), 4);
-        assert(leader != invalid_entity);
+        assert(pid != invalid_entity);
         auto eid = game_mode_->spawn_soldier(pid, soldier_idx_++, {0, -1});
-        auto *lp = em_.get_component<Position>(pid);
-        auto *sp = em_.get_component<Position>(eid);
+        auto *lp = game_mode_->entities().get_component<Position>(pid);
+        auto *sp = game_mode_->entities().get_component<Position>(eid);
         assert(lp && sp);
         sp->world_pos = {lp->world_pos.x + 32.f, lp->world_pos.y + 32.f};
     }
     else if (msg.type == NetPacket::spawn_enemy_wave) {
-        assert(msg.payload.size() >= 13);
-        float cx, cy;
-        int cnt;
-        uint8_t tm;
-        memcpy(&cx, msg.payload.data(), 4);
-        memcpy(&cy, msg.payload.data() + 4, 4);
-        memcpy(&cnt, msg.payload.data() + 8, 4);
-        tm = msg.payload[12];
+        auto w = parse_enemy_wave(msg.payload);
         assert(cs_);
-        cs_->spawn_enemy_wave(em_, cnt, {cx, cy}, 400.f, (Team)tm);
+        cs_->spawn_enemy_wave(game_mode_->entities(), w.count, {w.cx, w.cy}, 400.f,
+                              static_cast<Team>(w.team));
     }
     else if (msg.type == NetPacket::player_input) {
-        assert(msg.payload.size() >= 12);
-        EntityId pid;
-        float mx, my;
-        memcpy(&pid, msg.payload.data(), 4);
-        memcpy(&mx, msg.payload.data() + 4, 4);
-        memcpy(&my, msg.payload.data() + 8, 4);
-
-        pending_inputs_.push({pid, mx, my});
+        auto in = parse_player_input(msg.payload);
+        pending_inputs_.push({in.pid, in.mx, in.my});
     }
     else if (msg.type == NetPacket::interact) {
         assert(msg.payload.size() >= 4);
@@ -129,7 +103,7 @@ void Server::on_message(TransportExMessage const &msg)
         assert(msg.payload.size() >= 4);
         uint32_t pid;
         memcpy(&pid, msg.payload.data(), 4);
-        auto *cs = em_.get_component<CombatStats>(pid);
+        auto *cs = game_mode_->entities().get_component<CombatStats>(pid);
         if (cs && cs->alive) {
             cs->hp = std::min(cs->max_hp, cs->hp + 5);
             if (survival_)
@@ -138,14 +112,9 @@ void Server::on_message(TransportExMessage const &msg)
         }
     }
     else if (msg.type == NetPacket::combat_event) {
-        assert(msg.payload.size() >= 13);
-        int att, def, dmg;
-        uint8_t k;
-        memcpy(&att, msg.payload.data(), 4);
-        memcpy(&def, msg.payload.data() + 4, 4);
-        memcpy(&dmg, msg.payload.data() + 8, 4);
-        k = msg.payload[12];
-        handle_combat_event(att, def, dmg, (bool)k);
+        auto ev = parse_combat_event(msg.payload);
+        handle_combat_event(ev.attacker_id, ev.defender_id, ev.damage,
+                            ev.killed);
     }
 }
 
@@ -160,8 +129,9 @@ void Server::update(float dt)
     // Processes user input
     while (!pending_inputs_.empty()) {
         auto const &[pid, mx, my] = pending_inputs_.front();
-        assert(pid != invalid_entity);
-        auto *pp = em_.get_component<Position>(pid);
+        assert(player_entities_.contains(pid));
+        assert(game_mode_->entities().alive(pid));
+        auto *pp = game_mode_->entities().get_component<Position>(pid);
         assert(pp);
         assert(game_mode_);
 
@@ -171,7 +141,7 @@ void Server::update(float dt)
         pending_inputs_.pop();
     }
 
-    cs_->update(em_, dt);
+    cs_->update(game_mode_->entities(), dt);
     for (auto const &ev : cs_->events()) {
         if (ev.killed)
             qm_->report_kill("enemy");
@@ -204,12 +174,12 @@ void Server::check_event_spawns()
     if (cnt > last_event_count_) {
         last_event_count_ = cnt;
         for (auto pid : player_entities_) {
-            auto *pos = em_.get_component<Position>(pid);
+            auto *pos = game_mode_->entities().get_component<Position>(pid);
             Vec2f center = pos ? pos->world_pos : Vec2f{};
             auto &latest = events_->triggered_events().back();
             if (latest.type == GameEvent::Type::battle ||
                 latest.type == GameEvent::Type::refugee_wave)
-                cs_->spawn_enemy_wave(em_, 2 + rand() % 4, center, 400.f,
+                cs_->spawn_enemy_wave(game_mode_->entities(), 2 + rand() % 4, center, 400.f,
                                       Team::enemy);
         }
     }
@@ -228,7 +198,7 @@ void Server::handle_combat_event(int attacker_id, int defender_id, int damage,
                                  bool killed)
 {
     (void)attacker_id;
-    auto *cs = em_.get_component<CombatStats>(defender_id);
+    auto *cs = game_mode_->entities().get_component<CombatStats>(defender_id);
     if (cs) {
         cs->hp -= damage;
         if (killed)
@@ -238,10 +208,10 @@ void Server::handle_combat_event(int attacker_id, int defender_id, int damage,
 
 EntityId Server::add_player(Vec2f pos)
 {
-    auto eid = em_.create_entity();
+    auto eid = game_mode_->entities().create_entity();
     std::println("Adding player {} at position ({}, {})", eid, pos.x, pos.y);
-    em_.add_component<Position>(eid, Position{pos, {0, 0}, 1.f});
-    em_.add_component<CombatStats>(
+    game_mode_->entities().add_component<Position>(eid, Position{pos, {0, 0}, 1.f});
+    game_mode_->entities().add_component<CombatStats>(
         eid, CombatStats{Team::player, 20, 20, 4, 3, 80.f});
     mark_needs_full_sync();
     return eid;
@@ -250,8 +220,8 @@ EntityId Server::add_player(Vec2f pos)
 void Server::update_player(EntityId player_id, Vec2f pos, int hp, int max_hp,
                            bool alive)
 {
-    auto *p = em_.get_component<Position>(player_id);
-    auto *c = em_.get_component<CombatStats>(player_id);
+    auto *p = game_mode_->entities().get_component<Position>(player_id);
+    auto *c = game_mode_->entities().get_component<CombatStats>(player_id);
     if (p)
         p->world_pos = pos;
     if (c) {
@@ -273,9 +243,9 @@ std::vector<uint8_t> Server::build_sync_payload()
         out.insert(out.end(), p, p + sizeof(v));
     };
 
-    for (auto id : em_.all_entities()) {
-        auto *ep = em_.get_component<Position>(id);
-        auto *ec = em_.get_component<CombatStats>(id);
+    for (auto id : game_mode_->entities().all_entities()) {
+        auto *ep = game_mode_->entities().get_component<Position>(id);
+        auto *ec = game_mode_->entities().get_component<CombatStats>(id);
         if (!ep || !ec)
             continue;
         float x = ep->world_pos.x, y = ep->world_pos.y;

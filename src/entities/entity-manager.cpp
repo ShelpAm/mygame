@@ -4,6 +4,11 @@
 EntityId EntityManager::create_entity()
 {
     EntityId id = next_id_++;
+
+    if (id == invalid_entity) {
+        throw std::runtime_error("Entity ID overflow");
+    }
+
     alive_.push_back(id);
     return id;
 }

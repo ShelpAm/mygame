@@ -5,6 +5,7 @@
 #include "dialogue/topic-registry.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/interactable.hpp"
+#include "entities/components/position.hpp"
 #include "entities/components/soldier-ai.hpp"
 #include "entities/components/sprite.hpp"
 #include "entities/entity-manager.hpp"
@@ -12,7 +13,6 @@
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "knowledge/rumor-propagator.hpp"
-#include "net/network-manager.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/quest-manager.hpp"
 #include "world/world-state.hpp"
@@ -28,17 +28,13 @@ static std::string readFile(std::string const &path)
             std::istreambuf_iterator<char>()};
 }
 
-GameMode::GameMode(EntityManager &em) : em_(em)
-{
-    dialogue_ = std::make_unique<DialogueState>();
-}
+GameMode::GameMode() = default;
 
 void GameMode::init_world(WorldState &ws, KnowledgeGraph &kg,
                           DialogueEngine &de, TopicRegistry &tr,
                           RelationshipTable &rt, FactionNetwork &fn,
                           EventSimulator &es, RumorPropagator &rp,
-                          CombatSystem &cs, QuestManager &qm,
-                          NetworkManager &net)
+                          CombatSystem &cs, QuestManager &qm)
 {
     ws_ = &ws;
     kg_ = &kg;
@@ -323,7 +319,7 @@ void GameMode::handle_interaction(EntityId player)
 }
 
 EntityId GameMode::find_nearest_interactable(EntityId player,
-                                             Vec2f player_pos) const
+                                             Vec2f player_pos)
 {
     EntityId nearest = invalid_entity;
     float nearestDist = 80.f;

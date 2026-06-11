@@ -5,6 +5,7 @@
 #include "dialogue/dialogue-engine.hpp"
 #include "dialogue/relationship-table.hpp"
 #include "entities/components/combat-stats.hpp"
+#include "entities/components/position.hpp"
 #include "factions/event-simulator.hpp"
 #include "knowledge/rumor-propagator.hpp"
 #include "net/network-manager.hpp"
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <imgui.h>
 #include <print>
+#include <spdlog/spdlog.h>
 
 App::App() = default;
 App::~App()
@@ -22,17 +24,21 @@ App::~App()
     shutdown();
 }
 
-bool App::init()
+void App::init()
 {
+    SDL_SetAppMetadata("The Sunset Straits App name", "1.0",
+                       "com.example.app-identifier");
+
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
-        return false;
-    window_ = SDL_CreateWindow(window_title, window_width, window_height,
-                               SDL_WINDOW_RESIZABLE);
-    if (!window_)
-        return false;
-    renderer_ = SDL_CreateRenderer(window_, nullptr);
-    if (!renderer_)
-        return false;
+        throw std::runtime_error("Failed to initialize SDL");
+
+    if (!SDL_CreateWindowAndRenderer(window_title, window_width, window_height,
+                                     SDL_WINDOW_RESIZABLE, &window_,
+                                     &renderer_))
+        throw std::runtime_error("Failed to create window and renderer");
+
+    SDL_SetRenderLogicalPresentation(renderer_, window_width, window_height,
+                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
     SDL_SetRenderVSync(renderer_, 1);
 
     resources_ = std::make_unique<ResourceManager>();
@@ -57,10 +63,10 @@ bool App::init()
     server_->set_survival(&survival_);
     server_->set_event_simulator(events_.get());
 
-    game_mode_ = std::make_unique<GameMode>(server_->entities());
+    game_mode_ = std::make_unique<GameMode>();
     game_mode_->init_world(world_state_, knowledge_, dialogue_engine_,
                            topic_registry_, relationships_, factions_, *events_,
-                           *rumors_, combat_, quests_, *network_);
+                           *rumors_, combat_, quests_);
 
     server_->set_game_mode(game_mode_.get());
 
@@ -68,47 +74,33 @@ bool App::init()
 
     game_clock_.restart();
     running_ = true;
-    return true;
 }
 
 void App::start_local_session()
 {
-    session_mode_ = SessionMode::local;
-    if (!server_) {
-        server_ = std::make_unique<Server>();
-        server_->set_managers(&combat_, &world_state_, &quests_);
-        server_->set_survival(&survival_);
-        server_->set_event_simulator(events_.get());
-        server_->set_game_mode(game_mode_.get());
-    }
-    server_->clear_transports();
+    server_ = std::make_unique<Server>();
+    server_->set_managers(&combat_, &world_state_, &quests_);
+    server_->set_survival(&survival_);
+    server_->set_event_simulator(events_.get());
+    server_->set_game_mode(game_mode_.get());
     server_->attach_local_pair(client_);
 
     client_.send_join_request();
+    session_mode_ = SessionMode::local;
 }
 
 void App::start_host_session(int port)
 {
-    stop_session();
-    session_mode_ = SessionMode::host;
-    if (!server_) {
-        server_ = std::make_unique<Server>();
-        server_->set_managers(&combat_, &world_state_, &quests_);
-        server_->set_survival(&survival_);
-        server_->set_event_simulator(events_.get());
-        server_->set_game_mode(game_mode_.get());
-    }
+    start_local_session();
+
     network_->host(port);
-    server_->attach_local_pair(client_);
     server_->attach_network(*network_);
 
-    client_.send_join_request();
+    session_mode_ = SessionMode::host;
 }
 
 void App::start_client_session(std::string const &host, int port)
 {
-    stop_session();
-    session_mode_ = SessionMode::client;
     server_.reset();
 
     std::string resolved_ip = host;
@@ -133,14 +125,14 @@ void App::start_client_session(std::string const &host, int port)
     client_.attach_network(*network_);
 
     client_.send_join_request();
+    session_mode_ = SessionMode::client;
 }
 
 void App::stop_session()
 {
     if (network_)
         network_->disconnect();
-    if (server_)
-        server_->clear_transports();
+    server_.reset();
     client_.detach_transport();
 }
 
@@ -296,6 +288,9 @@ void App::quick_save()
 
 void App::save_to_slot(int slot)
 {
+    spdlog::warn("Save/load is currently disabled to prevent exploits and "
+                 "bugs. It will be re-enabled in a future update.");
+    (void)slot;
     // auto *pos =
     //     server_.entities().get_component<Position>(server_.host_player_id());
     // auto *cs =
@@ -344,13 +339,13 @@ void App::load_from_slot(int slot)
     if (!SaveManager::load(path, data))
         return;
 
-    while (!server_->entities().all_entities().empty())
-        server_->entities().destroy_entity(
-            server_->entities().all_entities().back());
-    game_mode_ = std::make_unique<GameMode>(server_->entities());
+    while (!game_mode_->entities().all_entities().empty())
+        game_mode_->entities().destroy_entity(
+            game_mode_->entities().all_entities().back());
+    game_mode_->clear_npc_list();
 
     auto pid = game_mode_->spawn_player(data.player_pos.x, data.player_pos.y);
-    auto *cs = server_->entities().get_component<CombatStats>(pid);
+    auto *cs = game_mode_->entities().get_component<CombatStats>(pid);
     if (cs) {
         cs->hp = data.player_hp;
         cs->max_hp = data.player_max_hp;
@@ -376,7 +371,7 @@ void App::load_from_slot(int slot)
         game_mode_->spawn_npc(nd.id, nd.name, nd.position.x, nd.position.y,
                               nd.personality, facts);
         auto &eid = game_mode_->npc_entities().back();
-        auto *ncs = server_->entities().get_component<CombatStats>(eid);
+        auto *ncs = game_mode_->entities().get_component<CombatStats>(eid);
         if (ncs) {
             ncs->hp = nd.hp;
             ncs->max_hp = nd.max_hp;
@@ -390,7 +385,7 @@ void App::load_from_slot(int slot)
     client_.reset();
     start_local_session();
 
-    auto *pos = server_->entities().get_component<Position>(pid);
+    auto *pos = game_mode_->entities().get_component<Position>(pid);
     if (pos)
         camera_system_.center_on(pos->world_pos);
 }

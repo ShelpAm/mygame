@@ -1,3 +1,6 @@
+#include "entities/components/movement.hpp"
+#include "entities/components/position.hpp"
+#include "entities/components/sprite.hpp"
 #include "entities/entity-manager.hpp"
 #include <boost/test/unit_test.hpp>
 BOOST_AUTO_TEST_SUITE(entity_tests)

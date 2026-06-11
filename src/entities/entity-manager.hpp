@@ -1,12 +1,13 @@
 #pragma once
 
-#include "entities/components/movement.hpp"
-#include "entities/components/position.hpp"
-#include "entities/components/sprite.hpp"
+#include <cstdint>
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
 #include <vector>
+
+using EntityId = std::uint32_t;
+constexpr EntityId invalid_entity = 0;
 
 class EntityManager {
   public:
@@ -25,43 +26,27 @@ class EntityManager {
     std::vector<EntityId> all_entities() const;
 
   private:
-    EntityId next_id_ = 1;
+    EntityId next_id_ = invalid_entity + 1;
     std::vector<EntityId> alive_;
 
-    template <typename T> struct ComponentPool {
+    struct IComponentPool {
+        virtual ~IComponentPool() = default;
+    };
+
+    template <typename T> struct ComponentPool : IComponentPool {
         std::unordered_map<EntityId, T> data;
     };
 
-    struct PoolDeleter {
-        template <typename T> static void delete_pool(void *p)
-        {
-            delete static_cast<ComponentPool<T> *>(p);
-        }
-
-        void (*fn)(void *) = nullptr;
-        void operator()(void *p) const
-        {
-            if (fn)
-                fn(p);
-        }
-    };
-    std::unordered_map<std::type_index, std::unique_ptr<void, PoolDeleter>>
-        pools_;
+    std::unordered_map<std::type_index, std::unique_ptr<IComponentPool>> pools_;
 
     template <typename T> ComponentPool<T> &pool();
 };
 
 template <typename T> EntityManager::ComponentPool<T> &EntityManager::pool()
 {
-    auto ti = std::type_index(typeid(T));
-    auto it = pools_.find(ti);
-    if (it == pools_.end()) {
-        auto *raw = new ComponentPool<T>();
-        pools_[ti] = std::unique_ptr<void, PoolDeleter>(
-            raw, PoolDeleter{PoolDeleter::delete_pool<T>});
-        return *raw;
-    }
-    return *static_cast<ComponentPool<T> *>(it->second.get());
+    auto [it, ok] = pools_.try_emplace(std::type_index(typeid(T)),
+                                       std::make_unique<ComponentPool<T>>());
+    return static_cast<ComponentPool<T> &>(*it->second);
 }
 
 template <typename T> T &EntityManager::add_component(EntityId id, T component)

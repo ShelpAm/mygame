@@ -39,7 +39,7 @@ class App {
   public:
     App();
     ~App();
-    bool init();
+    void init();
     void run();
     void shutdown();
 
@@ -93,13 +93,21 @@ class App {
     {
         show_multiplayer_ = v;
     }
-    NetworkManager *network_mut()
+    Client &client()
     {
-        return network_.get();
+        return client_;
     }
-    NetworkManager const *network() const
+    Client const &client() const
     {
-        return network_.get();
+        return client_;
+    }
+    NetworkManager &network()
+    {
+        return *network_;
+    }
+    NetworkManager const &network() const
+    {
+        return *network_;
     }
     QuestManager &quests_mut()
     {
@@ -184,7 +192,6 @@ class App {
     std::unique_ptr<NetworkManager> network_;
 
     SessionMode session_mode_ = SessionMode::local;
-    EntityId player_id_ = -1;
 
     bool show_load_menu_ = false;
     bool show_help_ = false;
