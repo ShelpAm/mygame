@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+// #include <SDL3_ttf/SDL_ttf.h>
 #include <string>
 #include <unordered_map>
 
@@ -15,4 +16,5 @@ class ResourceManager {
 
   private:
     std::unordered_map<std::string, SDL_Texture *> textures_;
+    // std::unordered_map<std::string, TTF_Font *> fonts_;
 };

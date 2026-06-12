@@ -4,13 +4,14 @@
 #include "core/locale-manager.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "survival/condition-tracker.hpp"
-#include "ui/imgui_impl_sdl3.h"
 #include "world/world-state.hpp"
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_sdlrenderer3.h>
 #include <spdlog/spdlog.h>
 
 UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer)
@@ -21,6 +22,10 @@ UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer)
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+
+    ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
+    ImGui_ImplSDLRenderer3_Init(renderer);
+    SDL_StartTextInput(window);
 
     // Load CJK font for Chinese support
     auto &fonts = *io.Fonts;
@@ -51,18 +56,15 @@ UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer)
 #endif
     };
     for (char const *path : cjkPaths) {
-        FILE *test = fopen(path, "rb");
-        if (test) {
-            fclose(test);
-            fonts.AddFontFromFileTTF(path, 16.f, &cfg, cjkRanges);
+        if (std::filesystem::exists(path)) {
+            spdlog::info("Loading font in {}", path);
+            assert(fonts.AddFontFromFileTTF(path, 16.f, &cfg, cjkRanges) !=
+                   nullptr);
             break;
         }
     }
     fonts.Build();
 
-    ImGui_ImplSDL3_Init(window);
-    ImGui_ImplSDLRenderer3_Init(renderer);
-    SDL_StartTextInput(window);
     load_server_list();
 }
 
@@ -75,7 +77,7 @@ UIManager::~UIManager()
 
 void UIManager::process_event(SDL_Event const &event)
 {
-    ImGui_ImplSDL3_ProcessEvent(event);
+    ImGui_ImplSDL3_ProcessEvent(&event);
 }
 
 void UIManager::update(float /*dt*/) {}
@@ -83,6 +85,7 @@ void UIManager::update(float /*dt*/) {}
 void UIManager::render(WorldState const &world_state, App const &app)
 {
     ImGui_ImplSDL3_NewFrame();
+    ImGui_ImplSDLRenderer3_NewFrame();
     ImGui::NewFrame();
 
     render_hud(world_state, app);
@@ -419,6 +422,9 @@ void UIManager::render_hosting(App &app)
     ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
                 app.client().remote_entities().size());
     ImGui::Separator();
+
+    render_client_list(app);
+
     render_chat(app);
     // if (ImGui::Button(loc.get("mp.disconnect").c_str()))
     //     app.stop_session();
@@ -502,8 +508,67 @@ void UIManager::render_client(App &app)
                 app.client().remote_entities().size());
     ImGui::Separator();
     render_chat(app);
-    if (ImGui::Button(loc.get("mp.disconnect").c_str()))
-        app.client().detach_transport();
+    if (ImGui::Button(loc.get("mp.disconnect").c_str())) {
+        // Return to local
+        app.start_local_session();
+    }
+}
+
+void UIManager::render_client_list(App &app)
+{
+    auto const &loc = app.locale();
+    auto *server = app.server(); // 假设有 server() 方法
+
+    if (server->transports().empty()) {
+        ImGui::TextDisabled("%s", loc.get("mp.no_clients").c_str());
+        return;
+    }
+
+    if (ImGui::CollapsingHeader(loc.get("mp.clients").c_str(),
+                                ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent();
+
+        // 表格方式显示
+        if (ImGui::BeginTable("client_list", 3,
+                              ImGuiTableFlags_Borders |
+                                  ImGuiTableFlags_RowBg)) {
+
+            ImGui::TableSetupColumn(loc.get("mp.id").c_str(),
+                                    ImGuiTableColumnFlags_WidthFixed, 60.0f);
+            ImGui::TableSetupColumn(loc.get("mp.address").c_str(),
+                                    ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn(loc.get("mp.status").c_str(),
+                                    ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableHeadersRow();
+
+            for (auto const &trans : server->transports()) {
+                ImGui::TableNextRow();
+
+                // ID
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("%p", trans.get());
+
+                // Address
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%s", "Unknown");
+
+                // Status
+                ImGui::TableSetColumnIndex(2);
+                if (trans->is_connected()) {
+                    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s",
+                                       loc.get("mp.connected").c_str());
+                }
+                else {
+                    ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "%s",
+                                       loc.get("mp.disconnected").c_str());
+                }
+            }
+
+            ImGui::EndTable();
+        }
+
+        ImGui::Unindent();
+    }
 }
 
 void UIManager::render_chat(App &app)

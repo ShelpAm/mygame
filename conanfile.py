@@ -16,6 +16,7 @@ class TheSunsetStraits(ConanFile):
         self.requires("imgui/1.91.8")
         self.requires("spdlog/1.17.0")
         self.requires("sdl_image/3.4.0")
+        self.requires("sdl_ttf/3.2.2")
 
     def configure(self):
         assert self.options is not None
@@ -33,7 +34,9 @@ class TheSunsetStraits(ConanFile):
         self.options["boost/*"].without_stacktrace = True
         self.options["boost/*"].without_log = True
         self.options["spdlog/*"].use_std_fmt = True
+        self.options["imgui/*"].with_sdl3_binding = True
 
+        # SDL_image
         sdl_image_opts = [
             "with_avif",
             "with_jxl",

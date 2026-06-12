@@ -1,7 +1,6 @@
 #pragma once
 
 #include "net/transport.hpp"
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -15,7 +14,7 @@ class NetworkTransport : public ITransport {
         Acceptor &operator=(Acceptor &&) noexcept = default;
         ~Acceptor() = default;
 
-        awaitable<std::unique_ptr<ITransport>> accept();
+        awaitable<std::unique_ptr<NetworkTransport>> accept();
         void stop();
 
       private:
@@ -42,11 +41,7 @@ class NetworkTransport : public ITransport {
     }
 
   private:
-    void on_connected();
-    void start_read();
-
     tcp::socket socket_{io()};
-    std::atomic<bool> connected_{false};
 
     std::vector<std::uint8_t> write_buffer_;
     NetHead read_head_buffer_;

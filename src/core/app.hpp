@@ -8,7 +8,6 @@
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "net/client.hpp"
-#include "net/network-transport.hpp"
 #include "net/server.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/camera-system.hpp"
@@ -72,6 +71,14 @@ class App {
     {
         show_multiplayer_ = v;
     }
+    Server *server()
+    {
+        return server_.get();
+    }
+    Server const *server() const
+    {
+        return server_.get();
+    }
     Client &client()
     {
         return client_;
@@ -110,7 +117,7 @@ class App {
     DialogueState const &dialogue() const
     {
         return session_mode_ == SessionMode::client ? client_.dialogue()
-                                                     : game_mode_->dialogue();
+                                                    : game_mode_->dialogue();
     }
     void end_dialogue()
     {

@@ -1,6 +1,10 @@
 #include "net/local-transport.hpp"
+#include <spdlog/spdlog.h>
 
-LocalTransportEndpoint::LocalTransportEndpoint() : channel_(ITransport::io()) {}
+LocalTransportEndpoint::LocalTransportEndpoint()
+    : channel_(ITransport::io(), 32)
+{
+}
 
 LocalTransportEndpoint::~LocalTransportEndpoint()
 {
@@ -18,6 +22,9 @@ void LocalTransportEndpoint::set_peer(LocalTransportEndpoint *peer)
 awaitable<void> LocalTransportEndpoint::write(TransportMessage msg)
 {
     assert(peer_);
+    spdlog::debug("LocalTransportEndpoint ({}) writing message of type {} with "
+                  "payload size {}",
+                  (void *)this, static_cast<int>(msg.type), msg.payload.size());
     co_await peer_->channel_.async_send(boost::system::error_code(),
                                         TransportMessage{msg.type, msg.payload},
                                         use_awaitable);

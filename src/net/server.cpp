@@ -4,7 +4,6 @@
 #include "entities/components/position.hpp"
 #include "factions/event-simulator.hpp"
 #include "net/client.hpp"
-#include "net/local-transport.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/quest-manager.hpp"
@@ -36,9 +35,12 @@ void Server::set_game_mode(GameMode *gm)
 awaitable<void> Server::listen(std::uint16_t port)
 {
     acceptor_ = std::make_unique<NetworkTransport::Acceptor>(port);
+    spdlog::info("Waiting for incoming connections on port {}...", port);
     while (acceptor_) {
         try {
             auto t = co_await acceptor_->accept();
+            spdlog::info("Accepted new connection from {}",
+                         t->socket().remote_endpoint().address().to_string());
             attach_transport(std::move(t));
         }
         catch (boost::system::system_error const &e) {
@@ -49,30 +51,24 @@ awaitable<void> Server::listen(std::uint16_t port)
     }
 }
 
-void Server::attach_local_pair(Client &client)
-{
-    auto [srv, cli] = create_transport_pair();
-    co_spawn(
-        ITransport::io(),
-        [this, srv = srv.get()]() -> awaitable<void> {
-            while (srv->is_connected()) {
-                co_await on_message(*srv, co_await srv->read());
-            }
-            co_return;
-        },
-        detached);
-    client.attach_transport(std::move(cli));
-    transports_.push_back(std::move(srv));
-}
-
 void Server::attach_transport(std::unique_ptr<ITransport> t)
 {
     co_spawn(
         ITransport::io(),
         [this, t = t.get()]() -> awaitable<void> {
-            while (t->is_connected()) {
-                co_await on_message(*t, co_await t->read());
+            spdlog::info("Transport ({}) connected", static_cast<void *>(t));
+            while (true) {
+                try {
+                    co_await on_message(*t, co_await t->read());
+                }
+                catch (boost::system::system_error const &) {
+                    break;
+                }
             }
+            spdlog::info("Transport ({}) disconnected", static_cast<void *>(t));
+            std::erase_if(transports_, [trans = t](auto const &t) {
+                return t.get() == trans;
+            });
             co_return;
         },
         detached);
@@ -87,6 +83,8 @@ void Server::clear_transports()
 awaitable<void> Server::on_message(ITransport &from,
                                    TransportMessage const &msg)
 {
+    spdlog::info("Processing message of type {} with payload size {}",
+                 static_cast<int>(msg.type), msg.payload.size());
     if (msg.type == NetPacket::join) {
         assert(msg.payload.empty());
         auto eid = add_player({0, 0});
@@ -218,9 +216,10 @@ void Server::broadcast_sync()
     auto payload = build_sync_payload();
     if (payload.empty())
         return;
-    for (auto &t : transports_)
+    for (auto &t : transports_) {
         co_spawn(ITransport::io(), t->write({NetPacket::state_full, payload}),
                  detached);
+    }
 }
 
 void Server::handle_combat_event(int attacker_id, int defender_id, int damage,

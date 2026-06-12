@@ -37,7 +37,7 @@ class Server {
     void handle_combat_event(int attacker_id, int defender_id, int damage,
                              bool killed);
 
-    void attach_local_pair(Client &client);
+    void attach_transport(std::unique_ptr<ITransport> t);
     void clear_transports();
 
     EntityId add_player(Vec2f pos);
@@ -54,9 +54,17 @@ class Server {
         return v;
     }
 
-  private:
-    void attach_transport(std::unique_ptr<ITransport> t);
+    std::vector<std::unique_ptr<ITransport>> &transports()
+    {
+        return transports_;
+    }
 
+    std::vector<std::unique_ptr<ITransport>> const &transports() const
+    {
+        return transports_;
+    }
+
+  private:
     std::unordered_set<EntityId> player_entities_;
     std::unordered_map<EntityId, bool> sent_initial_sync_;
     bool needs_full_sync_ = false;

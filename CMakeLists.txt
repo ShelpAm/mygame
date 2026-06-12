@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(TheSunsetStraits VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -11,6 +11,36 @@ find_package(Boost REQUIRED)
 find_package(imgui REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(SDL3_image REQUIRED)
+# find_package(SDL3_ttf REQUIRED)
+
+function(add_imgui_backends)
+    set(one_value_args TARGET)
+    set(multi_value_args BACKENDS DEPS)
+    cmake_parse_arguments(PARSE_ARGV 0 arg "" "${one_value_args}"
+                          "${multi_value_args}")
+    cmake_path(SET imgui_bindings_dir NORMALIZE
+               "${imgui_INCLUDE_DIR}/../res/bindings")
+
+    foreach (backend ${arg_BACKENDS})
+        find_file(imgui_backend "imgui_impl_${backend}.h"
+            NO_DEFAULT_PATH
+            PATHS ${imgui_bindings_dir}
+            REQUIRED
+            )
+        if (backend STREQUAL "metal")
+            set(extension "mm")
+        else()
+            set(extension "cpp")
+        endif()
+        list(APPEND backend_sources
+             "${imgui_bindings_dir}/imgui_impl_${backend}.${extension}")
+    endforeach()
+    MESSAGE(STATUS "Adding ImGui backends: ${arg_BACKENDS}")
+    add_library(imgui_backend "${backend_sources}")
+    target_include_directories(imgui_backend PUBLIC ${imgui_bindings_dir})
+    target_link_libraries(imgui_backend PUBLIC imgui::imgui ${arg_DEPS})
+    target_link_libraries(${arg_TARGET} PRIVATE imgui_backend)
+endfunction()
 
 set(SOURCES
     src/main.cpp
@@ -44,7 +74,6 @@ set(SOURCES
     src/core/locale-manager.cpp
     src/ui/ui-manager.cpp
     src/ui/hud.cpp
-    src/ui/imgui_impl_sdl3.cpp
 )
 
 set(HEADERS
@@ -70,7 +99,6 @@ set(HEADERS
     src/dialogue/relationship-table.hpp
     src/ui/ui-manager.hpp
     src/ui/hud.hpp
-    src/ui/imgui_impl_sdl3.h
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
@@ -82,6 +110,11 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 
+# Patch imgui backends — use source files from conan package
+add_imgui_backends(TARGET ${PROJECT_NAME}
+    BACKENDS #[[ sdl3 ]] sdlrenderer3
+    DEPS sdl::sdl)
+
 target_link_libraries(${PROJECT_NAME} PRIVATE
     sdl::sdl
     Boost::boost
@@ -89,6 +122,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     imgui::imgui
     spdlog::spdlog
     SDL3_image::SDL3_image
+    # SDL3_ttf::SDL3_ttf-static
 )
 
 if(MINGW OR WIN32)

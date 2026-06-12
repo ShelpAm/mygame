@@ -3,8 +3,8 @@
 #include "net/network-transport.hpp"
 #include <boost/asio.hpp>
 #include <boost/test/unit_test.hpp>
+#include <chrono>
 #include <future>
-#include <thread>
 
 namespace asio = boost::asio;
 
@@ -18,15 +18,13 @@ struct NetworkFixture {
 
 BOOST_GLOBAL_FIXTURE(NetworkFixture);
 
-// Helper: run a coroutine to completion synchronously on a temporary io_context.
-template <typename T>
-static T run_sync(asio::awaitable<T> a)
+// Helper: run a coroutine on the global IO thread, block until done.
+template <typename T> static T run_sync(asio::awaitable<T> a)
 {
-    asio::io_context io;
     std::promise<T> promise;
     auto future = promise.get_future();
     asio::co_spawn(
-        io,
+        ITransport::io(),
         [&]() -> asio::awaitable<void> {
             if constexpr (std::is_void_v<T>)
                 co_await std::move(a), promise.set_value();
@@ -34,7 +32,6 @@ static T run_sync(asio::awaitable<T> a)
                 promise.set_value(co_await std::move(a));
         },
         asio::detached);
-    io.run();
     return future.get();
 }
 
@@ -202,21 +199,82 @@ BOOST_AUTO_TEST_CASE(local_transport_threaded_send)
     auto [a, b] = create_transport_pair();
     std::atomic<int> count{0};
 
-    std::thread t([&]() {
-        for (int i = 0; i < 100; ++i)
-            run_sync([&]() -> asio::awaitable<void> {
-                co_await b->write({NetPacket::chat, {}});
-            }());
-    });
-    t.join();
-
+    // Spawn reader first, then writer — must read concurrently to avoid
+    // deadlock when channel capacity is exceeded.
     run_sync([&]() -> asio::awaitable<void> {
-        for (int i = 0; i < 100; ++i) {
-            co_await a->read();
-            count++;
-        }
+        auto reader = [&]() -> asio::awaitable<void> {
+            for (int i = 0; i < 100; ++i) {
+                co_await a->read();
+                count++;
+            }
+        };
+        auto writer = [&]() -> asio::awaitable<void> {
+            for (int i = 0; i < 100; ++i)
+                co_await b->write({NetPacket::chat, {}});
+        };
+
+        co_spawn(ITransport::io(), reader(), asio::detached);
+        // Give reader a chance to start listening
+        co_await asio::steady_timer(ITransport::io(),
+                                    std::chrono::milliseconds(1))
+            .async_wait(asio::use_awaitable);
+        co_await writer();
+        // Small delay for remaining reads
+        co_await asio::steady_timer(ITransport::io(),
+                                    std::chrono::milliseconds(10))
+            .async_wait(asio::use_awaitable);
     }());
     BOOST_TEST(count == 100);
+}
+
+BOOST_AUTO_TEST_CASE(disconnect_during_read)
+{
+    run_sync([]() -> asio::awaitable<void> {
+        NetworkTransport::Acceptor acceptor{58888};
+        std::unique_ptr<NetworkTransport> r, w;
+        std::atomic<bool> connected{false};
+
+        // Spawn accept, then connect — must run concurrently
+        auto accept_coro = [&]() -> asio::awaitable<void> {
+            auto t = co_await acceptor.accept();
+            r.reset(dynamic_cast<NetworkTransport *>(t.release()));
+            connected = true;
+        };
+        co_spawn(ITransport::io(), accept_coro(), asio::detached);
+
+        // Give accept time to start listening
+        co_await asio::steady_timer(ITransport::io(),
+                                    std::chrono::milliseconds(10))
+            .async_wait(asio::use_awaitable);
+        w = co_await NetworkTransport::connect("127.0.0.1", 58888);
+        BOOST_TEST(connected);
+
+        // Now test: spawn reader, wait, close writer
+        std::atomic<bool> read_failed{false};
+        co_spawn(
+            ITransport::io(),
+            [&]() -> asio::awaitable<void> {
+                try {
+                    co_await r->read();
+                }
+                catch (std::exception const &) {
+                    read_failed = true;
+                }
+            },
+            asio::detached);
+
+        co_await asio::steady_timer(ITransport::io(),
+                                    std::chrono::milliseconds(10))
+            .async_wait(asio::use_awaitable);
+        w->socket().close();
+
+        co_await asio::steady_timer(ITransport::io(),
+                                    std::chrono::milliseconds(10))
+            .async_wait(asio::use_awaitable);
+
+        BOOST_TEST(read_failed);
+        BOOST_TEST(!r->is_connected());
+    }());
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -15,15 +15,6 @@ using asio::detached;
 using asio::use_awaitable;
 using asio::ip::tcp;
 
-class ITransport;
-
-struct [[deprecated("No longer need to be used, since we have corotine")]]
-TransportExMessage {
-    ITransport *from;
-    NetPacket::Type type;
-    std::vector<uint8_t> payload;
-};
-
 struct TransportMessage {
     NetPacket::Type type;
     std::vector<uint8_t> payload;

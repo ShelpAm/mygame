@@ -7,6 +7,7 @@
 #include "entities/components/position.hpp"
 #include "factions/event-simulator.hpp"
 #include "knowledge/rumor-propagator.hpp"
+#include "net/local-transport.hpp"
 #include "net/network-transport.hpp"
 #include "save/save-manager.hpp"
 #include "systems/render-system.hpp"
@@ -79,7 +80,10 @@ void App::start_local_session()
     server_->set_survival(&survival_);
     server_->set_event_simulator(events_.get());
     server_->set_game_mode(game_mode_.get());
-    server_->attach_local_pair(client_);
+
+    auto [srv, cli] = create_transport_pair();
+    server_->attach_transport(std::move(srv));
+    client_.attach_transport(std::move(cli));
 
     client_.send_join_request();
     session_mode_ = SessionMode::local;
@@ -89,7 +93,6 @@ awaitable<void> App::start_host_session(int port)
 {
     session_mode_ = SessionMode::host;
     co_await server_->listen(port);
-    co_return;
 }
 
 awaitable<void> App::start_client_session(std::string const &host, int port)

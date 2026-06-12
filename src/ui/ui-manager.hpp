@@ -37,6 +37,7 @@ class UIManager {
     void render_hosting(App &app);
     void render_local(App &app);
     void render_client(App &app);
+    void render_client_list(App &app);
     void render_chat(App &app);
 
     std::string host_ip_ = "127.0.0.1";

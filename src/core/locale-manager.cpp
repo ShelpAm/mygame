@@ -80,8 +80,8 @@ std::string const &LocaleManager::language_name(int idx) const
 std::string const &LocaleManager::get(std::string const &key) const
 {
     if (current_ < 0 || current_ >= (int)strings_.size()) {
-        static std::string const empty;
-        return empty;
+        throw std::runtime_error(
+            "LocaleManager: current language index is out of range");
     }
     auto const &strings = current_strings();
     auto it = strings.find(key);
@@ -95,8 +95,8 @@ std::string const &LocaleManager::get(std::string const &key) const
             return it0->second;
     }
 
-    static std::string const empty;
-    return empty;
+    throw std::runtime_error("LocaleManager: missing key '" + key +
+                             "' in language '" + language_name() + "'");
 }
 
 std::string LocaleManager::fmt(std::string const &key, std::string const &arg0,

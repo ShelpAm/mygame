@@ -17,9 +17,18 @@ void Client::attach_transport(std::unique_ptr<ITransport> t)
     co_spawn(
         ITransport::io(),
         [this]() -> awaitable<void> {
-            while (transport_->is_connected()) {
-                on_message(*transport_, co_await transport_->read());
+            spdlog::info("Transport ({}) connected",
+                         static_cast<void *>(transport_.get()));
+            while (true) {
+                try {
+                    on_message(*transport_, co_await transport_->read());
+                }
+                catch (boost::system::system_error const &) {
+                    break;
+                }
             }
+            spdlog::info("Transport ({}) disconnected",
+                         static_cast<void *>(transport_.get()));
             co_return;
         },
         detached);
