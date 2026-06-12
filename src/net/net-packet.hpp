@@ -24,11 +24,22 @@ struct NetPacket {
         interact = 9,
         rest = 10,
         return_pid,
+        dialogue_sync,
+        dialogue_action,
     };
     Type type;
     std::vector<uint8_t> payload; // 4 bytes size, left: real payload
     // Layout:
     // [type:4][size:4][payload:size]
+};
+
+// Note: Do not confuse NetHead with NetPacket. NetPacket is not the real
+// packet, but unpacked from actual layout. NetHead stands for the actual
+// header.
+struct NetHead {
+    using Type = NetPacket::Type;
+    Type type;
+    std::uint32_t size; // paylouad size in bytes.
 };
 
 // Serialize a value into bytes (little-endian)
@@ -166,6 +177,7 @@ struct SyncEntityData {
     int hp, max_hp;
     bool alive;
     int team;
+    uint8_t flags;
 };
 
 inline SyncEntityData parse_sync_entity(std::vector<uint8_t> const &d,
@@ -179,6 +191,7 @@ inline SyncEntityData parse_sync_entity(std::vector<uint8_t> const &d,
     memcpy(&r.max_hp, d.data() + off + 16, 4);
     r.alive = d[off + 20];
     r.team = d[off + 21];
+    r.flags = d[off + 22];
     return r;
 }
 
@@ -224,5 +237,108 @@ inline EnemyWaveData parse_enemy_wave(std::vector<uint8_t> const &d)
     memcpy(&r.cy, d.data() + 4, 4);
     memcpy(&r.count, d.data() + 8, 4);
     r.team = d[12];
+    return r;
+}
+
+// -- Dialogue sync serialization --
+
+struct DialogueLineData {
+    uint8_t speaker;
+    std::string text;
+    bool use_raw;
+    std::string npc_name;
+};
+
+inline std::vector<uint8_t>
+serialize_dialogue_sync(std::string const &npc_name, int npc_trust,
+                        std::vector<DialogueLineData> const &lines,
+                        std::vector<std::string> const &topics,
+                        std::vector<std::string> const &actions, bool can_gift,
+                        bool can_threaten)
+{
+    std::vector<uint8_t> p;
+    auto wstr = [&](std::string const &s) {
+        uint16_t len = static_cast<uint16_t>(s.size());
+        write_bytes(p, len);
+        p.insert(p.end(), s.begin(), s.end());
+    };
+    wstr(npc_name);
+    write_bytes(p, npc_trust);
+    p.push_back(static_cast<uint8_t>(lines.size()));
+    for (auto const &l : lines) {
+        p.push_back(l.speaker);
+        wstr(l.text);
+        p.push_back(l.use_raw ? 1 : 0);
+        wstr(l.npc_name);
+    }
+    p.push_back(static_cast<uint8_t>(topics.size()));
+    for (auto const &t : topics)
+        wstr(t);
+    p.push_back(static_cast<uint8_t>(actions.size()));
+    for (auto const &a : actions)
+        wstr(a);
+    p.push_back((can_gift ? 1 : 0) | (can_threaten ? 2 : 0));
+    return p;
+}
+
+inline std::vector<uint8_t> make_dialogue_action(std::string const &action)
+{
+    std::vector<uint8_t> p;
+    uint16_t len = static_cast<uint16_t>(action.size());
+    write_bytes(p, len);
+    p.insert(p.end(), action.begin(), action.end());
+    return p;
+}
+
+inline std::string parse_dialogue_action(std::vector<uint8_t> const &d)
+{
+    uint16_t len;
+    memcpy(&len, d.data(), 2);
+    return {d.begin() + 2, d.begin() + 2 + len};
+}
+
+struct DialogueSyncData {
+    std::string npc_name;
+    int npc_trust;
+    std::vector<DialogueLineData> lines;
+    std::vector<std::string> topics;
+    std::vector<std::string> actions;
+    bool can_gift;
+    bool can_threaten;
+};
+
+inline DialogueSyncData parse_dialogue_sync(std::vector<uint8_t> const &d)
+{
+    DialogueSyncData r;
+    size_t off = 0;
+    auto rstr = [&]() {
+        uint16_t len;
+        memcpy(&len, d.data() + off, 2);
+        off += 2;
+        std::string s(d.begin() + off, d.begin() + off + len);
+        off += len;
+        return s;
+    };
+    r.npc_name = rstr();
+    memcpy(&r.npc_trust, d.data() + off, 4);
+    off += 4;
+    uint8_t line_count = d[off++];
+    for (uint8_t i = 0; i < line_count; ++i) {
+        DialogueLineData l;
+        l.speaker = d[off++];
+        l.text = rstr();
+        l.use_raw = d[off++];
+        l.npc_name = rstr();
+        r.lines.push_back(std::move(l));
+    }
+    uint8_t topic_count = d[off++];
+    for (uint8_t i = 0; i < topic_count; ++i)
+        r.topics.push_back(rstr());
+    uint8_t action_count = d[off++];
+    for (uint8_t i = 0; i < action_count; ++i)
+        r.actions.push_back(rstr());
+    uint8_t flags = d[off];
+    r.can_gift = flags & 1;
+    r.can_threaten = flags & 2;
     return r;
 }

@@ -4,7 +4,7 @@
 #include "world/world-state.hpp"
 #include <boost/json.hpp>
 #include <fstream>
-#include <iostream>
+#include <spdlog/spdlog.h>
 
 bool SaveManager::save(std::string const &path, WorldState const &ws,
                        KnowledgeGraph const &kg, RelationshipTable const &rt,
@@ -76,7 +76,7 @@ bool SaveManager::save(std::string const &path, WorldState const &ws,
 
     std::ofstream file(path);
     if (!file) {
-        std::cerr << "Failed to open save: " << path << '\n';
+        spdlog::error("Failed to open save: {}", path);
         return false;
     }
     file << boost::json::serialize(root);
@@ -137,7 +137,7 @@ bool SaveManager::load(std::string const &path, SaveData &out)
         return true;
     }
     catch (std::exception const &e) {
-        std::cerr << "Failed to load: " << e.what() << '\n';
+        spdlog::error("Failed to load save: {}", e.what());
         return false;
     }
 }

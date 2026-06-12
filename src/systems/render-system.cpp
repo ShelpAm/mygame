@@ -1,6 +1,7 @@
 #include "systems/render-system.hpp"
 #include "core/resource-manager.hpp"
 #include "entities/components/combat-stats.hpp"
+#include "entities/components/interactable.hpp"
 #include "entities/components/position.hpp"
 #include "entities/components/sprite.hpp"
 #include "entities/entity-manager.hpp"
@@ -8,7 +9,8 @@
 #include "systems/combat-system.hpp"
 #include "systems/navigation-system.hpp"
 #include "world/world-state.hpp"
-#include <cstdio>
+#include <cmath>
+#include <string>
 
 RenderSystem::RenderSystem(SDL_Renderer *renderer, ResourceManager &resources,
                            CameraSystem &camera)
@@ -19,12 +21,13 @@ RenderSystem::RenderSystem(SDL_Renderer *renderer, ResourceManager &resources,
 void RenderSystem::render(EntityManager &entities,
                           WorldState const &world_state,
                           NavigationSystem const &nav,
-                          std::vector<CombatEvent> const &combat_events)
+                          std::vector<CombatEvent> const &combat_events,
+                          Vec2f player_pos, EntityId player_id)
 {
     render_tile_map(world_state, nav);
-    render_entities(entities);
+    render_entities(entities, player_pos, player_id);
     render_health_bars(entities);
-    render_damage_numbers(combat_events);
+    render_damage_numbers(entities, combat_events);
 }
 
 void RenderSystem::render_tile_map(WorldState const &world_state,
@@ -63,7 +66,8 @@ void RenderSystem::render_tile_map(WorldState const &world_state,
     }
 }
 
-void RenderSystem::render_entities(EntityManager &entities)
+void RenderSystem::render_entities(EntityManager &entities, Vec2f player_pos,
+                                   EntityId player_id)
 {
     for (auto id : entities.all_entities()) {
         auto *pos = entities.get_component<Position>(id);
@@ -72,27 +76,35 @@ void RenderSystem::render_entities(EntityManager &entities)
         if (!pos || !spr || !spr->visible)
             continue;
         if (cs && !cs->alive)
-            continue; // Don't render dead
+            continue;
 
         Vec2f screen = camera_.world_to_screen(pos->world_pos);
         float size = 14.f * spr->scale;
 
-        // Hit flash
         auto *flash = entities.get_component<HitFlash>(id);
         SDL_FColor col = spr->color;
-        if (flash && flash->remaining > 0.f) {
-            col = {1.f, 1.f, 1.f, 1.f}; // White flash on hit
-        }
+        if (flash && flash->remaining > 0.f)
+            col = {1.f, 1.f, 1.f, 1.f};
 
         SDL_FRect rect{screen.x - size, screen.y - size, size * 2, size * 2};
         SDL_SetRenderDrawColor(renderer_, col.r * 255, col.g * 255, col.b * 255,
                                col.a * 255);
         SDL_RenderFillRect(renderer_, &rect);
 
-        // Outline for enemies
         if (cs && cs->team == Team::enemy) {
             SDL_SetRenderDrawColor(renderer_, 180, 40, 40, 200);
             SDL_RenderRect(renderer_, &rect);
+        }
+
+        // Interaction hint: show "!" above nearby interactable NPCs
+        if (id != player_id && entities.get_component<Interactable>(id)) {
+            float dist = std::hypot(pos->world_pos.x - player_pos.x,
+                                    pos->world_pos.y - player_pos.y);
+            if (dist < 64.f) {
+                SDL_FRect hint{screen.x - 4, screen.y - size - 14, 8, 12};
+                SDL_SetRenderDrawColor(renderer_, 255, 255, 100, 220);
+                SDL_RenderFillRect(renderer_, &hint);
+            }
         }
     }
 }
@@ -128,22 +140,23 @@ void RenderSystem::render_health_bars(EntityManager &entities)
     }
 }
 
-void RenderSystem::render_damage_numbers(std::vector<CombatEvent> const &events)
+void RenderSystem::render_damage_numbers(EntityManager &entities,
+                                         std::vector<CombatEvent> const &events)
 {
-    char buf[32];
     for (auto &ev : events) {
         if (ev.damage <= 0)
             continue;
-        std::snprintf(buf, sizeof(buf), "-%d", ev.damage);
         FloatingText ft;
-        ft.text = buf;
-        ft.world_pos = {0, 0}; // Will be positioned per defender
+        ft.text = std::to_string(ev.damage);
+        auto *pos = entities.get_component<Position>(
+            static_cast<EntityId>(ev.defender_id));
+        ft.world_pos = pos ? pos->world_pos : Vec2f{};
+        ft.velocity = {0.f, -40.f};
         ft.color = {1.f, 0.3f, 0.2f, 1.f};
         ft.lifetime = 0.8f;
-        floating_texts_.push_back(ft);
+        floating_texts_.push_back(std::move(ft));
     }
 
-    // Update and render existing texts
     float dt = 1.f / 60.f;
     for (auto it = floating_texts_.begin(); it != floating_texts_.end();) {
         it->elapsed += dt;
@@ -154,6 +167,13 @@ void RenderSystem::render_damage_numbers(std::vector<CombatEvent> const &events)
         it->world_pos = it->world_pos + it->velocity * dt;
         float alpha = 1.f - (it->elapsed / it->lifetime);
         it->color.a = alpha;
+        // Render as small colored text floating up
+        Vec2f screen = camera_.world_to_screen(it->world_pos);
+        SDL_FRect rect{screen.x - 6, screen.y - 6, 12, 12};
+        SDL_SetRenderDrawColor(renderer_, it->color.r * 255, it->color.g * 255,
+                               it->color.b * 255,
+                               static_cast<uint8_t>(alpha * 255));
+        SDL_RenderFillRect(renderer_, &rect);
         ++it;
     }
 }

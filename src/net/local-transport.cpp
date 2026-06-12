@@ -1,6 +1,6 @@
 #include "net/local-transport.hpp"
 
-LocalTransportEndpoint::LocalTransportEndpoint() = default;
+LocalTransportEndpoint::LocalTransportEndpoint() : channel_(ITransport::io()) {}
 
 LocalTransportEndpoint::~LocalTransportEndpoint()
 {
@@ -15,28 +15,17 @@ void LocalTransportEndpoint::set_peer(LocalTransportEndpoint *peer)
     peer_ = peer;
 }
 
-void LocalTransportEndpoint::send(TransportMessage msg)
+awaitable<void> LocalTransportEndpoint::write(TransportMessage msg)
 {
-    if (!peer_)
-        return;
-    std::lock_guard<std::mutex> lock(peer_->mutex_);
-    peer_->inbound_.push(std::move(msg));
+    assert(peer_);
+    co_await peer_->channel_.async_send(boost::system::error_code(),
+                                        TransportMessage{msg.type, msg.payload},
+                                        use_awaitable);
 }
 
-void LocalTransportEndpoint::set_callback(Callback cb)
+awaitable<TransportMessage> LocalTransportEndpoint::read()
 {
-    callback_ = std::move(cb);
-}
-
-void LocalTransportEndpoint::consume()
-{
-    std::lock_guard<std::mutex> lock(mutex_);
-    while (!inbound_.empty()) {
-        auto msg = std::move(inbound_.front());
-        inbound_.pop();
-        if (callback_)
-            callback_({this, msg.type, std::move(msg.payload)});
-    }
+    co_return co_await channel_.async_receive(use_awaitable);
 }
 
 bool LocalTransportEndpoint::is_connected() const

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/entity-manager.hpp"
@@ -46,6 +47,7 @@ class Client {
     void send_rest();
     void send_recruit();
     void send_chat(std::string const &msg);
+    void send_dialogue_action(std::string const &action);
 
     EntityManager &entities()
     {
@@ -72,6 +74,14 @@ class Client {
     {
         return chat_history_;
     }
+    DialogueState const &dialogue() const
+    {
+        return dialogue_;
+    }
+    DialogueState &dialogue()
+    {
+        return dialogue_;
+    }
 
   private:
     EntityManager em_;
@@ -80,8 +90,10 @@ class Client {
     std::unique_ptr<ITransport> transport_;
     std::vector<RemoteEntity> remote_entities_;
     std::vector<std::string> chat_history_;
+    DialogueState dialogue_;
 
     void apply_sync(std::vector<uint8_t> const &data);
-    void on_message(TransportExMessage const &msg);
+    void on_message(ITransport &from, TransportMessage const &msg);
     void handle_entity_update(NetPacket const &pkt);
+    void handle_dialogue_sync(std::vector<uint8_t> const &data);
 };

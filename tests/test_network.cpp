@@ -1,18 +1,42 @@
 #include "net/local-transport.hpp"
 #include "net/net-packet.hpp"
 #include "net/network-transport.hpp"
+#include <boost/asio.hpp>
 #include <boost/test/unit_test.hpp>
+#include <future>
 #include <thread>
+
+namespace asio = boost::asio;
 
 struct NetworkFixture {
     NetworkFixture() = default;
     ~NetworkFixture()
     {
-        NetworkTransport::shutdown();
+        ITransport::shutdown();
     }
 };
 
 BOOST_GLOBAL_FIXTURE(NetworkFixture);
+
+// Helper: run a coroutine to completion synchronously on a temporary io_context.
+template <typename T>
+static T run_sync(asio::awaitable<T> a)
+{
+    asio::io_context io;
+    std::promise<T> promise;
+    auto future = promise.get_future();
+    asio::co_spawn(
+        io,
+        [&]() -> asio::awaitable<void> {
+            if constexpr (std::is_void_v<T>)
+                co_await std::move(a), promise.set_value();
+            else
+                promise.set_value(co_await std::move(a));
+        },
+        asio::detached);
+    io.run();
+    return future.get();
+}
 
 BOOST_AUTO_TEST_SUITE(network_tests)
 
@@ -54,12 +78,10 @@ BOOST_AUTO_TEST_CASE(serialize_packet_roundtrip)
 BOOST_AUTO_TEST_CASE(make_and_parse_entity_update)
 {
     auto data = make_entity_update(7, 1.5f, -2.0f, 10, 20, true);
-    // Strip header
     auto header_type = read_bytes<uint32_t>(data, 0);
     auto header_size = read_bytes<uint32_t>(data, 4);
     BOOST_TEST(header_type == static_cast<uint32_t>(NetPacket::entity_update));
 
-    // Parse payload (skip 8-byte header)
     std::vector<uint8_t> payload(data.begin() + 8, data.end());
     auto u = parse_entity_update(payload);
     BOOST_TEST(u.id == 7);
@@ -93,49 +115,43 @@ BOOST_AUTO_TEST_CASE(make_chat_preserves_text)
 BOOST_AUTO_TEST_CASE(local_transport_send_receive)
 {
     auto [a, b] = create_transport_pair();
-
-    int received = 0;
-    a->set_callback([&](TransportExMessage const &msg) {
-        BOOST_TEST(msg.from == a.get());
-        BOOST_TEST(msg.type == NetPacket::chat);
-        received++;
-    });
-
     std::vector<uint8_t> pl = {'h', 'i'};
-    b->send({NetPacket::chat, pl});
-    a->consume();
-    BOOST_TEST(received == 1);
+
+    run_sync([&]() -> asio::awaitable<void> {
+        co_await b->write({NetPacket::chat, pl});
+        auto msg = co_await a->read();
+        BOOST_TEST(msg.type == NetPacket::chat);
+        BOOST_TEST(msg.payload == pl);
+    }());
 }
 
 BOOST_AUTO_TEST_CASE(local_transport_bidirectional)
 {
     auto [a, b] = create_transport_pair();
 
-    int a_count = 0, b_count = 0;
-    a->set_callback([&](TransportExMessage const &) { a_count++; });
-    b->set_callback([&](TransportExMessage const &) { b_count++; });
+    run_sync([&]() -> asio::awaitable<void> {
+        co_await b->write({NetPacket::chat, {}});
+        auto m1 = co_await a->read();
+        BOOST_TEST(m1.type == NetPacket::chat);
 
-    b->send({NetPacket::chat, {}});
-    a->consume();
-    BOOST_TEST(a_count == 1);
-
-    a->send({NetPacket::join, {}});
-    b->consume();
-    BOOST_TEST(b_count == 1);
+        co_await a->write({NetPacket::join, {}});
+        auto m2 = co_await b->read();
+        BOOST_TEST(m2.type == NetPacket::join);
+    }());
 }
 
 BOOST_AUTO_TEST_CASE(local_transport_multiple_messages)
 {
     auto [a, b] = create_transport_pair();
 
-    int count = 0;
-    a->set_callback([&](TransportExMessage const &) { count++; });
-
-    for (int i = 0; i < 5; ++i)
-        b->send({NetPacket::chat, {}});
-
-    a->consume();
-    BOOST_TEST(count == 5);
+    run_sync([&]() -> asio::awaitable<void> {
+        for (int i = 0; i < 5; ++i)
+            co_await b->write({NetPacket::chat, {}});
+        for (int i = 0; i < 5; ++i) {
+            auto msg = co_await a->read();
+            BOOST_TEST(msg.type == NetPacket::chat);
+        }
+    }());
 }
 
 BOOST_AUTO_TEST_CASE(local_transport_is_connected)
@@ -152,61 +168,31 @@ BOOST_AUTO_TEST_CASE(network_transport_not_connected_initially)
     BOOST_TEST(!peer->is_connected());
 }
 
-BOOST_AUTO_TEST_CASE(network_transport_do_receive_empty)
-{
-    auto peer = std::make_unique<NetworkTransport>();
-    int called = 0;
-    peer->set_callback([&](TransportExMessage const &) { called++; });
-    peer->consume(); // no data, should not call callback
-    BOOST_TEST(called == 0);
-}
-
-BOOST_AUTO_TEST_CASE(network_transport_on_connected)
-{
-    auto peer = std::make_unique<NetworkTransport>();
-    BOOST_TEST(!peer->is_connected());
-    peer->on_connected();
-    BOOST_TEST(peer->is_connected());
-}
-
 BOOST_AUTO_TEST_CASE(network_transport_has_socket)
 {
     auto peer = std::make_unique<NetworkTransport>();
-    // Socket exists but is not open (no connect/accept yet)
     auto &sock = peer->socket();
     BOOST_TEST(!sock.is_open());
 }
 
-// -- Listener lifecycle --
-BOOST_AUTO_TEST_CASE(listener_default_constructed)
+// -- Acceptor lifecycle --
+BOOST_AUTO_TEST_CASE(acceptor_construct_with_port)
 {
-    NetworkTransport::Acceptor l;
-    // Default-constructed; not listening
-    l.stop(); // no-op, safe to call
+    NetworkTransport::Acceptor l{0};
+    l.stop();
 }
 
-BOOST_AUTO_TEST_CASE(listener_move)
+BOOST_AUTO_TEST_CASE(acceptor_move)
 {
-    NetworkTransport::Acceptor a;
+    NetworkTransport::Acceptor a{0};
     NetworkTransport::Acceptor b = std::move(a);
-    b.stop(); // moved-from a is in valid-but-unspecified state
+    b.stop();
 }
 
-BOOST_AUTO_TEST_CASE(listener_stop_before_listen_is_safe)
+BOOST_AUTO_TEST_CASE(acceptor_stop_idempotent)
 {
-    NetworkTransport::Acceptor l;
-    l.stop(); // should not crash
-}
-
-BOOST_AUTO_TEST_CASE(listener_listen_twice_rejected)
-{
-    NetworkTransport::Acceptor l;
-    bool ok = l.listen(0, [](std::unique_ptr<NetworkTransport>) {});
-    // Port 0 means OS picks an ephemeral port
-    BOOST_TEST(ok);
-    // Second listen should be rejected
-    bool ok2 = l.listen(0, [](std::unique_ptr<NetworkTransport>) {});
-    BOOST_TEST(!ok2);
+    NetworkTransport::Acceptor l{0};
+    l.stop();
     l.stop();
 }
 
@@ -215,15 +201,21 @@ BOOST_AUTO_TEST_CASE(local_transport_threaded_send)
 {
     auto [a, b] = create_transport_pair();
     std::atomic<int> count{0};
-    a->set_callback([&](TransportExMessage const &) { count++; });
 
     std::thread t([&]() {
         for (int i = 0; i < 100; ++i)
-            b->send({NetPacket::chat, {}});
+            run_sync([&]() -> asio::awaitable<void> {
+                co_await b->write({NetPacket::chat, {}});
+            }());
     });
     t.join();
 
-    a->consume();
+    run_sync([&]() -> asio::awaitable<void> {
+        for (int i = 0; i < 100; ++i) {
+            co_await a->read();
+            count++;
+        }
+    }());
     BOOST_TEST(count == 100);
 }
 

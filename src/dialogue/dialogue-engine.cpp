@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
+#include <spdlog/spdlog.h>
 
 DialogueEngine::DialogueEngine() {}
 
@@ -60,8 +60,7 @@ int DialogueEngine::discover_languages(std::string const &dir)
         }
     }
     catch (std::exception const &e) {
-        std::cerr << "Failed to discover dialogue templates: " << e.what()
-                  << '\n';
+        spdlog::error("Failed to discover dialogue templates: {}", e.what());
     }
     return (int)templates_.size();
 }

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <imgui.h>
+#include <spdlog/spdlog.h>
 
 UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer)
     : window_(window), renderer_(renderer)
@@ -85,19 +86,15 @@ void UIManager::render(WorldState const &world_state, App const &app)
     ImGui::NewFrame();
 
     render_hud(world_state, app);
-    if (app.game_mode().dialogue().active) {
-        render_dialogue(app);
-    }
-    if (show_journal_)
-        render_journal(app);
-    if (show_inventory_)
-        render_inventory(app);
-    if (show_map_)
-        render_map(app);
-    if (app.show_help())
-        render_help_panel(app);
-    if (app.show_load_menu())
-        render_load_menu(app);
+
+    // clang-format off
+    if (app.dialogue().active) render_dialogue(app);
+    if (show_journal_)                     render_journal(app);
+    if (show_inventory_)                   render_inventory(app);
+    if (show_map_)                         render_map(app);
+    if (app.show_help())                   render_help_panel(app);
+    if (app.show_load_menu())              render_load_menu(app);
+
     if (app.show_multiplayer()) {
         if (!chat_active_) {
             chat_buf_[0] = '\0';
@@ -111,6 +108,7 @@ void UIManager::render(WorldState const &world_state, App const &app)
             chat_buf_[0] = '\0';
         }
     }
+    // clang-format on
 
     ImGui::Render();
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
@@ -192,7 +190,7 @@ void UIManager::render_hud(WorldState const &world_state, App const &app)
 
 void UIManager::render_dialogue(App const &app)
 {
-    auto const &ds = app.game_mode().dialogue();
+    auto const &ds = app.dialogue();
     auto const &loc = app.locale();
 
     ImGui::SetNextWindowSize(ImVec2(500, 480), ImGuiCond_Appearing);
@@ -381,7 +379,7 @@ void UIManager::render_multiplayer_menu(App const &app)
 
     ImGui::Separator();
     if (ImGui::Button(app.locale().get("mp.close").c_str()))
-        const_cast<App &>(app).set_show_multiplayer(false);
+        mutApp.set_show_multiplayer(false);
     ImGui::End();
 }
 
@@ -422,8 +420,8 @@ void UIManager::render_hosting(App &app)
                 app.client().remote_entities().size());
     ImGui::Separator();
     render_chat(app);
-    if (ImGui::Button(loc.get("mp.disconnect").c_str()))
-        app.stop_session();
+    // if (ImGui::Button(loc.get("mp.disconnect").c_str()))
+    //     app.stop_session();
 }
 
 void UIManager::render_local(App &app)
@@ -433,13 +431,10 @@ void UIManager::render_local(App &app)
     ImGui::Text("%s", loc.get("mp.host").c_str());
     ImGui::SetNextItemWidth(80);
     ImGui::InputInt("Port", &host_port_);
-    if (host_port_ < 1)
-        host_port_ = 1;
-    if (host_port_ > 65535)
-        host_port_ = 65535;
+    host_port_ = std::clamp(host_port_, 1, 65535);
     if (ImGui::Button(loc.get("mp.host_btn").c_str())) {
-        app.stop_session();
-        app.start_host_session(host_port_);
+        co_spawn(ITransport::io(), app.start_host_session(host_port_),
+                 detached);
     }
     ImGui::Separator();
     ImGui::Text("%s", loc.get("mp.join").c_str());
@@ -451,8 +446,7 @@ void UIManager::render_local(App &app)
     ImGui::InputInt("##port", &host_port_);
     host_port_ = std::clamp(host_port_, 1, 65535);
     if (ImGui::Button(loc.get("mp.connect").c_str())) {
-        app.stop_session();
-        co_spawn(NetworkTransport::io(),
+        co_spawn(ITransport::io(),
                  app.start_client_session(host_ip_, host_port_), detached);
         auto entry = host_ip_ + ":" + std::to_string(host_port_);
         if (!std::ranges::contains(server_list_, entry)) {
@@ -468,25 +462,24 @@ void UIManager::render_local(App &app)
             if (ImGui::Button(server_list_[i].c_str())) {
                 // Parse "ip:port" or just "ip"
                 auto colon = server_list_[i].rfind(':');
-                std::string ip, portStr;
-                int port = 27015;
-                if (colon != std::string::npos) {
-                    ip = server_list_[i].substr(0, colon);
-                    portStr = server_list_[i].substr(colon + 1);
-                    try {
-                        port = std::stoi(portStr);
+                {
+                    std::string ip;
+                    int port = 27015;
+                    if (colon != std::string::npos) {
+                        ip = server_list_[i].substr(0, colon);
+                        port = std::stoi(server_list_[i].substr(colon + 1));
                     }
-                    catch (...) {
+                    else {
+                        ip = server_list_[i];
                     }
+                    host_ip_ = ip;
+                    host_port_ = port;
                 }
-                else {
-                    ip = server_list_[i];
-                }
-                host_ip_ = ip;
-                host_port_ = port;
-                app.stop_session();
-                co_spawn(NetworkTransport::io(),
-                         app.start_client_session(ip, port), detached);
+                spdlog::debug("Clicked button, Connecting to {}:{}", host_ip_,
+                              host_port_);
+                co_spawn(ITransport::io(),
+                         app.start_client_session(host_ip_, host_port_),
+                         detached);
             }
             ImGui::SameLine();
             if (ImGui::Button("X")) {
@@ -510,7 +503,7 @@ void UIManager::render_client(App &app)
     ImGui::Separator();
     render_chat(app);
     if (ImGui::Button(loc.get("mp.disconnect").c_str()))
-        app.stop_session();
+        app.client().detach_transport();
 }
 
 void UIManager::render_chat(App &app)

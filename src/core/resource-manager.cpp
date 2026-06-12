@@ -1,4 +1,8 @@
 #include "core/resource-manager.hpp"
+
+#include <SDL3_image/SDL_image.h>
+#include <spdlog/spdlog.h>
+
 ResourceManager::~ResourceManager()
 {
     clear();
@@ -8,16 +12,17 @@ SDL_Texture *ResourceManager::load_texture(SDL_Renderer *renderer,
                                            std::string const &name,
                                            std::string const &path)
 {
-    SDL_Surface *surface = SDL_LoadBMP(path.c_str());
+
+    SDL_Surface *surface = IMG_Load(path.c_str());
     if (!surface) {
-        SDL_Log("Failed to load texture %s: %s", path.c_str(), SDL_GetError());
+        spdlog::error("Failed to load texture {}: {}", path, SDL_GetError());
         return nullptr;
     }
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
     SDL_DestroySurface(surface);
     if (!texture) {
-        SDL_Log("Failed to create texture from %s: %s", path.c_str(),
-                SDL_GetError());
+        spdlog::error("Failed to create texture from {}: {}", path,
+                      SDL_GetError());
         return nullptr;
     }
     textures_[name] = texture;

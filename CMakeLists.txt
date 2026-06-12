@@ -10,6 +10,7 @@ find_package(SDL3 REQUIRED)
 find_package(Boost REQUIRED)
 find_package(imgui REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(SDL3_image REQUIRED)
 
 set(SOURCES
     src/main.cpp
@@ -37,6 +38,7 @@ set(SOURCES
     src/systems/quest-manager.cpp
     src/net/server.cpp
     src/net/client.cpp
+    src/net/transport.cpp
     src/net/local-transport.cpp
     src/net/network-transport.cpp
     src/core/locale-manager.cpp
@@ -86,6 +88,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Boost::json
     imgui::imgui
     spdlog::spdlog
+    SDL3_image::SDL3_image
 )
 
 if(MINGW OR WIN32)
@@ -158,6 +161,7 @@ set(TEST_SOURCES
     src/survival/condition-tracker.cpp
     src/save/save-manager.cpp
     src/systems/combat-system.cpp
+    src/net/transport.cpp
     src/net/local-transport.cpp
     src/net/network-transport.cpp
 )
@@ -170,6 +174,13 @@ target_link_libraries(TheSunsetStraits_tests PRIVATE
     Boost::json
     spdlog::spdlog
 )
+
+if(MINGW OR WIN32)
+    target_link_libraries(TheSunsetStraits_tests PRIVATE
+        ws2_32
+        mswsock
+    )
+endif()
 
 # Register with CTest
 enable_testing()

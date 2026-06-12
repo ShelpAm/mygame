@@ -1,9 +1,8 @@
 #pragma once
 
 #include "net/transport.hpp"
+#include <boost/asio/experimental/channel.hpp>
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <utility>
 
 class LocalTransportEndpoint : public ITransport {
@@ -13,16 +12,15 @@ class LocalTransportEndpoint : public ITransport {
 
     void set_peer(LocalTransportEndpoint *peer);
 
-    void send(TransportMessage msg) override;
-    void set_callback(Callback cb) override;
-    void consume() override;
+    awaitable<void> write(TransportMessage msg) override;
+    awaitable<TransportMessage> read() override;
     bool is_connected() const override;
 
   private:
-    Callback callback_;
     LocalTransportEndpoint *peer_ = nullptr;
-    std::queue<TransportMessage> inbound_;
-    std::mutex mutex_;
+    asio::experimental::channel<void(boost::system::error_code,
+                                     TransportMessage)>
+        channel_;
 };
 
 std::pair<std::unique_ptr<LocalTransportEndpoint>,

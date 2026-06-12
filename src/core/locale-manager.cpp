@@ -2,7 +2,7 @@
 #include <boost/json.hpp>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
+#include <spdlog/spdlog.h>
 
 LocaleManager::LocaleManager() {}
 
@@ -27,7 +27,7 @@ int LocaleManager::discover_languages(std::string const &locale_dir)
         }
     }
     catch (std::exception const &e) {
-        std::cerr << "Failed to discover locales: " << e.what() << '\n';
+        spdlog::error("Failed to discover locales: {}", e.what());
     }
     return static_cast<int>(language_names_.size());
 }
@@ -51,8 +51,7 @@ bool LocaleManager::load_language_file(std::string const &path,
         return true;
     }
     catch (std::exception const &e) {
-        std::cerr << "Failed to load locale " << path << ": " << e.what()
-                  << '\n';
+        spdlog::error("Failed to load locale {}: {}", path, e.what());
         return false;
     }
 }

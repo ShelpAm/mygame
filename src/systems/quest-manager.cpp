@@ -1,7 +1,7 @@
 #include "systems/quest-manager.hpp"
 #include <boost/json.hpp>
 #include <fstream>
-#include <iostream>
+#include <spdlog/spdlog.h>
 
 bool QuestManager::load_from_json(std::string const &json_path)
 {
@@ -41,7 +41,7 @@ bool QuestManager::load_from_json(std::string const &json_path)
         return true;
     }
     catch (std::exception const &e) {
-        std::cerr << "Failed to load quests: " << e.what() << '\n';
+        spdlog::error("Failed to load quests: {}", e.what());
         return false;
     }
 }

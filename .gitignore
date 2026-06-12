@@ -1,6 +1,9 @@
 .claude/
 .cache/
 
+# Ignore game resources
+assets/
+
 build/
 CMakeUserPresets.json
 compile_commands.json

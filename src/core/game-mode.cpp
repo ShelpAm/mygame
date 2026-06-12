@@ -20,6 +20,7 @@
 #include <cmath>
 #include <fstream>
 #include <imgui.h>
+#include <spdlog/spdlog.h>
 
 static std::string readFile(std::string const &path)
 {
@@ -68,7 +69,9 @@ void GameMode::init_world(WorldState &ws, KnowledgeGraph &kg,
             fn.add_faction(std::move(f));
         }
     }
-    catch (...) {
+    catch (std::exception const &e) {
+        spdlog::error("Failed to load factions.json: {}", e.what());
+        throw;
     }
 
     // Load events
@@ -119,7 +122,9 @@ void GameMode::init_world(WorldState &ws, KnowledgeGraph &kg,
             es.add_event(std::move(ev));
         }
     }
-    catch (...) {
+    catch (std::exception const &e) {
+        spdlog::error("Failed to load events.json: {}", e.what());
+        throw;
     }
 
     // Load NPCs
@@ -158,7 +163,9 @@ void GameMode::init_world(WorldState &ws, KnowledgeGraph &kg,
             }
         }
     }
-    catch (...) {
+    catch (std::exception const &e) {
+        spdlog::error("Failed to load npcs.json: {}", e.what());
+        throw;
     }
 
     ws.reveal_radius({0, 0}, 8);
@@ -273,8 +280,11 @@ void GameMode::handle_interaction(EntityId player)
     if (!pp)
         return;
     auto eid = find_nearest_interactable(player, pp->world_pos);
-    if (eid == invalid_entity)
+    if (eid == invalid_entity) {
+        spdlog::debug("No interactable NPC near player {} at ({}, {})", player,
+                      pp->world_pos.x, pp->world_pos.y);
         return;
+    }
     auto *npc = em_.get_component<NPCState>(eid);
     if (!npc)
         return;

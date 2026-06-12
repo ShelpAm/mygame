@@ -105,19 +105,27 @@ class App {
     void start_local_session();
     awaitable<void> start_host_session(int port);
     awaitable<void> start_client_session(std::string const &ip, int port);
-    void stop_session();
 
     void set_ui_language(int lang_index);
+    DialogueState const &dialogue() const
+    {
+        return session_mode_ == SessionMode::client ? client_.dialogue()
+                                                     : game_mode_->dialogue();
+    }
     void end_dialogue()
     {
+        if (session_mode_ == SessionMode::client)
+            client_.send_dialogue_action("__end__");
         game_mode_->end_dialogue();
     }
     void ask_topic(std::string const &t)
     {
-        game_mode_->do_dialogue_action(t);
+        do_dialogue_action(t);
     }
     void do_dialogue_action(std::string const &a)
     {
+        if (session_mode_ == SessionMode::client)
+            client_.send_dialogue_action(a);
         game_mode_->do_dialogue_action(a);
     }
 

@@ -1,5 +1,6 @@
 #include "net/server.hpp"
 #include "core/game-mode.hpp"
+#include "entities/components/interactable.hpp"
 #include "entities/components/position.hpp"
 #include "factions/event-simulator.hpp"
 #include "net/client.hpp"
@@ -10,7 +11,7 @@
 #include "world/world-state.hpp"
 #include <cassert>
 #include <cstring>
-#include <print>
+#include <spdlog/spdlog.h>
 
 Server::Server() {}
 Server::~Server() {}
@@ -35,25 +36,46 @@ void Server::set_game_mode(GameMode *gm)
 awaitable<void> Server::listen(std::uint16_t port)
 {
     acceptor_ = std::make_unique<NetworkTransport::Acceptor>(port);
-    while (true) {
-        // TODO: Only accept once, but we should constantly call this.
-        auto t = co_await acceptor_->accept();
-        attach_transport(std::move(t));
+    while (acceptor_) {
+        try {
+            auto t = co_await acceptor_->accept();
+            attach_transport(std::move(t));
+        }
+        catch (boost::system::system_error const &e) {
+            if (e.code() == asio::error::operation_aborted)
+                break;
+            spdlog::error("Accept error: {}", e.what());
+        }
     }
 }
 
 void Server::attach_local_pair(Client &client)
 {
     auto [srv, cli] = create_transport_pair();
-    srv->set_callback(
-        [this](TransportExMessage const &msg) { on_message(msg); });
+    co_spawn(
+        ITransport::io(),
+        [this, srv = srv.get()]() -> awaitable<void> {
+            while (srv->is_connected()) {
+                co_await on_message(*srv, co_await srv->read());
+            }
+            co_return;
+        },
+        detached);
     client.attach_transport(std::move(cli));
     transports_.push_back(std::move(srv));
 }
 
 void Server::attach_transport(std::unique_ptr<ITransport> t)
 {
-    t->set_callback([this](TransportExMessage const &msg) { on_message(msg); });
+    co_spawn(
+        ITransport::io(),
+        [this, t = t.get()]() -> awaitable<void> {
+            while (t->is_connected()) {
+                co_await on_message(*t, co_await t->read());
+            }
+            co_return;
+        },
+        detached);
     transports_.push_back(std::move(t));
 }
 
@@ -62,7 +84,8 @@ void Server::clear_transports()
     transports_.clear();
 }
 
-void Server::on_message(TransportExMessage const &msg)
+awaitable<void> Server::on_message(ITransport &from,
+                                   TransportMessage const &msg)
 {
     if (msg.type == NetPacket::join) {
         assert(msg.payload.empty());
@@ -70,8 +93,8 @@ void Server::on_message(TransportExMessage const &msg)
         player_entities_.insert(eid);
         std::vector<uint8_t> payload;
         write_bytes(payload, eid); // player_id
-        msg.from->send({NetPacket::return_pid, payload});
-        std::println("New player joined with ID: {}", eid);
+        co_await from.write({NetPacket::return_pid, payload});
+        spdlog::info("New player joined with ID: {}", eid);
     }
     else if (msg.type == NetPacket::entity_update) {
         auto u = parse_entity_update(msg.payload);
@@ -130,9 +153,6 @@ void Server::update(float dt)
     if (!cs_)
         return;
 
-    for (auto &t : transports_)
-        t->consume();
-
     // Processes user input
     while (!pending_inputs_.empty()) {
         auto const &[pid, mx, my] = pending_inputs_.front();
@@ -162,7 +182,8 @@ void Server::update(float dt)
         push(ev.damage);
         p.push_back(ev.killed ? 1 : 0);
         for (auto &t : transports_)
-            t->send({NetPacket::combat_event, p});
+            co_spawn(ITransport::io(), t->write({NetPacket::combat_event, p}),
+                     detached);
     }
 
     check_event_spawns();
@@ -198,7 +219,8 @@ void Server::broadcast_sync()
     if (payload.empty())
         return;
     for (auto &t : transports_)
-        t->send({NetPacket::state_full, payload});
+        co_spawn(ITransport::io(), t->write({NetPacket::state_full, payload}),
+                 detached);
 }
 
 void Server::handle_combat_event(int attacker_id, int defender_id, int damage,
@@ -216,7 +238,7 @@ void Server::handle_combat_event(int attacker_id, int defender_id, int damage,
 EntityId Server::add_player(Vec2f pos)
 {
     auto eid = game_mode_->entities().create_entity();
-    std::println("Adding player {} at position ({}, {})", eid, pos.x, pos.y);
+    spdlog::info("Adding player {} at position ({}, {})", eid, pos.x, pos.y);
     game_mode_->entities().add_component<Position>(eid,
                                                    Position{pos, {0, 0}, 1.f});
     game_mode_->entities().add_component<CombatStats>(
@@ -267,6 +289,9 @@ std::vector<uint8_t> Server::build_sync_payload()
         push(max_hp);
         out.push_back(alive);
         out.push_back(team);
+        uint8_t flags =
+            game_mode_->entities().get_component<Interactable>(id) ? 1 : 0;
+        out.push_back(flags);
     }
     return out;
 }

@@ -80,6 +80,7 @@ class Server {
 
     std::vector<uint8_t> build_sync_payload();
     void broadcast_sync();
-    void on_message(TransportExMessage const &msg);
+    awaitable<void> on_message(ITransport &from, TransportMessage const &msg);
     void check_event_spawns();
+    void sync_dialogue_to(ITransport *to);
 };

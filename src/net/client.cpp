@@ -1,19 +1,28 @@
 #include "net/client.hpp"
 #include "entities/components/combat-stats.hpp"
+#include "entities/components/interactable.hpp"
 #include "entities/components/position.hpp"
 #include "entities/components/sprite.hpp"
 #include "net/net-packet.hpp"
 #include <cassert>
 #include <cstring>
-#include <print>
+#include <spdlog/spdlog.h>
 
 Client::Client() = default;
 
 void Client::attach_transport(std::unique_ptr<ITransport> t)
 {
     transport_ = std::move(t);
-    transport_->set_callback(
-        [this](TransportExMessage const &msg) { on_message(msg); });
+
+    co_spawn(
+        ITransport::io(),
+        [this]() -> awaitable<void> {
+            while (transport_->is_connected()) {
+                on_message(*transport_, co_await transport_->read());
+            }
+            co_return;
+        },
+        detached);
 }
 
 void Client::detach_transport()
@@ -35,8 +44,13 @@ void Client::reset()
 
 void Client::send_join_request()
 {
-    assert(transport_);
-    transport_->send({NetPacket::join, std::vector<std::uint8_t>{}});
+    if (!transport_) {
+        spdlog::error("send_join_request: no transport attached");
+        return;
+    }
+    co_spawn(ITransport::io(),
+             transport_->write({NetPacket::join, std::vector<std::uint8_t>{}}),
+             detached);
 }
 
 void Client::send_player_direction(Vec2f dir)
@@ -47,46 +61,77 @@ void Client::send_player_direction(Vec2f dir)
     write_bytes(payload, player_id_);
     write_float(payload, dir.x);
     write_float(payload, dir.y);
-    transport_->send({NetPacket::player_input, std::move(payload)});
+    co_spawn(ITransport::io(),
+             transport_->write({NetPacket::player_input, std::move(payload)}),
+             detached);
 }
 
 void Client::send_recruit()
 {
-    if (!transport_)
+    if (!transport_) {
+        spdlog::warn("send_recruit: no transport attached");
         return;
+    }
     std::vector<uint8_t> payload;
     write_bytes(payload, player_id_);
-    transport_->send({NetPacket::recruit_soldier, std::move(payload)});
+    co_spawn(
+        ITransport::io(),
+        transport_->write({NetPacket::recruit_soldier, std::move(payload)}),
+        detached);
 }
 
 void Client::send_interact()
 {
-    if (!transport_)
+    if (!transport_) {
+        spdlog::warn("send_interact: no transport attached");
         return;
+    }
     std::vector<uint8_t> payload;
     write_bytes(payload, player_id_);
-    transport_->send({NetPacket::interact, std::move(payload)});
+    co_spawn(ITransport::io(),
+             transport_->write({NetPacket::interact, std::move(payload)}),
+             detached);
 }
 
 void Client::send_rest()
 {
-    if (!transport_)
+    if (!transport_) {
+        spdlog::warn("send_rest: no transport attached");
         return;
+    }
     std::vector<uint8_t> payload;
     write_bytes(payload, player_id_);
-    transport_->send({NetPacket::rest, std::move(payload)});
+    co_spawn(ITransport::io(),
+             transport_->write({NetPacket::rest, std::move(payload)}),
+             detached);
 }
 
 void Client::send_chat(std::string const &msg)
 {
-    if (!transport_)
+    if (!transport_) {
+        spdlog::warn("send_chat: no transport attached");
         return;
+    }
     chat_history_.push_back("You: " + msg);
     std::vector<uint8_t> p(msg.begin(), msg.end());
-    transport_->send({NetPacket::chat, std::move(p)});
+    co_spawn(ITransport::io(),
+             transport_->write({NetPacket::chat, std::move(p)}), detached);
 }
 
-void Client::on_message(TransportExMessage const &msg)
+void Client::send_dialogue_action(std::string const &action)
+{
+    if (!transport_) {
+        spdlog::warn("send_dialogue_action: no transport attached");
+        return;
+    }
+    co_spawn(
+        ITransport::io(),
+        transport_->write({NetPacket::dialogue_action,
+                           std::vector<uint8_t>(action.begin(), action.end())}),
+        detached);
+}
+
+void Client::on_message(ITransport &from, TransportMessage const &msg)
 {
     switch (msg.type) {
     case NetPacket::state_full:
@@ -108,7 +153,10 @@ void Client::on_message(TransportExMessage const &msg)
     }
     case NetPacket::return_pid:
         memcpy(&player_id_, msg.payload.data(), 4);
-        std::println("Returned player ID: {}", player_id_);
+        spdlog::info("Returned player ID: {}", player_id_);
+        break;
+    case NetPacket::dialogue_sync:
+        handle_dialogue_sync(msg.payload);
         break;
     default:
         break;
@@ -133,11 +181,7 @@ void Client::handle_entity_update(NetPacket const &pkt)
         {u.id, {u.x, u.y}, {u.x, u.y}, u.hp, u.max_hp, u.alive});
 }
 
-void Client::update(float dt)
-{
-    if (transport_)
-        transport_->consume();
-}
+void Client::update(float dt) {}
 
 EntityId Client::local_player() const
 {
@@ -148,7 +192,10 @@ Vec2f Client::player_position()
 {
     if (player_id_ == invalid_entity)
         return {};
-    auto *p = em_.get_component<Position>(player_id_);
+    auto it = id_map_.find(static_cast<int>(player_id_));
+    if (it == id_map_.end())
+        return {};
+    auto *p = em_.get_component<Position>(it->second);
     return p ? p->world_pos : Vec2f{};
 }
 
@@ -156,7 +203,10 @@ bool Client::is_player_dead()
 {
     if (player_id_ == invalid_entity)
         return false;
-    auto *cs = em_.get_component<CombatStats>(player_id_);
+    auto it = id_map_.find(static_cast<int>(player_id_));
+    if (it == id_map_.end())
+        return false;
+    auto *cs = em_.get_component<CombatStats>(it->second);
     return cs && !cs->alive;
 }
 
@@ -164,12 +214,15 @@ CombatStats const *Client::player_stats()
 {
     if (player_id_ == invalid_entity)
         return nullptr;
-    return em_.get_component<CombatStats>(player_id_);
+    auto it = id_map_.find(static_cast<int>(player_id_));
+    if (it == id_map_.end())
+        return nullptr;
+    return em_.get_component<CombatStats>(it->second);
 }
 
 void Client::apply_sync(std::vector<uint8_t> const &data)
 {
-    for (size_t i = 0; i + 22 <= data.size(); i += 22) {
+    for (size_t i = 0; i + 23 <= data.size(); i += 23) {
         auto se = parse_sync_entity(data, i);
 
         if (se.id == 0) {
@@ -222,6 +275,8 @@ void Client::apply_sync(std::vector<uint8_t> const &data)
                                               : (se.team == 2 ? Team::neutral
                                                               : Team::player),
                                  se.max_hp, se.hp, 3, 2, 80.f});
+            if (se.flags & 1)
+                em_.add_component<Interactable>(eid, Interactable{64.f, true});
         }
         else {
             auto eid = it->second;
@@ -274,11 +329,14 @@ void Client::handle_combat_event(int attacker_id, int defender_id, int damage,
     (void)attacker_id;
     if (defender_id == 0) {
         if (player_id_ != invalid_entity) {
-            auto *cs = em_.get_component<CombatStats>(player_id_);
-            if (cs) {
-                cs->hp -= damage;
-                if (killed)
-                    cs->alive = false;
+            auto it = id_map_.find(static_cast<int>(player_id_));
+            if (it != id_map_.end()) {
+                auto *cs = em_.get_component<CombatStats>(it->second);
+                if (cs) {
+                    cs->hp -= damage;
+                    if (killed)
+                        cs->alive = false;
+                }
             }
         }
         return;
@@ -291,6 +349,33 @@ void Client::handle_combat_event(int attacker_id, int defender_id, int damage,
         if (killed)
             cs->alive = false;
     }
+}
+
+void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
+{
+    if (data.size() < 4)
+        return;
+    uint32_t name_len;
+    memcpy(&name_len, data.data(), 4);
+    if (name_len == 0) {
+        dialogue_ = {};
+        return;
+    }
+    auto s = parse_dialogue_sync(data);
+    dialogue_.active = true;
+    dialogue_.npc_name = std::move(s.npc_name);
+    dialogue_.npc_trust = s.npc_trust;
+    dialogue_.can_gift = s.can_gift;
+    dialogue_.can_threaten = s.can_threaten;
+    dialogue_.history.clear();
+    for (auto &l : s.lines) {
+        dialogue_.history.push_back(
+            {l.speaker == 0 ? DialogueLine::player : DialogueLine::npc,
+             l.use_raw ? "" : l.text, l.use_raw ? l.text : "", l.use_raw,
+             std::move(l.npc_name)});
+    }
+    dialogue_.available_topics = std::move(s.topics);
+    dialogue_.available_actions = std::move(s.actions);
 }
 
 void Client::interpolate_entities(float dt)

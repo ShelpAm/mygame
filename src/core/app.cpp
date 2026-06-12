@@ -87,23 +87,21 @@ void App::start_local_session()
 
 awaitable<void> App::start_host_session(int port)
 {
-    start_local_session();
-
     session_mode_ = SessionMode::host;
-    server_->listen(port);
+    co_await server_->listen(port);
     co_return;
 }
 
 awaitable<void> App::start_client_session(std::string const &host, int port)
 {
-    server_.reset();
-
     // Resolve domain name if needed.
     std::string resolved_ip = host;
     try {
         boost::asio::ip::make_address(host);
     }
-    catch (...) {
+    catch (std::exception const &e) {
+        spdlog::debug("Not an IP address ({}), resolving as hostname",
+                      e.what());
         try {
             boost::asio::io_context io;
             boost::asio::ip::tcp::resolver resolver(io);
@@ -113,7 +111,8 @@ awaitable<void> App::start_client_session(std::string const &host, int port)
                 break;
             }
         }
-        catch (...) {
+        catch (std::exception const &e2) {
+            spdlog::error("DNS resolution failed for {}: {}", host, e2.what());
         }
     }
 
@@ -125,13 +124,8 @@ awaitable<void> App::start_client_session(std::string const &host, int port)
         session_mode_ = SessionMode::client;
     }
     catch (std::exception &e) {
+        spdlog::error("Connect failed: {}, aborting", e.what());
     }
-}
-
-void App::stop_session()
-{
-    server_.reset();
-    client_.detach_transport();
 }
 
 void App::run()
@@ -148,9 +142,11 @@ void App::run()
 
 void App::shutdown()
 {
-    stop_session();
+    spdlog::set_level(spdlog::level::debug);
+    client_.reset();
     server_.reset();
     game_mode_.reset();
+    ITransport::shutdown();
     events_.reset();
     rumors_.reset();
     ui_manager_.reset();
@@ -194,7 +190,7 @@ void App::update(float dt)
 
     // Handles move
     float mx = 0, my = 0;
-    bool in_dialogue = game_mode_->dialogue().active;
+    bool in_dialogue = dialogue().active;
     if (!ImGui::IsAnyItemActive() && !client_.is_player_dead() &&
         !in_dialogue) {
         if (input_.is_pressed(InputManager::Action::move_up))
@@ -253,7 +249,8 @@ void App::render()
     SDL_RenderClear(renderer_);
 
     render_system_->render(client_.entities(), world_state_, navigation_system_,
-                           combat_.events());
+                           combat_.events(), client_.player_position(),
+                           client_.local_player());
     combat_.clear_events();
     ui_manager_->render(world_state_, *this);
     SDL_RenderPresent(renderer_);
@@ -307,6 +304,11 @@ std::vector<int> App::available_save_slots() const
 
 void App::load_from_slot(int slot)
 {
+    spdlog::warn("Save/load is currently disabled to prevent exploits and "
+                 "bugs. It will be re-enabled in a future update.");
+    (void)slot;
+    return;
+
     std::string path = "saves/save_" + std::to_string(slot) + ".json";
     SaveManager::SaveData data;
     if (!SaveManager::load(path, data))
@@ -314,7 +316,6 @@ void App::load_from_slot(int slot)
 
     auto pid = game_mode_->load_world(data);
 
-    stop_session();
     client_.reset();
     start_local_session();
 
