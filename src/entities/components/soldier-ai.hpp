@@ -1,9 +1,7 @@
 #pragma once
 
 #include "core/math.hpp"
-#include <cstdint>
-
-using EntityId = std::uint32_t;
+#include "entities/entity-manager.hpp"
 
 struct SoldierAI {
     EntityId follow_target = 0; // Entity to follow (player or captain)

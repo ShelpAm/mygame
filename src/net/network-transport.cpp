@@ -11,15 +11,15 @@ NetworkTransport::NetworkTransport(tcp::socket sock) : socket_(std::move(sock))
 }
 
 NetworkTransport::Acceptor::Acceptor(std::uint16_t port)
-    : impl_(std::make_shared<tcp::acceptor>(ITransport::io(),
-                                            tcp::endpoint(tcp::v4(), port)))
+    : impl_(std::make_shared<tcp_acceptor>(ITransport::io(),
+                                           tcp::endpoint(tcp::v4(), port)))
 {
 }
 
 awaitable<std::unique_ptr<NetworkTransport>>
 NetworkTransport::Acceptor::accept()
 {
-    auto sock = co_await impl_->async_accept(use_awaitable);
+    auto sock = co_await impl_->async_accept();
     co_return std::make_unique<NetworkTransport>(std::move(sock));
 }
 

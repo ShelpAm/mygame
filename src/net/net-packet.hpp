@@ -152,7 +152,7 @@ inline std::vector<uint8_t> make_enemy_wave(Vec2f center, int count, Team team)
 // --- Parse helpers ---
 
 struct EntityUpdateData {
-    int id;
+    uint32_t id; // wire-format 4-byte entity ID (cast from EntityId)
     float x, y;
     int hp, max_hp;
     bool alive;
@@ -172,7 +172,7 @@ inline EntityUpdateData parse_entity_update(std::vector<uint8_t> const &d,
 }
 
 struct SyncEntityData {
-    int id;
+    uint32_t id; // wire-format 4-byte entity ID (cast from EntityId)
     float x, y;
     int hp, max_hp;
     bool alive;
@@ -196,7 +196,8 @@ inline SyncEntityData parse_sync_entity(std::vector<uint8_t> const &d,
 }
 
 struct CombatEventData {
-    int attacker_id, defender_id, damage;
+    uint32_t attacker_id, defender_id; // wire-format 4-byte entity ID (cast from EntityId)
+    int damage;
     bool killed;
 };
 

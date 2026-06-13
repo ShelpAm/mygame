@@ -9,8 +9,6 @@
 class WorldState;
 class KnowledgeGraph;
 class RelationshipTable;
-class EntityManager;
-
 class SaveManager {
   public:
     struct NPCData {

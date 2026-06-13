@@ -1,8 +1,11 @@
 #pragma once
 
-#include "entities/entity-manager.hpp"
+#include <cstdint>
 #include <string>
 #include <vector>
+
+using EntityId = std::uint64_t; // matches flecs::entity_t
+constexpr EntityId invalid_entity = 0;
 
 struct DialogueLine {
     enum Speaker { player, npc };

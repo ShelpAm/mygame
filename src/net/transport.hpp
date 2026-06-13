@@ -11,9 +11,13 @@ namespace asio = boost::asio;
 using asio::as_tuple;
 using asio::awaitable;
 using asio::co_spawn;
+using asio::deferred;
 using asio::detached;
 using asio::use_awaitable;
 using asio::ip::tcp;
+
+using default_token = asio::use_awaitable_t<>;
+// using default_token = asio::deferred_t;
 
 struct TransportMessage {
     NetPacket::Type type;
@@ -29,6 +33,10 @@ class ITransport {
     virtual ~ITransport() = default;
 
     static asio::io_context &io();
+    static void spawn(auto awaitable)
+    {
+        co_spawn(io(), std::move(awaitable), detached);
+    }
     static void shutdown();
 
     // Push a message to the peer. Non-blocking.

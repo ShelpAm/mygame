@@ -1,17 +1,15 @@
 #pragma once
 
-#include <cstdint>
+#include "core/game-types.hpp"
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
 #include <vector>
 
-using EntityId = std::uint32_t;
-constexpr EntityId invalid_entity = 0;
-
 class EntityManager {
   public:
     EntityId create_entity();
+    EntityId create_entity(EntityId id); // register existing Flecs ID
     void destroy_entity(EntityId id);
     bool alive(EntityId id) const;
 
@@ -24,6 +22,8 @@ class EntityManager {
     template <typename T> bool has_component(EntityId id) const;
 
     std::vector<EntityId> all_entities() const;
+
+    template <typename... Ts> std::vector<EntityId> view() const;
 
   private:
     EntityId next_id_ = invalid_entity + 1;
@@ -77,4 +77,16 @@ template <typename T> bool EntityManager::has_component(EntityId id) const
         return false;
     auto &p = *static_cast<ComponentPool<T> const *>(it->second.get());
     return p.data.contains(id);
+}
+
+template <typename... Ts>
+std::vector<EntityId> EntityManager::view() const
+{
+    std::vector<EntityId> result;
+    for (EntityId id : alive_) {
+        if ((has_component<Ts>(id) && ...)) {
+            result.push_back(id);
+        }
+    }
+    return result;
 }

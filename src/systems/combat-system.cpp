@@ -2,204 +2,258 @@
 #include "entities/components/position.hpp"
 #include "entities/components/soldier-ai.hpp"
 #include "entities/components/sprite.hpp"
-#include "entities/entity-manager.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
-void CombatSystem::update(EntityManager &entities, float dt)
+void CombatSystem::update(flecs::world &world, float dt)
 {
-    resolve_combat(entities, dt);
-    process_soldier_ai(entities);
+    resolve_combat(world, dt);
+    process_soldier_ai(world);
 }
 
-void CombatSystem::resolve_combat(EntityManager &entities, float dt)
+struct EnemyInfo {
+    EntityId id;
+    Vec2f world_pos;
+    CombatStats stats;
+};
+
+void CombatSystem::resolve_combat(flecs::world &world, float dt)
 {
-    // Collect all combat-capable entities
-    std::vector<EntityId> combatants;
-    for (auto id : entities.all_entities()) {
-        auto *cs = entities.get_component<CombatStats>(id);
-        if (cs && cs->alive && cs->team != Team::neutral) {
-            combatants.push_back(id);
+    // Phase 1: collect all data from queries
+    struct Combatant {
+        EntityId id;
+        CombatStats stats;
+        Vec2f world_pos;
+    };
+    std::vector<Combatant> combatants;
+    std::vector<EnemyInfo> all_enemies;
+
+    world.query<CombatStats, Position>().each(
+        [&](flecs::entity e, CombatStats &cs, Position &pos) {
+            all_enemies.push_back({e.id(), pos.world_pos, cs});
+            if (cs.alive && cs.team != Team::neutral)
+                combatants.push_back({e.id(), cs, pos.world_pos});
+        });
+
+    // Phase 2: process
+    struct CombatUpdate {
+        EntityId id;
+        CombatStats new_stats;
+    };
+    std::vector<CombatUpdate> updates;
+
+    for (auto &attacker : combatants) {
+        attacker.stats.cooldown_remaining -= dt;
+        if (attacker.stats.cooldown_remaining > 0.f)
+            continue;
+
+        Team enemy_team = (attacker.stats.team == Team::player) ? Team::enemy
+                                                                 : Team::player;
+
+        EntityId targetId = 0;
+        float nearestDist = attacker.stats.attack_range;
+        for (auto &enemy : all_enemies) {
+            if (enemy.id == attacker.id || enemy.stats.team != enemy_team ||
+                !enemy.stats.alive)
+                continue;
+            float d = std::hypot(enemy.world_pos.x - attacker.world_pos.x,
+                                 enemy.world_pos.y - attacker.world_pos.y);
+            if (d < nearestDist) {
+                nearestDist = d;
+                targetId = enemy.id;
+            }
         }
-    }
 
-    for (auto attacker_id : combatants) {
-        auto *atkStats = entities.get_component<CombatStats>(attacker_id);
-        if (!atkStats || !atkStats->alive)
-            continue;
-
-        atkStats->cooldown_remaining -= dt;
-        if (atkStats->cooldown_remaining > 0.f)
-            continue;
-
-        // Find nearest enemy
-        Team enemy_team =
-            (atkStats->team == Team::player) ? Team::enemy : Team::player;
-        auto targetId = find_nearest_enemy(entities, attacker_id, enemy_team);
         if (targetId == 0)
             continue;
 
-        auto *defStats = entities.get_component<CombatStats>(targetId);
-        if (!defStats || !defStats->alive)
-            continue;
+        // Find defender stats
+        int def_defense = 0;
+        bool def_killed = false;
+        for (auto &target : all_enemies) {
+            if (target.id == targetId) {
+                def_defense = target.stats.defense;
+                int dmg = calc_damage(attacker.stats.attack, def_defense);
 
-        // Attack!
-        int dmg = calc_damage(atkStats->attack, defStats->defense);
-        defStats->hp -= dmg;
-        atkStats->cooldown_remaining = atkStats->attack_cooldown;
+                attacker.stats.cooldown_remaining =
+                    attacker.stats.attack_cooldown;
+                updates.push_back({attacker.id, attacker.stats});
 
-        bool killed = defStats->hp <= 0;
-        if (killed) {
-            defStats->alive = false;
-            defStats->hp = 0;
+                target.stats.hp -= dmg;
+                if (target.stats.hp <= 0) {
+                    target.stats.alive = false;
+                    target.stats.hp = 0;
+                    def_killed = true;
+                }
+                updates.push_back({targetId, target.stats});
+
+                events_.push_back({attacker.id, targetId, "attacker",
+                                   "defender", dmg, def_killed});
+                break;
+            }
         }
-
-        events_.push_back(
-            {attacker_id, targetId, "attacker", "defender", dmg, killed});
     }
+
+    // Phase 3: write back all modifications
+    for (auto &up : updates)
+        world.entity(up.id).set<CombatStats>(up.new_stats);
 }
 
-void CombatSystem::process_soldier_ai(EntityManager &entities)
+void CombatSystem::process_soldier_ai(flecs::world &world)
 {
     float const SOLDIER_SPEED = 120.f;
 
-    for (auto id : entities.all_entities()) {
-        auto *ai = entities.get_component<SoldierAI>(id);
-        if (!ai)
-            continue;
+    // Collect soldiers and enemies data in a single pass
+    struct SoldierData {
+        EntityId id;
+        SoldierAI ai;
+        Position pos;
+        CombatStats cs;
+    };
+    std::vector<SoldierData> soldiers;
+    std::vector<EnemyInfo> all_enemies;
 
-        auto *pos = entities.get_component<Position>(id);
-        auto *cs = entities.get_component<CombatStats>(id);
-        if (!pos || !cs || !cs->alive)
-            continue;
+    world.query<SoldierAI, Position, CombatStats>().each(
+        [&](flecs::entity e, SoldierAI &ai, Position &pos, CombatStats &cs) {
+            all_enemies.push_back({e.id(), pos.world_pos, cs});
+            if (cs.alive)
+                soldiers.push_back({e.id(), ai, pos, cs});
+        });
 
+    // Process and write back using set<Position>/set<SoldierAI>
+    for (auto &s : soldiers) {
         // Check for nearby enemies
-        auto enemyId = find_nearest_enemy(
-            entities, id,
-            cs->team == Team::player ? Team::enemy : Team::player);
-        auto *enemyPos = entities.get_component<Position>(enemyId);
+        Team enemy_team =
+            s.cs.team == Team::player ? Team::enemy : Team::player;
+        EntityId enemyId = 0;
+        Vec2f enemyWorldPos;
+        float nearestDist = s.ai.engage_range;
+        for (auto &enemy : all_enemies) {
+            if (enemy.id == s.id || enemy.stats.team != enemy_team ||
+                !enemy.stats.alive)
+                continue;
+            float d = std::hypot(enemy.world_pos.x - s.pos.world_pos.x,
+                                 enemy.world_pos.y - s.pos.world_pos.y);
+            if (d < nearestDist) {
+                nearestDist = d;
+                enemyId = enemy.id;
+                enemyWorldPos = enemy.world_pos;
+            }
+        }
 
-        if (enemyId != 0 && enemyPos) {
-            Vec2f diff = enemyPos->world_pos - pos->world_pos;
-            float dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
+        if (enemyId != 0) {
+            Vec2f diff = enemyWorldPos - s.pos.world_pos;
+            float dist = std::hypot(diff.x, diff.y);
 
-            if (dist <= ai->engage_range) {
-                // Move toward enemy
-                if (dist > cs->attack_range) {
+            if (dist <= s.ai.engage_range) {
+                if (dist > s.cs.attack_range) {
                     Vec2f dir = {diff.x / dist, diff.y / dist};
-                    pos->world_pos.x += dir.x * SOLDIER_SPEED * 1.2f / 60.f;
-                    pos->world_pos.y += dir.y * SOLDIER_SPEED * 1.2f / 60.f;
+                    s.pos.world_pos.x +=
+                        dir.x * SOLDIER_SPEED * 1.2f / 60.f;
+                    s.pos.world_pos.y +=
+                        dir.y * SOLDIER_SPEED * 1.2f / 60.f;
                 }
-                ai->in_combat = true;
+                s.ai.in_combat = true;
+                s.pos.tile_pos = {(int)(s.pos.world_pos.x / 64.f),
+                                  (int)(s.pos.world_pos.y / 64.f)};
+                world.entity(s.id).set<Position>(s.pos);
+                world.entity(s.id).set<SoldierAI>(s.ai);
                 continue;
             }
         }
 
-        ai->in_combat = false;
+        s.ai.in_combat = false;
 
         // Follow leader
-        auto *leaderPos = entities.get_component<Position>(ai->follow_target);
+        const auto *leaderPos = world.try_get<Position>(s.ai.follow_target);
         if (!leaderPos)
             continue;
 
-        Vec2f goal = leaderPos->world_pos + ai->formation_offset;
-        Vec2f diff = goal - pos->world_pos;
-        float dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
+        Vec2f goal = leaderPos->world_pos + s.ai.formation_offset;
+        Vec2f diff = goal - s.pos.world_pos;
+        float dist = std::hypot(diff.x, diff.y);
 
-        if (dist > ai->follow_distance) {
+        if (dist > s.ai.follow_distance) {
             Vec2f dir = diff.x == 0 && diff.y == 0
                             ? Vec2f{1.f, 0.f}
                             : Vec2f{diff.x / dist, diff.y / dist};
-            pos->world_pos.x += dir.x * SOLDIER_SPEED / 60.f;
-            pos->world_pos.y += dir.y * SOLDIER_SPEED / 60.f;
+            s.pos.world_pos.x += dir.x * SOLDIER_SPEED / 60.f;
+            s.pos.world_pos.y += dir.y * SOLDIER_SPEED / 60.f;
         }
-        pos->tile_pos = {(int)(pos->world_pos.x / 64.f),
-                         (int)(pos->world_pos.y / 64.f)};
+        s.pos.tile_pos = {(int)(s.pos.world_pos.x / 64.f),
+                          (int)(s.pos.world_pos.y / 64.f)};
+
+        world.entity(s.id).set<Position>(s.pos);
+        world.entity(s.id).set<SoldierAI>(s.ai);
     }
 }
 
-EntityId CombatSystem::find_nearest_enemy(EntityManager &entities,
-                                          EntityId self, Team enemy_team) const
+EntityId CombatSystem::find_nearest_enemy(flecs::world &world, EntityId self,
+                                          Team enemy_team) const
 {
-    auto *selfPos = entities.get_component<Position>(self);
-    auto *selfStats = entities.get_component<CombatStats>(self);
+    const auto *selfPos = world.try_get<Position>(self);
+    const auto *selfStats = world.try_get<CombatStats>(self);
     if (!selfPos || !selfStats)
         return 0;
 
     EntityId nearest = 0;
     float nearestDist = selfStats->attack_range;
 
-    for (auto id : entities.all_entities()) {
-        if (id == self)
-            continue;
-        auto *cs = entities.get_component<CombatStats>(id);
-        if (!cs || !cs->alive || cs->team != enemy_team)
-            continue;
-
-        auto *pos = entities.get_component<Position>(id);
-        if (!pos)
-            continue;
-
-        Vec2f diff = pos->world_pos - selfPos->world_pos;
-        float dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
-        if (dist < nearestDist) {
-            nearestDist = dist;
-            nearest = id;
-        }
-    }
+    world.query<CombatStats, Position>().each(
+        [&](flecs::entity e, CombatStats &cs, Position &pos) {
+            if (e.id() == self || !cs.alive || cs.team != enemy_team)
+                return;
+            float d = std::hypot(pos.world_pos.x - selfPos->world_pos.x,
+                                 pos.world_pos.y - selfPos->world_pos.y);
+            if (d < nearestDist) {
+                nearestDist = d;
+                nearest = e.id();
+            }
+        });
     return nearest;
 }
 
 int CombatSystem::calc_damage(int attack, int defense) const
 {
     int base = std::max(1, attack - defense / 2);
-    int variance = std::rand() % 3 - 1; // -1, 0, or +1
+    int variance = std::rand() % 3 - 1;
     return std::max(1, base + variance);
 }
 
-bool CombatSystem::team_near_position(EntityManager &entities, Team team,
+bool CombatSystem::team_near_position(flecs::world &world, Team team,
                                       Vec2f pos, float radius) const
 {
-    for (auto id : entities.all_entities()) {
-        auto *cs = entities.get_component<CombatStats>(id);
-        if (!cs || !cs->alive || cs->team != team)
-            continue;
-        auto *p = entities.get_component<Position>(id);
-        if (!p)
-            continue;
-        Vec2f d = p->world_pos - pos;
-        if (std::sqrt(d.x * d.x + d.y * d.y) <= radius)
-            return true;
-    }
-    return false;
+    bool found = false;
+    world.query<CombatStats, Position>().each(
+        [&](flecs::entity, CombatStats &cs, Position &p) {
+            if (!cs.alive || cs.team != team)
+                return;
+            Vec2f d = p.world_pos - pos;
+            if (std::sqrt(d.x * d.x + d.y * d.y) <= radius)
+                found = true;
+        });
+    return found;
 }
 
-void CombatSystem::spawn_enemy_wave(EntityManager &entities, int count,
+void CombatSystem::spawn_enemy_wave(flecs::world &world, int count,
                                     Vec2f center, float spread, Team team)
 {
     for (int i = 0; i < count; ++i) {
-        auto eid = entities.create_entity();
+        auto e = world.entity();
         float ang = (float)(std::rand() % 360) * 3.14159f / 180.f;
         float dist = (float)(std::rand() % (int)spread);
         float x = center.x + std::cos(ang) * dist;
         float y = center.y + std::sin(ang) * dist;
 
-        entities.add_component<Position>(
-            eid, Position{.world_pos = {x, y},
-                          .tile_pos = {(int)(x / 64.f), (int)(y / 64.f)},
-                          .z_order = 0.5f});
-        entities.add_component<Sprite>(eid,
-                                       Sprite{.origin = {12.f, 12.f},
-                                              .color = {0.9f, 0.2f, 0.1f, 1.f},
-                                              .scale = 1.f,
-                                              .visible = true});
-        entities.add_component<CombatStats>(eid,
-                                            CombatStats{.team = team,
-                                                        .max_hp = 8,
-                                                        .hp = 8,
-                                                        .attack = 3,
-                                                        .defense = 1,
-                                                        .attack_range = 80.f});
+        e.set<Position>(Position{{x, y},
+                                 {(int)(x / 64.f), (int)(y / 64.f)},
+                                 0.5f});
+        e.set<Sprite>(
+            Sprite{.origin = {12.f, 12.f},
+                   .color = {0.9f, 0.2f, 0.1f, 1.f},
+                   .scale = 1.f,
+                   .visible = true});
+        e.set<CombatStats>(CombatStats{team, 8, 8, 3, 1, 80.f});
     }
 }

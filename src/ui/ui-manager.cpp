@@ -546,7 +546,7 @@ void UIManager::render_client_list(App &app)
 
                 // ID
                 ImGui::TableSetColumnIndex(0);
-                ImGui::Text("%p", trans.get());
+                ImGui::Text("%p", trans);
 
                 // Address
                 ImGui::TableSetColumnIndex(1);

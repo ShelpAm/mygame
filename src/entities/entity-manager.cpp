@@ -18,6 +18,13 @@ void EntityManager::destroy_entity(EntityId id)
     std::erase(alive_, id);
 }
 
+EntityId EntityManager::create_entity(EntityId id)
+{
+    if (!alive(id))
+        alive_.push_back(id);
+    return id;
+}
+
 bool EntityManager::alive(EntityId id) const
 {
     return std::ranges::find(alive_, id) != alive_.end();

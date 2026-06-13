@@ -66,6 +66,8 @@ void App::init()
                            factions_, *events_, *rumors_, combat_, quests_);
 
     server_->set_game_mode(game_mode_.get());
+    game_mode_->set_survival(&survival_);
+    game_mode_->set_event_simulator(events_.get());
 
     start_local_session();
 
@@ -80,8 +82,13 @@ void App::start_local_session()
     server_->set_survival(&survival_);
     server_->set_event_simulator(events_.get());
     server_->set_game_mode(game_mode_.get());
+    game_mode_->set_survival(&survival_);
+    game_mode_->set_event_simulator(events_.get());
 
     auto [srv, cli] = create_transport_pair();
+    spdlog::info(
+        "Created local transport pair: server endpoint {}, client endpoint {}",
+        (void *)srv.get(), (void *)cli.get());
     server_->attach_transport(std::move(srv));
     client_.attach_transport(std::move(cli));
 
@@ -226,23 +233,13 @@ void App::update(float dt)
     if (input_.just_pressed(InputManager::Action::multiplayer))
         show_multiplayer_ = !show_multiplayer_;
 
-    if (session_mode_ != SessionMode::client)
+    if (session_mode_ != SessionMode::client) {
+        game_mode_->update(dt);
         server_->update(dt);
-
-    // TODO: healthy state
-    // if (survival_.state().food <= 0 || survival_.state().water <= 0) {
-    //     auto *pcs = server_.entities().get_component<CombatStats>(
-    //         server_.host_player_id());
-    //     if (pcs && pcs->alive) {
-    //         pcs->hp = std::max(0, pcs->hp - 1);
-    //         server_.mark_needs_full_sync();
-    //     }
-    // }
+    }
 
     camera_system_.set_target(client_.player_position());
     camera_system_.update(dt);
-    // TODO: What is this?
-    // game_mode_->update(server_.host_player_id(), dt);
     ui_manager_->update(dt);
 }
 
@@ -322,7 +319,7 @@ void App::load_from_slot(int slot)
     client_.reset();
     start_local_session();
 
-    auto *pos = game_mode_->entities().get_component<Position>(pid);
+    const auto *pos = game_mode_->get_position(pid);
     if (pos)
         camera_system_.center_on(pos->world_pos);
 }

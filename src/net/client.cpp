@@ -17,7 +17,7 @@ void Client::attach_transport(std::unique_ptr<ITransport> t)
     co_spawn(
         ITransport::io(),
         [this]() -> awaitable<void> {
-            spdlog::info("Transport ({}) connected",
+            spdlog::info("Transport ({}) connected to server",
                          static_cast<void *>(transport_.get()));
             while (true) {
                 try {
@@ -27,7 +27,7 @@ void Client::attach_transport(std::unique_ptr<ITransport> t)
                     break;
                 }
             }
-            spdlog::info("Transport ({}) disconnected",
+            spdlog::info("Transport ({}) disconnected from server",
                          static_cast<void *>(transport_.get()));
             co_return;
         },
@@ -43,8 +43,7 @@ void Client::detach_transport()
 
 void Client::reset()
 {
-    for (auto eid : em_.all_entities())
-        em_.destroy_entity(eid);
+    world_.each([](flecs::entity e) { e.destruct(); });
     id_map_.clear();
     player_id_ = invalid_entity;
     remote_entities_.clear();
@@ -65,11 +64,17 @@ void Client::send_join_request()
 void Client::send_player_direction(Vec2f dir)
 {
     if (!transport_)
-        return;
+        throw std::runtime_error(
+            "send_player_direction: no transport attached");
     std::vector<uint8_t> payload;
-    write_bytes(payload, player_id_);
+    write_bytes(payload, static_cast<uint32_t>(player_id_));
     write_float(payload, dir.x);
     write_float(payload, dir.y);
+    spdlog::info("move dir: {}, {}", dir.x, dir.y);
+    co_spawn(ITransport::io(),
+             transport_->write({NetPacket::player_input, payload}), detached);
+    co_spawn(ITransport::io(),
+             transport_->write({NetPacket::player_input, payload}), detached);
     co_spawn(ITransport::io(),
              transport_->write({NetPacket::player_input, std::move(payload)}),
              detached);
@@ -82,7 +87,7 @@ void Client::send_recruit()
         return;
     }
     std::vector<uint8_t> payload;
-    write_bytes(payload, player_id_);
+    write_bytes(payload, static_cast<uint32_t>(player_id_));
     co_spawn(
         ITransport::io(),
         transport_->write({NetPacket::recruit_soldier, std::move(payload)}),
@@ -96,7 +101,7 @@ void Client::send_interact()
         return;
     }
     std::vector<uint8_t> payload;
-    write_bytes(payload, player_id_);
+    write_bytes(payload, static_cast<uint32_t>(player_id_));
     co_spawn(ITransport::io(),
              transport_->write({NetPacket::interact, std::move(payload)}),
              detached);
@@ -109,7 +114,7 @@ void Client::send_rest()
         return;
     }
     std::vector<uint8_t> payload;
-    write_bytes(payload, player_id_);
+    write_bytes(payload, static_cast<uint32_t>(player_id_));
     co_spawn(ITransport::io(),
              transport_->write({NetPacket::rest, std::move(payload)}),
              detached);
@@ -160,10 +165,13 @@ void Client::on_message(ITransport &from, TransportMessage const &msg)
                             ev.killed);
         break;
     }
-    case NetPacket::return_pid:
-        memcpy(&player_id_, msg.payload.data(), 4);
+    case NetPacket::return_pid: {
+        uint32_t pid;
+        memcpy(&pid, msg.payload.data(), 4);
+        player_id_ = pid;
         spdlog::info("Returned player ID: {}", player_id_);
         break;
+    }
     case NetPacket::dialogue_sync:
         handle_dialogue_sync(msg.payload);
         break;
@@ -204,7 +212,7 @@ Vec2f Client::player_position()
     auto it = id_map_.find(static_cast<int>(player_id_));
     if (it == id_map_.end())
         return {};
-    auto *p = em_.get_component<Position>(it->second);
+    const auto *p = world_.try_get<Position>(it->second);
     return p ? p->world_pos : Vec2f{};
 }
 
@@ -215,7 +223,7 @@ bool Client::is_player_dead()
     auto it = id_map_.find(static_cast<int>(player_id_));
     if (it == id_map_.end())
         return false;
-    auto *cs = em_.get_component<CombatStats>(it->second);
+    const auto *cs = world_.try_get<CombatStats>(it->second);
     return cs && !cs->alive;
 }
 
@@ -226,7 +234,7 @@ CombatStats const *Client::player_stats()
     auto it = id_map_.find(static_cast<int>(player_id_));
     if (it == id_map_.end())
         return nullptr;
-    return em_.get_component<CombatStats>(it->second);
+    return world_.try_get<CombatStats>(it->second);
 }
 
 void Client::apply_sync(std::vector<uint8_t> const &data)
@@ -236,23 +244,23 @@ void Client::apply_sync(std::vector<uint8_t> const &data)
 
         if (se.id == 0) {
             if (player_id_ == invalid_entity) {
-                player_id_ = em_.create_entity();
-                em_.add_component<Position>(
-                    player_id_, Position{{se.x, se.y}, {0, 0}, 1.f});
-                em_.add_component<Sprite>(player_id_,
-                                          Sprite{"player",
-                                                 {},
-                                                 {16, 16},
-                                                 {0.3f, 0.8f, 0.3f, 1.f},
-                                                 1.f,
-                                                 true});
-                em_.add_component<CombatStats>(
-                    player_id_,
+                auto e = world_.entity();
+                player_id_ = e.id();
+                e.set<Position>(Position{{se.x, se.y}, {0, 0}, 1.f});
+                e.set<Sprite>(Sprite{"player",
+                                      {},
+                                      {16, 16},
+                                      {0.3f, 0.8f, 0.3f, 1.f},
+                                      1.f,
+                                      true});
+                e.set<CombatStats>(
                     CombatStats{Team::player, se.max_hp, se.hp, 4, 3, 80.f});
             }
             else {
-                auto *p = em_.get_component<Position>(player_id_);
-                auto *c = em_.get_component<CombatStats>(player_id_);
+                auto *p =
+                    world_.entity(player_id_).try_get_mut<Position>();
+                auto *c =
+                    world_.entity(player_id_).try_get_mut<CombatStats>();
                 if (p)
                     p->world_pos = {se.x, se.y};
                 if (c) {
@@ -266,10 +274,10 @@ void Client::apply_sync(std::vector<uint8_t> const &data)
 
         auto it = id_map_.find(se.id);
         if (it == id_map_.end()) {
-            auto eid = em_.create_entity();
+            auto e = world_.entity();
+            auto eid = e.id();
             id_map_[se.id] = eid;
-            em_.add_component<Position>(eid,
-                                        Position{{se.x, se.y}, {0, 0}, 0.5f});
+            e.set<Position>(Position{{se.x, se.y}, {0, 0}, 0.5f});
             SDL_FColor color;
             if (se.team == 1)
                 color = {0.8f, 0.2f, 0.2f, 1.f};
@@ -277,21 +285,24 @@ void Client::apply_sync(std::vector<uint8_t> const &data)
                 color = {0.8f, 0.6f, 0.2f, 1.f};
             else
                 color = {0.3f, 0.5f, 0.9f, 1.f};
-            em_.add_component<Sprite>(
-                eid, Sprite{"", {}, {12, 12}, color, 0.8f, true});
-            em_.add_component<CombatStats>(
-                eid, CombatStats{se.team == 1 ? Team::enemy
-                                              : (se.team == 2 ? Team::neutral
-                                                              : Team::player),
-                                 se.max_hp, se.hp, 3, 2, 80.f});
+            e.set<Sprite>(Sprite{"", {}, {12, 12}, color, 0.8f, true});
+            e.set<CombatStats>(
+                CombatStats{se.team == 1   ? Team::enemy
+                            : (se.team == 2 ? Team::neutral
+                                            : Team::player),
+                            se.max_hp,
+                            se.hp,
+                            3,
+                            2,
+                            80.f});
             if (se.flags & 1)
-                em_.add_component<Interactable>(eid, Interactable{64.f, true});
+                e.set<Interactable>(Interactable{64.f, true});
         }
         else {
             auto eid = it->second;
-            auto *p = em_.get_component<Position>(eid);
-            auto *c = em_.get_component<CombatStats>(eid);
-            auto *s = em_.get_component<Sprite>(eid);
+            auto *p = world_.entity(eid).try_get_mut<Position>();
+            auto *c = world_.entity(eid).try_get_mut<CombatStats>();
+            auto *s = world_.entity(eid).try_get_mut<Sprite>();
             if (p)
                 p->world_pos = {se.x, se.y};
             if (c) {
@@ -340,7 +351,7 @@ void Client::handle_combat_event(int attacker_id, int defender_id, int damage,
         if (player_id_ != invalid_entity) {
             auto it = id_map_.find(static_cast<int>(player_id_));
             if (it != id_map_.end()) {
-                auto *cs = em_.get_component<CombatStats>(it->second);
+                auto *cs = world_.entity(it->second).try_get_mut<CombatStats>();
                 if (cs) {
                     cs->hp -= damage;
                     if (killed)
@@ -352,7 +363,7 @@ void Client::handle_combat_event(int attacker_id, int defender_id, int damage,
     }
     auto it = id_map_.find(defender_id);
     EntityId eid = (it != id_map_.end()) ? it->second : invalid_entity;
-    auto *cs = em_.get_component<CombatStats>(eid);
+    auto *cs = world_.entity(eid).try_get_mut<CombatStats>();
     if (cs) {
         cs->hp -= damage;
         if (killed)

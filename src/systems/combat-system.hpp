@@ -2,10 +2,10 @@
 
 #include "entities/components/combat-stats.hpp"
 #include "entities/entity-manager.hpp"
+#include <flecs.h>
 #include <string>
 #include <vector>
 
-class EntityManager;
 struct Vec2f;
 
 struct CombatEvent {
@@ -19,9 +19,8 @@ struct CombatEvent {
 
 class CombatSystem {
   public:
-    void update(EntityManager &entities, float dt);
+    void update(flecs::world &world, float dt);
 
-    // Events generated this frame
     std::vector<CombatEvent> const &events() const
     {
         return events_;
@@ -31,20 +30,18 @@ class CombatSystem {
         events_.clear();
     }
 
-    // Check if any entity on a team is near a position
-    bool team_near_position(EntityManager &entities, Team team, Vec2f pos,
+    bool team_near_position(flecs::world &world, Team team, Vec2f pos,
                             float radius) const;
 
-    // Spawn a wave of enemies
-    void spawn_enemy_wave(EntityManager &entities, int count, Vec2f center,
+    void spawn_enemy_wave(flecs::world &world, int count, Vec2f center,
                           float spread, Team team);
 
   private:
     std::vector<CombatEvent> events_;
 
-    void resolve_combat(EntityManager &entities, float dt);
-    void process_soldier_ai(EntityManager &entities);
-    EntityId find_nearest_enemy(EntityManager &entities, EntityId self,
+    void resolve_combat(flecs::world &world, float dt);
+    void process_soldier_ai(flecs::world &world);
+    EntityId find_nearest_enemy(flecs::world &world, EntityId self,
                                 Team enemy_team) const;
     int calc_damage(int attack, int defense) const;
 };

@@ -12,6 +12,7 @@ find_package(imgui REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(SDL3_image REQUIRED)
 # find_package(SDL3_ttf REQUIRED)
+find_package(flecs REQUIRED)
 
 function(add_imgui_backends)
     set(one_value_args TARGET)
@@ -49,7 +50,6 @@ set(SOURCES
     src/core/resource-manager.cpp
     src/core/input-manager.cpp
     src/core/game-clock.cpp
-    src/entities/entity-manager.cpp
     src/systems/render-system.cpp
     src/systems/camera-system.cpp
     src/systems/navigation-system.cpp
@@ -123,6 +123,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     spdlog::spdlog
     SDL3_image::SDL3_image
     # SDL3_ttf::SDL3_ttf-static
+    flecs::flecs_static
 )
 
 if(MINGW OR WIN32)
@@ -181,7 +182,6 @@ set(TEST_SOURCES
     tests/test_network.cpp
     src/core/input-manager.cpp
     src/core/game-clock.cpp
-    src/entities/entity-manager.cpp
     src/systems/navigation-system.cpp
     src/knowledge/knowledge-graph.cpp
     src/world/world-state.cpp
@@ -207,6 +207,7 @@ target_link_libraries(TheSunsetStraits_tests PRIVATE
     Boost::unit_test_framework
     Boost::json
     spdlog::spdlog
+    flecs::flecs_static
 )
 
 if(MINGW OR WIN32)

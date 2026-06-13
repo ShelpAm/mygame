@@ -5,6 +5,9 @@
 #include <mutex>
 #include <vector>
 
+using tcp_socket = default_token::as_default_on_t<tcp::socket>;
+using tcp_acceptor = default_token::as_default_on_t<tcp::acceptor>;
+
 class NetworkTransport : public ITransport {
   public:
     class Acceptor {
@@ -18,7 +21,7 @@ class NetworkTransport : public ITransport {
         void stop();
 
       private:
-        std::shared_ptr<tcp::acceptor> impl_{};
+        std::shared_ptr<tcp_acceptor> impl_{};
     };
 
     NetworkTransport() = default;
@@ -35,13 +38,13 @@ class NetworkTransport : public ITransport {
     awaitable<TransportMessage> read() override;
     bool is_connected() const override;
 
-    tcp::socket &socket()
+    tcp_socket &socket()
     {
         return socket_;
     }
 
   private:
-    tcp::socket socket_{io()};
+    tcp_socket socket_{io()};
 
     std::vector<std::uint8_t> write_buffer_;
     NetHead read_head_buffer_;

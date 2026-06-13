@@ -17,6 +17,7 @@ class TheSunsetStraits(ConanFile):
         self.requires("spdlog/1.17.0")
         self.requires("sdl_image/3.4.0")
         self.requires("sdl_ttf/3.2.2")
+        self.requires("flecs/4.1.5")
 
     def configure(self):
         assert self.options is not None

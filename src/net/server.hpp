@@ -3,8 +3,8 @@
 #include "entities/entity-manager.hpp"
 #include "net/network-transport.hpp"
 #include "net/transport.hpp"
+#include <boost/asio/experimental/concurrent_channel.hpp>
 #include <memory>
-#include <queue>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -34,15 +34,10 @@ class Server {
     awaitable<void> listen(std::uint16_t port);
 
     void update(float dt);
-    void handle_combat_event(int attacker_id, int defender_id, int damage,
-                             bool killed);
 
     void attach_transport(std::unique_ptr<ITransport> t);
     void clear_transports();
 
-    EntityId add_player(Vec2f pos);
-    void update_player(EntityId player_id, Vec2f pos, int hp, int max_hp,
-                       bool alive);
     void mark_needs_full_sync()
     {
         needs_full_sync_ = true;
@@ -54,12 +49,7 @@ class Server {
         return v;
     }
 
-    std::vector<std::unique_ptr<ITransport>> &transports()
-    {
-        return transports_;
-    }
-
-    std::vector<std::unique_ptr<ITransport>> const &transports() const
+    std::vector<ITransport *> const &transports() const
     {
         return transports_;
     }
@@ -74,21 +64,16 @@ class Server {
     EventSimulator *events_ = nullptr;
     GameMode *game_mode_ = nullptr;
     ConditionTracker *survival_ = nullptr;
-    size_t last_event_count_ = 0;
     int soldier_idx_ = 0;
 
-    struct DeltaPos {
-        EntityId pid;
-        float mx, my;
-    };
-    std::queue<DeltaPos> pending_inputs_;
+    using deferred_concurrent_channel =
+        default_token::as_default_on_t<asio::experimental::concurrent_channel<
+            void(boost::system::error_code, ITransport *, TransportMessage)>>;
+    deferred_concurrent_channel messages_;
 
     std::unique_ptr<NetworkTransport::Acceptor> acceptor_;
-    std::vector<std::unique_ptr<ITransport>> transports_;
+    std::vector<ITransport *> transports_;
 
-    std::vector<uint8_t> build_sync_payload();
     void broadcast_sync();
-    awaitable<void> on_message(ITransport &from, TransportMessage const &msg);
-    void check_event_spawns();
-    void sync_dialogue_to(ITransport *to);
+    awaitable<void> handle_message(ITransport &from, TransportMessage msg);
 };

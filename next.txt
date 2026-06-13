@@ -1,1 +1,2 @@
 1. ESC 键回退 GUI 界面到上一层
+2. Server 里应该迁移到 GameMode 下的，全都要迁移

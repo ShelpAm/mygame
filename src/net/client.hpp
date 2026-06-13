@@ -3,8 +3,8 @@
 #include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "entities/components/combat-stats.hpp"
-#include "entities/entity-manager.hpp"
 #include "net/transport.hpp"
+#include <flecs.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -16,7 +16,7 @@ class QuestManager;
 class NetworkManager;
 
 struct RemoteEntity {
-    int id = 0;
+    uint32_t id = 0;
     Vec2f position, target_pos;
     int hp = 20, max_hp = 20;
     bool alive = true;
@@ -36,7 +36,7 @@ class Client {
     {
         player_id_ = id;
     }
-    uint32_t player_id() const
+    EntityId player_id() const
     {
         return player_id_;
     }
@@ -49,13 +49,13 @@ class Client {
     void send_chat(std::string const &msg);
     void send_dialogue_action(std::string const &action);
 
-    EntityManager &entities()
+    flecs::world &entities()
     {
-        return em_;
+        return world_;
     }
-    EntityManager const &entities() const
+    flecs::world const &entities() const
     {
-        return em_;
+        return world_;
     }
     EntityId local_player() const;
     Vec2f player_position();
@@ -84,7 +84,7 @@ class Client {
     }
 
   private:
-    EntityManager em_;
+    flecs::world world_;
     EntityId player_id_ = invalid_entity;
     std::unordered_map<int, EntityId> id_map_;
     std::unique_ptr<ITransport> transport_;
