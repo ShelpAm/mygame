@@ -4,28 +4,19 @@
 #include "core/game-mode.hpp"
 #include "core/input-manager.hpp"
 #include "core/locale-manager.hpp"
-#include "dialogue/dialogue-engine.hpp"
-#include "factions/faction-network.hpp"
-#include "knowledge/knowledge-graph.hpp"
 #include "net/client.hpp"
-#include "net/server.hpp"
-#include "survival/condition-tracker.hpp"
 #include "systems/camera-system.hpp"
-#include "systems/combat-system.hpp"
 #include "systems/navigation-system.hpp"
-#include "systems/quest-manager.hpp"
-#include "world/world-state.hpp"
 
 #include <memory>
 #include <SDL3/SDL.h>
 #include <string>
+#include <thread>
 #include <vector>
 
 class ResourceManager;
 class RenderSystem;
 class UIManager;
-class EventSimulator;
-class RumorPropagator;
 struct CombatStats;
 
 enum class SessionMode { local, host, client };
@@ -42,11 +33,6 @@ class App {
     {
         return locale_;
     }
-    ConditionTracker const &survival() const
-    {
-        return survival_;
-    }
-    CombatStats const *player_combat_stats() const;
     bool show_load_menu() const
     {
         return show_load_menu_;
@@ -71,58 +57,49 @@ class App {
     {
         show_multiplayer_ = v;
     }
-    Server *server()
+    asio::io_context &io()
     {
-        return server_.get();
-    }
-    Server const *server() const
-    {
-        return server_.get();
-    }
-    Client &client()
-    {
-        return client_;
-    }
-    Client const &client() const
-    {
-        return client_;
-    }
-    QuestManager &quests_mut()
-    {
-        return quests_;
-    }
-    QuestManager const &quests() const
-    {
-        return quests_;
+        return io_;
     }
     GameMode &game_mode()
     {
+        if (!game_mode_)
+            throw std::runtime_error("Game mode not initialized");
         return *game_mode_;
     }
-    GameMode const &game_mode() const
+    Client &client()
     {
-        return *game_mode_;
+        if (!client_)
+            throw std::runtime_error("Client not initialized");
+        return *client_;
     }
+    Client const &client() const
+    {
+        if (!client_)
+            throw std::runtime_error("Client not initialized");
+        return *client_;
+    }
+
+    void start_local_session();
 
     SessionMode session_mode() const
     {
         return session_mode_;
     }
 
-    void start_local_session();
     awaitable<void> start_host_session(int port);
     awaitable<void> start_client_session(std::string const &ip, int port);
 
     void set_ui_language(int lang_index);
     DialogueState const &dialogue() const
     {
-        return session_mode_ == SessionMode::client ? client_.dialogue()
+        return session_mode_ == SessionMode::client ? client_->dialogue()
                                                     : game_mode_->dialogue();
     }
     void end_dialogue()
     {
         if (session_mode_ == SessionMode::client)
-            client_.send_dialogue_action("__end__");
+            client_->send_dialogue_action("__end__");
         game_mode_->end_dialogue();
     }
     void ask_topic(std::string const &t)
@@ -132,7 +109,7 @@ class App {
     void do_dialogue_action(std::string const &a)
     {
         if (session_mode_ == SessionMode::client)
-            client_.send_dialogue_action(a);
+            client_->send_dialogue_action(a);
         game_mode_->do_dialogue_action(a);
     }
 
@@ -149,29 +126,22 @@ class App {
     SDL_Window *window_ = nullptr;
     SDL_Renderer *renderer_ = nullptr;
 
-    // Plain members
     InputManager input_;
     GameClock game_clock_;
     CameraSystem camera_system_{window_width, window_height};
     NavigationSystem navigation_system_;
-    WorldState world_state_;
-    KnowledgeGraph knowledge_;
-    DialogueEngine dialogue_engine_;
     LocaleManager locale_;
-    ConditionTracker survival_;
-    FactionNetwork factions_;
-    CombatSystem combat_;
-    QuestManager quests_;
-    Client client_;
 
-    // Must stay unique_ptr — runtime deps or recreated
-    std::unique_ptr<Server> server_;
     std::unique_ptr<ResourceManager> resources_;
     std::unique_ptr<RenderSystem> render_system_;
     std::unique_ptr<UIManager> ui_manager_;
-    std::unique_ptr<EventSimulator> events_;
-    std::unique_ptr<RumorPropagator> rumors_;
+    asio::io_context io_;
+    decltype(asio::make_work_guard(io_)) io_workguard_ =
+        asio::make_work_guard(io_);
+    std::jthread io_thread_;
+
     std::unique_ptr<GameMode> game_mode_;
+    std::unique_ptr<Client> client_;
 
     SessionMode session_mode_ = SessionMode::local;
 

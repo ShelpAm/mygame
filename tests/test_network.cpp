@@ -5,14 +5,26 @@
 #include <boost/test/unit_test.hpp>
 #include <chrono>
 #include <future>
+#include <thread>
 
 namespace asio = boost::asio;
 
 struct NetworkFixture {
-    NetworkFixture() = default;
+    asio::io_context io;
+    std::jthread io_thread;
+    decltype(asio::make_work_guard(io)) work = asio::make_work_guard(io);
+
+    NetworkFixture()
+    {
+        ITransport::set_io(&io);
+        io_thread = std::jthread([this]() { io.run(); });
+    }
     ~NetworkFixture()
     {
-        ITransport::shutdown();
+        work.reset();
+        io.stop();
+        if (io_thread.joinable())
+            io_thread.join();
     }
 };
 

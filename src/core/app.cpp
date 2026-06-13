@@ -3,13 +3,9 @@
 #include "core/game-mode.hpp"
 #include "core/resource-manager.hpp"
 #include "dialogue/dialogue-engine.hpp"
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/position.hpp"
-#include "factions/event-simulator.hpp"
-#include "knowledge/rumor-propagator.hpp"
 #include "net/local-transport.hpp"
 #include "net/network-transport.hpp"
-#include "save/save-manager.hpp"
+#include "net/server.hpp"
 #include "systems/render-system.hpp"
 #include "ui/ui-manager.hpp"
 #include <boost/asio.hpp>
@@ -25,6 +21,9 @@ App::~App()
 
 void App::init()
 {
+    spdlog::set_level(spdlog::level::debug);
+    // spdlog::flush_on(spdlog::level::trace);
+
     SDL_SetAppMetadata("The Sunset Straits App name", "1.0",
                        "com.example.app-identifier");
 
@@ -43,63 +42,56 @@ void App::init()
     resources_ = std::make_unique<ResourceManager>();
     render_system_ =
         std::make_unique<RenderSystem>(renderer_, *resources_, camera_system_);
-    // Ensure fresh state (no-op, keeps pattern)
     navigation_system_ = NavigationSystem{};
     ui_manager_ = std::make_unique<UIManager>(window_, renderer_);
 
     locale_.discover_languages("assets/locale");
     locale_.set_language(0);
-    dialogue_engine_.discover_languages("assets/dialogue");
-    quests_.load_from_json("assets/data/quests.json");
 
-    events_ =
-        std::make_unique<EventSimulator>(factions_, knowledge_, world_state_);
-    rumors_ = std::make_unique<RumorPropagator>(knowledge_);
-
-    server_ = std::make_unique<Server>();
-    server_->set_managers(&combat_, &world_state_, &quests_);
-    server_->set_survival(&survival_);
-    server_->set_event_simulator(events_.get());
+    // Start IO thread
+    io_thread_ = std::jthread([this]() {
+        try {
+            spdlog::info("IO thread started");
+            io_.run();
+            spdlog::info("IO thread stopped");
+        }
+        catch (std::exception const &e) {
+            spdlog::error("IO thread error: {}", e.what());
+        }
+    });
+    ITransport::set_io(&io_);
 
     game_mode_ = std::make_unique<GameMode>();
-    game_mode_->init_world(world_state_, knowledge_, dialogue_engine_,
-                           factions_, *events_, *rumors_, combat_, quests_);
+    game_mode_->init_world();
 
-    server_->set_game_mode(game_mode_.get());
-    game_mode_->set_survival(&survival_);
-    game_mode_->set_event_simulator(events_.get());
+    client_ = std::make_unique<Client>(this);
 
     start_local_session();
 
     game_clock_.restart();
     running_ = true;
-}
 
-void App::start_local_session()
-{
-    server_ = std::make_unique<Server>();
-    server_->set_managers(&combat_, &world_state_, &quests_);
-    server_->set_survival(&survival_);
-    server_->set_event_simulator(events_.get());
-    server_->set_game_mode(game_mode_.get());
-    game_mode_->set_survival(&survival_);
-    game_mode_->set_event_simulator(events_.get());
-
-    auto [srv, cli] = create_transport_pair();
-    spdlog::info(
-        "Created local transport pair: server endpoint {}, client endpoint {}",
-        (void *)srv.get(), (void *)cli.get());
-    server_->attach_transport(std::move(srv));
-    client_.attach_transport(std::move(cli));
-
-    client_.send_join_request();
-    session_mode_ = SessionMode::local;
+    spdlog::info("App: initialization complete");
 }
 
 awaitable<void> App::start_host_session(int port)
 {
     session_mode_ = SessionMode::host;
-    co_await server_->listen(port);
+    co_await game_mode_->start_host(port);
+}
+
+void App::start_local_session()
+{
+    client_->detach_transport();
+    auto [srv, cli] = create_transport_pair();
+    spdlog::info("App: spawned two transports: srv = {}, cli = {}",
+                 (void *)srv.get(), (void *)cli.get());
+    game_mode_->server()->attach_transport(std::move(srv));
+    client_->attach_transport(std::move(cli));
+
+    client_->send_join_request();
+
+    session_mode_ = SessionMode::local;
 }
 
 awaitable<void> App::start_client_session(std::string const &host, int port)
@@ -128,9 +120,9 @@ awaitable<void> App::start_client_session(std::string const &host, int port)
 
     try {
         auto peer = co_await NetworkTransport::connect(resolved_ip, port);
-        client_.attach_transport(std::move(peer));
+        client_->attach_transport(std::move(peer));
 
-        client_.send_join_request();
+        client_->send_join_request();
         session_mode_ = SessionMode::client;
     }
     catch (std::exception &e) {
@@ -141,6 +133,7 @@ awaitable<void> App::start_client_session(std::string const &host, int port)
 void App::run()
 {
     while (running_) {
+        spdlog::trace("App: main loop tick");
         float dt = game_clock_.tick();
         process_events();
         if (!running_)
@@ -152,16 +145,32 @@ void App::run()
 
 void App::shutdown()
 {
-    spdlog::set_level(spdlog::level::debug);
+    if (!window_) // Shutdown already called or init failed, nothing to do
+        return;
+
+    spdlog::info("App: shutting down");
+
+    if (client_)
+        client_->detach_transport();
+    if (game_mode_)
+        game_mode_->server()->clear_transports();
+
+    spdlog::info("App: stopping IO...");
+    io_workguard_.reset();
+    io_.stop();
+    if (io_thread_.joinable())
+        io_thread_.join();
+    spdlog::info("App: IO stopped");
+
+    // Reset after io thread stopped, otherwise coro in attach_transport will
+    // use this after freed.
     client_.reset();
-    server_.reset();
     game_mode_.reset();
-    ITransport::shutdown();
-    events_.reset();
-    rumors_.reset();
+
     ui_manager_.reset();
     render_system_.reset();
     resources_.reset();
+
     if (renderer_) {
         SDL_DestroyRenderer(renderer_);
         renderer_ = nullptr;
@@ -171,13 +180,18 @@ void App::shutdown()
         window_ = nullptr;
     }
     SDL_Quit();
+    spdlog::info("App: SDL cleaned up");
+
+    spdlog::info("App: shutdown complete");
 }
 
 void App::process_events()
 {
+    spdlog::trace("App: processing events");
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        ui_manager_->process_event(event);
+        if (ui_manager_->process_event(event))
+            continue;
         switch (event.type) {
         case SDL_EVENT_QUIT:
             running_ = false;
@@ -185,60 +199,66 @@ void App::process_events()
         case SDL_EVENT_WINDOW_RESIZED:
             camera_system_.resize(event.window.data1, event.window.data2);
             break;
+        default:
+            spdlog::warn("Unhandled SDL event type: {}", event.type);
         }
     }
     input_.update();
+    spdlog::trace("App: finished processing events");
 }
 
 void App::update(float dt)
 {
-    survival_.update(dt, false, false);
-    world_state_.update(dt);
-    events_->update(world_state_.day());
+    spdlog::trace("App::update dt={} mode={}", dt, (int)session_mode_);
+    if (session_mode_ != SessionMode::client)
+        game_mode_->update(dt);
 
-    client_.update(dt);
-
-    // Handles move
-    float mx = 0, my = 0;
-    bool in_dialogue = dialogue().active;
-    if (!ImGui::IsAnyItemActive() && !client_.is_player_dead() &&
-        !in_dialogue) {
-        if (input_.is_pressed(InputManager::Action::move_up))
-            my -= 1;
-        if (input_.is_pressed(InputManager::Action::move_down))
-            my += 1;
-        if (input_.is_pressed(InputManager::Action::move_left))
-            mx -= 1;
-        if (input_.is_pressed(InputManager::Action::move_right))
-            mx += 1;
-    }
-    if (mx != 0 || my != 0) {
-        float len = std::hypot(mx, my);
-        client_.send_player_direction({mx / len, my / len});
-    }
-
-    // Discrete actions — just_pressed fires once per key press
-    if (input_.just_pressed(InputManager::Action::interact))
-        client_.send_interact();
-    if (input_.just_pressed(InputManager::Action::rest))
-        client_.send_rest();
-    if (input_.just_pressed(InputManager::Action::recruit))
-        client_.send_recruit();
-    if (input_.just_pressed(InputManager::Action::quick_save))
-        quick_save();
-    if (input_.just_pressed(InputManager::Action::load_menu))
-        show_load_menu_ = !show_load_menu_;
     if (input_.just_pressed(InputManager::Action::help))
         show_help_ = !show_help_;
     if (input_.just_pressed(InputManager::Action::multiplayer))
         show_multiplayer_ = !show_multiplayer_;
 
-    if (session_mode_ != SessionMode::client) {
-        game_mode_->update(dt);
-        server_->update(dt);
+    client_->update(dt);
+
+    // Logged in to a server
+    if (client_->player_id() != invalid_entity) {
+        // Handles move
+        float mx = 0, my = 0;
+        bool in_dialogue = dialogue().active;
+        if (!ImGui::IsAnyItemActive() && !client_->is_player_dead() &&
+            !in_dialogue) {
+            if (input_.is_pressed(InputManager::Action::move_up))
+                my -= 1;
+            if (input_.is_pressed(InputManager::Action::move_down))
+                my += 1;
+            if (input_.is_pressed(InputManager::Action::move_left))
+                mx -= 1;
+            if (input_.is_pressed(InputManager::Action::move_right))
+                mx += 1;
+        }
+        float len = std::hypot(mx, my);
+        static Vec2f last_sent_dir{0, 0};
+        Vec2f dir = len > 0 ? Vec2f{mx / len, my / len} : Vec2f{0, 0};
+        if (dir.x != last_sent_dir.x || dir.y != last_sent_dir.y) {
+            client_->send_player_direction(dir);
+            last_sent_dir = dir;
+        }
+
+        // Discrete actions — just_pressed fires once per key press
+        if (input_.just_pressed(InputManager::Action::interact))
+            client_->send_interact();
+        if (input_.just_pressed(InputManager::Action::rest))
+            client_->send_rest();
+        if (input_.just_pressed(InputManager::Action::recruit))
+            client_->send_recruit();
+        if (input_.just_pressed(InputManager::Action::quick_save))
+            quick_save();
+        if (input_.just_pressed(InputManager::Action::load_menu))
+            show_load_menu_ = !show_load_menu_;
+
+        camera_system_.set_target(client_->player_position());
     }
 
-    camera_system_.set_target(client_.player_position());
     camera_system_.update(dt);
     ui_manager_->update(dt);
 }
@@ -248,23 +268,23 @@ void App::render()
     SDL_SetRenderDrawColor(renderer_, 10, 10, 15, 255);
     SDL_RenderClear(renderer_);
 
-    render_system_->render(client_.entities(), world_state_, navigation_system_,
-                           combat_.events(), client_.player_position(),
-                           client_.local_player());
-    combat_.clear_events();
-    ui_manager_->render(world_state_, *this);
+    // Connected to server and have a player entity
+    if (client_->player_id() != invalid_entity) {
+        render_system_->render(*client_, navigation_system_);
+        client_->combat_events().clear();
+    }
+    ui_manager_->render(client_->player_id() == invalid_entity
+                            ? nullptr
+                            : &client_->world_state(),
+                        *this);
+
     SDL_RenderPresent(renderer_);
 }
 
 void App::set_ui_language(int lang_index)
 {
     locale_.set_language(lang_index);
-    dialogue_engine_.set_language(lang_index);
-}
-
-CombatStats const *App::player_combat_stats() const
-{
-    return const_cast<Client &>(client_).player_stats();
+    game_mode_->dialogue_engine().set_language(lang_index);
 }
 
 void App::quick_save()
@@ -309,17 +329,17 @@ void App::load_from_slot(int slot)
     (void)slot;
     return;
 
-    std::string path = "saves/save_" + std::to_string(slot) + ".json";
-    SaveManager::SaveData data;
-    if (!SaveManager::load(path, data))
-        return;
-
-    auto pid = game_mode_->load_world(data);
-
-    client_.reset();
-    start_local_session();
-
-    const auto *pos = game_mode_->get_position(pid);
-    if (pos)
-        camera_system_.center_on(pos->world_pos);
+    // std::string path = "saves/save_" + std::to_string(slot) + ".json";
+    // SaveManager::SaveData data;
+    // if (!SaveManager::load(path, data))
+    //     return;
+    //
+    // auto pid = game_mode_->load_world(data);
+    //
+    // client_->detach_transport();
+    // start_local_session();
+    //
+    // auto const *pos = game_mode_->get_position(pid);
+    // if (pos)
+    //     camera_system_.center_on(pos->world_pos);
 }

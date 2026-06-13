@@ -62,7 +62,6 @@ set(SOURCES
     src/factions/faction-network.cpp
     src/factions/event-simulator.cpp
     src/knowledge/rumor-propagator.cpp
-    src/survival/condition-tracker.cpp
     src/save/save-manager.cpp
     src/systems/combat-system.cpp
     src/systems/quest-manager.cpp
@@ -73,7 +72,6 @@ set(SOURCES
     src/net/network-transport.cpp
     src/core/locale-manager.cpp
     src/ui/ui-manager.cpp
-    src/ui/hud.cpp
 )
 
 set(HEADERS
@@ -82,7 +80,6 @@ set(HEADERS
     src/core/input-manager.hpp
     src/core/game-clock.hpp
     src/core/math.hpp
-    src/entities/entity-manager.hpp
     src/entities/components/position.hpp
     src/entities/components/sprite.hpp
     src/entities/components/movement.hpp
@@ -98,7 +95,6 @@ set(HEADERS
     src/dialogue/topic-registry.hpp
     src/dialogue/relationship-table.hpp
     src/ui/ui-manager.hpp
-    src/ui/hud.hpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
@@ -126,18 +122,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     flecs::flecs_static
 )
 
-if(MINGW OR WIN32)
-    target_link_libraries(TheSunsetStraits PRIVATE
-        ws2_32
-        mswsock
-    )
-
-    target_link_options(TheSunsetStraits PRIVATE
-        -static
-        -Wl,--allow-multiple-definition
-    )
-endif()
-
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     # Sanitizers
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES
@@ -145,7 +129,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_options(TheSunsetStraits PRIVATE
             # -fsanitize=thread
             # -fsanitize=address
-            -O1)
+            -O0
+        )
         target_link_options(TheSunsetStraits PRIVATE
             # -fsanitize=thread
             # -fsanitize=address
@@ -177,7 +162,6 @@ set(TEST_SOURCES
     tests/test_input.cpp
     tests/test_dialogue.cpp
     tests/test_factions.cpp
-    tests/test_survival.cpp
     tests/test_combat.cpp
     tests/test_network.cpp
     src/core/input-manager.cpp
@@ -192,7 +176,6 @@ set(TEST_SOURCES
     src/factions/faction-network.cpp
     src/factions/event-simulator.cpp
     src/knowledge/rumor-propagator.cpp
-    src/survival/condition-tracker.cpp
     src/save/save-manager.cpp
     src/systems/combat-system.cpp
     src/net/transport.cpp
@@ -211,9 +194,25 @@ target_link_libraries(TheSunsetStraits_tests PRIVATE
 )
 
 if(MINGW OR WIN32)
+    target_link_libraries(TheSunsetStraits PRIVATE
+        ws2_32
+        mswsock
+    )
+
+    target_link_options(TheSunsetStraits PRIVATE
+        -static
+        -Wl,--allow-multiple-definition
+    )
+
+
     target_link_libraries(TheSunsetStraits_tests PRIVATE
         ws2_32
         mswsock
+    )
+
+    target_link_options(TheSunsetStraits_tests PRIVATE
+        -static
+        -Wl,--allow-multiple-definition
     )
 endif()
 

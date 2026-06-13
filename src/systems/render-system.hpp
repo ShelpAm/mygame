@@ -1,13 +1,13 @@
 #pragma once
 
+#include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "entities/components/visual-fx.hpp"
-#include "entities/entity-manager.hpp"
 #include <SDL3/SDL.h>
-#include <flecs.h>
 #include <vector>
 class ResourceManager;
 class CameraSystem;
+class Client;
 class WorldState;
 class NavigationSystem;
 
@@ -18,10 +18,7 @@ class RenderSystem {
     RenderSystem(SDL_Renderer *renderer, ResourceManager &resources,
                  CameraSystem &camera);
 
-    void render(flecs::world &world, WorldState const &world_state,
-                NavigationSystem const &nav,
-                std::vector<CombatEvent> const &combat_events,
-                Vec2f player_pos, EntityId player_id);
+    void render(Client &client, NavigationSystem const &nav);
 
   private:
     SDL_Renderer *renderer_;
@@ -30,10 +27,9 @@ class RenderSystem {
 
     void render_tile_map(WorldState const &world_state,
                          NavigationSystem const &nav);
-    void render_entities(flecs::world &world, Vec2f player_pos,
-                         EntityId player_id);
-    void render_health_bars(flecs::world &world);
-    void render_damage_numbers(flecs::world &world,
+    void render_entities(Client &client, Vec2f player_pos, EntityId player_id);
+    void render_health_bars(Client &client);
+    void render_damage_numbers(Client &client,
                                std::vector<CombatEvent> const &events);
 
     std::vector<FloatingText> floating_texts_;

@@ -1,7 +1,7 @@
 #pragma once
 
+#include "core/game-types.hpp"
 #include "core/math.hpp"
-#include "entities/entity-manager.hpp"
 
 struct SoldierAI {
     EntityId follow_target = 0; // Entity to follow (player or captain)

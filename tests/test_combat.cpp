@@ -1,7 +1,6 @@
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/position.hpp"
 #include "entities/components/soldier-ai.hpp"
-#include "entities/entity-manager.hpp"
 #include "systems/combat-system.hpp"
 #include <boost/test/unit_test.hpp>
 #include <flecs.h>

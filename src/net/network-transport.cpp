@@ -7,7 +7,6 @@ using namespace asio::experimental::awaitable_operators;
 
 NetworkTransport::NetworkTransport(tcp::socket sock) : socket_(std::move(sock))
 {
-    // on_connected();
 }
 
 NetworkTransport::Acceptor::Acceptor(std::uint16_t port)
@@ -32,7 +31,7 @@ void NetworkTransport::Acceptor::stop()
 awaitable<std::unique_ptr<NetworkTransport>>
 NetworkTransport::connect(std::string const &ip, int port)
 {
-    spdlog::info("Initiating connection to {}:{}", ip, port);
+    spdlog::info("NetworkTransport: Initiating connection to {}:{}", ip, port);
     auto t = std::make_unique<NetworkTransport>();
     auto ep = tcp::endpoint(asio::ip::make_address(ip), port);
 
@@ -52,8 +51,13 @@ NetworkTransport::connect(std::string const &ip, int port)
         throw std::runtime_error("Connection failed: " + ec.message());
 
     // t->on_connected();
-    spdlog::info("Connected!");
+    spdlog::info("NetworkTransport: Connected!");
     co_return t;
+}
+
+NetworkTransport::~NetworkTransport()
+{
+    disconnect();
 }
 
 awaitable<void> NetworkTransport::write(TransportMessage msg)
@@ -61,12 +65,13 @@ awaitable<void> NetworkTransport::write(TransportMessage msg)
     if (!socket_.is_open())
         throw std::runtime_error("NetworkTransport::write: socket is not open");
 
-    spdlog::debug(
-        "NetwortTransport ({}) writing message of type {} with payload size {}",
-        (void *)this, static_cast<int>(msg.type), msg.payload.size());
+    spdlog::log(msg.type == NetPacket::state_delta ? spdlog::level::trace
+                                                   : spdlog::level::debug,
+                "NetwortTransport ({}) writing message of type \"{}\" with "
+                "payload size {}",
+                (void *)this, msg.type, msg.payload.size());
     write_buffer_ = serialize_packet({msg.type, std::move(msg.payload)});
-    co_await asio::async_write(socket_, asio::buffer(write_buffer_),
-                               use_awaitable);
+    co_await asio::async_write(socket_, asio::buffer(write_buffer_));
 }
 
 awaitable<TransportMessage> NetworkTransport::read()
@@ -95,4 +100,14 @@ awaitable<TransportMessage> NetworkTransport::read()
 bool NetworkTransport::is_connected() const
 {
     return socket_.is_open();
+}
+
+void NetworkTransport::disconnect()
+{
+    socket_.close();
+}
+
+tcp_socket &NetworkTransport::socket()
+{
+    return socket_;
 }

@@ -2,16 +2,13 @@
 #include <spdlog/spdlog.h>
 
 LocalTransportEndpoint::LocalTransportEndpoint()
-    : channel_(ITransport::io(), 32)
+    : channel_(ITransport::io(), 128)
 {
 }
 
 LocalTransportEndpoint::~LocalTransportEndpoint()
 {
-    if (peer_) {
-        peer_->peer_ = nullptr;
-        peer_ = nullptr;
-    }
+    disconnect();
 }
 
 void LocalTransportEndpoint::set_peer(LocalTransportEndpoint *peer)
@@ -21,23 +18,31 @@ void LocalTransportEndpoint::set_peer(LocalTransportEndpoint *peer)
 
 awaitable<void> LocalTransportEndpoint::write(TransportMessage msg)
 {
-    assert(peer_);
-    spdlog::debug("LocalTransportEndpoint ({}) writing message of type {} with "
-                  "payload size {}",
-                  (void *)this, static_cast<int>(msg.type), msg.payload.size());
+    if (!peer_)
+        throw std::runtime_error(
+            "LocalTransportEndpoint: write to disconnected peer");
+
     co_await peer_->channel_.async_send(boost::system::error_code(),
-                                        TransportMessage{msg.type, msg.payload},
-                                        use_awaitable);
+                                        {msg.type, msg.payload});
 }
 
 awaitable<TransportMessage> LocalTransportEndpoint::read()
 {
-    co_return co_await channel_.async_receive(use_awaitable);
+    co_return co_await channel_.async_receive();
 }
 
 bool LocalTransportEndpoint::is_connected() const
 {
     return peer_ != nullptr;
+}
+
+void LocalTransportEndpoint::disconnect()
+{
+    if (peer_) {
+        peer_->peer_ = nullptr;
+        peer_ = nullptr;
+        channel_.close();
+    }
 }
 
 std::pair<std::unique_ptr<LocalTransportEndpoint>,

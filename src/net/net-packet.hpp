@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "entities/components/combat-stats.hpp"
 #include <array>
@@ -7,8 +8,46 @@
 #include <concepts>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <string>
 #include <vector>
+
+// Component bitmask for entity sync — each bit corresponds to a
+// component block in the per-entity payload.  LSB is checked first.
+namespace SyncComponent {
+enum Mask : uint16_t {
+    entity_kind = 1 << 0,  // EntityKindComp    (1 byte)
+    position    = 1 << 1,  // PositionComp      (8 bytes)
+    combat      = 1 << 2,  // CombatComp        (22 bytes: hp,max_hp,alive,team,atk,def,range)
+    movement    = 1 << 3,  // MovementComp      (9 bytes)
+    soldier_ai  = 1 << 4,  // SoldierAIComp     (17 bytes)
+    interact    = 1 << 5,  // InteractComp      (1 byte)
+    survival    = 1 << 6,  // SurvivalComp      (16 bytes: food,water,health,energy)
+};
+constexpr uint16_t wire_size(uint16_t mask)
+{
+    uint16_t sz = 0;
+    if (mask & entity_kind) sz += 1;
+    if (mask & position)    sz += 8;
+    if (mask & combat)      sz += 22;
+    if (mask & movement)    sz += 9;
+    if (mask & soldier_ai)  sz += 17;
+    if (mask & interact)    sz += 1;
+    if (mask & survival)    sz += 16;
+    return sz;
+}
+} // namespace SyncComponent
+
+// Entity kind values for SyncComponent::entity_kind
+namespace EntityKind {
+enum Value : uint8_t {
+    player   = 1,
+    soldier  = 2,
+    npc      = 3,
+    enemy    = 4,
+    structure = 5,
+};
+}
 
 struct NetPacket {
     enum Type : uint32_t {
@@ -26,29 +65,88 @@ struct NetPacket {
         return_pid,
         dialogue_sync,
         dialogue_action,
+        entity_removed,
+        state_delta,
+        kicked,
     };
     Type type;
-    std::vector<uint8_t> payload; // 4 bytes size, left: real payload
-    // Layout:
-    // [type:4][size:4][payload:size]
+    std::vector<uint8_t> payload;
 };
 
-// Note: Do not confuse NetHead with NetPacket. NetPacket is not the real
-// packet, but unpacked from actual layout. NetHead stands for the actual
-// header.
+template <>
+struct std::formatter<NetPacket::Type> : std::formatter<std::string_view> {
+    auto format(NetPacket::Type t, std::format_context &ctx) const
+    {
+        using enum NetPacket::Type;
+        std::string_view name = "unknown";
+        switch (t) {
+        case join:
+            name = "join";
+            break;
+        case state_full:
+            name = "state_full";
+            break;
+        case entity_update:
+            name = "entity_update";
+            break;
+        case chat:
+            name = "chat";
+            break;
+        case disconnect:
+            name = "disconnect";
+            break;
+        case combat_event:
+            name = "combat_event";
+            break;
+        case recruit_soldier:
+            name = "recruit_soldier";
+            break;
+        case spawn_enemy_wave:
+            name = "spawn_enemy_wave";
+            break;
+        case player_input:
+            name = "player_input";
+            break;
+        case interact:
+            name = "interact";
+            break;
+        case rest:
+            name = "rest";
+            break;
+        case return_pid:
+            name = "return_pid";
+            break;
+        case dialogue_sync:
+            name = "dialogue_sync";
+            break;
+        case dialogue_action:
+            name = "dialogue_action";
+            break;
+        case entity_removed:
+            name = "entity_removed";
+            break;
+        case state_delta:
+            name = "state_delta";
+            break;
+        case kicked:
+            name = "kicked";
+            break;
+        }
+        return std::formatter<std::string_view>::format(name, ctx);
+    }
+};
+
 struct NetHead {
     using Type = NetPacket::Type;
     Type type;
-    std::uint32_t size; // paylouad size in bytes.
+    std::uint32_t size;
 };
 
-// Serialize a value into bytes (little-endian)
+// Serialize an integral value into bytes (little-endian), sizeof(T) bytes
 template <std::integral T> void write_bytes(std::vector<uint8_t> &out, T val)
 {
-    if constexpr (std::endian::native != std::endian::little) {
-        // Swap to little-endian if needed
+    if constexpr (std::endian::native != std::endian::little)
         val = std::byteswap(val);
-    }
     auto bytes = std::bit_cast<std::array<uint8_t, sizeof(T)>>(val);
     out.insert(out.end(), bytes.begin(), bytes.end());
 }
@@ -59,22 +157,6 @@ inline void write_float(std::vector<uint8_t> &out, float val)
     out.insert(out.end(), bytes.begin(), bytes.end());
 }
 
-inline void write_string(std::vector<uint8_t> &out, std::string const &s)
-{
-    out.insert(out.end(), s.begin(), s.end());
-}
-
-// Serialize a NetPacket for sending
-inline std::vector<uint8_t> serialize_packet(NetPacket const &pkt)
-{
-    std::vector<uint8_t> data;
-    uint32_t payload_size = static_cast<uint32_t>(pkt.payload.size());
-    write_bytes(data, static_cast<uint32_t>(pkt.type));
-    write_bytes(data, payload_size);
-    data.insert(data.end(), pkt.payload.begin(), pkt.payload.end());
-    return data;
-}
-
 // Deserialize helpers
 template <std::integral T>
 T read_bytes(std::vector<uint8_t> const &data, size_t offset)
@@ -82,97 +164,44 @@ T read_bytes(std::vector<uint8_t> const &data, size_t offset)
     std::array<uint8_t, sizeof(T)> arr{};
     for (size_t i = 0; i < sizeof(T); ++i)
         arr[i] = data[offset + i];
-    if constexpr (std::endian::native != std::endian::little) {
+    if constexpr (std::endian::native != std::endian::little)
         return std::byteswap(std::bit_cast<T>(arr));
-    }
     return std::bit_cast<T>(arr);
 }
 
 inline float read_float(std::vector<uint8_t> const &data, size_t offset)
 {
-    std::array<uint8_t, 4> arr{data[offset], data[offset + 1], data[offset + 2],
-                               data[offset + 3]};
+    std::array<uint8_t, 4> arr{data[offset], data[offset + 1],
+                                data[offset + 2], data[offset + 3]};
     return std::bit_cast<float>(arr);
 }
 
-// Convenience packet builders
-inline std::vector<uint8_t> make_entity_update(int id, float x, float y, int hp,
-                                               int max_hp, bool alive)
-{
-    std::vector<uint8_t> p;
-    write_bytes(p, id);
-    write_float(p, x);
-    write_float(p, y);
-    write_bytes(p, hp);
-    write_bytes(p, max_hp);
-    p.push_back(alive ? 1 : 0);
-    return serialize_packet({NetPacket::entity_update, std::move(p)});
-}
-
-inline std::vector<uint8_t> make_full_sync(std::vector<uint8_t> const &entities)
-{
-    return serialize_packet({NetPacket::state_full, entities});
-}
-
-inline std::vector<uint8_t> make_chat(std::string const &msg)
-{
-    std::vector<uint8_t> p(msg.begin(), msg.end());
-    return serialize_packet({NetPacket::chat, std::move(p)});
-}
-
-inline std::vector<uint8_t> make_combat_event(int att_id, int def_id, int dmg,
-                                              bool killed)
-{
-    std::vector<uint8_t> p;
-    write_bytes(p, att_id);
-    write_bytes(p, def_id);
-    write_bytes(p, dmg);
-    p.push_back(killed ? 1 : 0);
-    return serialize_packet({NetPacket::combat_event, std::move(p)});
-}
-
-inline std::vector<uint8_t> make_recruit_request(std::uint16_t player_id)
-{
-    std::vector<uint8_t> p;
-    write_bytes(p, player_id);
-    return serialize_packet({NetPacket::recruit_soldier, std::move(p)});
-}
-
-inline std::vector<uint8_t> make_enemy_wave(Vec2f center, int count, Team team)
-{
-    std::vector<uint8_t> p;
-    write_float(p, center.x);
-    write_float(p, center.y);
-    write_bytes(p, count);
-    write_bytes(p, static_cast<uint8_t>(team));
-    p.push_back(0);
-    return serialize_packet({NetPacket::spawn_enemy_wave, std::move(p)});
-}
-
-// --- Parse helpers ---
+// --- Wire format structs ---
+// Entity IDs are now 8 bytes (uint64_t / EntityId) matching flecs::entity_t
 
 struct EntityUpdateData {
-    uint32_t id; // wire-format 4-byte entity ID (cast from EntityId)
+    EntityId id;
     float x, y;
     int hp, max_hp;
     bool alive;
 };
 
+// Layout: id(8) + x(4) + y(4) + hp(4) + max_hp(4) + alive(1) = 25 bytes
 inline EntityUpdateData parse_entity_update(std::vector<uint8_t> const &d,
                                             size_t off = 0)
 {
     EntityUpdateData r;
-    memcpy(&r.id, d.data() + off, 4);
-    memcpy(&r.x, d.data() + off + 4, 4);
-    memcpy(&r.y, d.data() + off + 8, 4);
-    memcpy(&r.hp, d.data() + off + 12, 4);
-    memcpy(&r.max_hp, d.data() + off + 16, 4);
-    r.alive = d[off + 20];
+    memcpy(&r.id, d.data() + off, 8);
+    memcpy(&r.x, d.data() + off + 8, 4);
+    memcpy(&r.y, d.data() + off + 12, 4);
+    memcpy(&r.hp, d.data() + off + 16, 4);
+    memcpy(&r.max_hp, d.data() + off + 20, 4);
+    r.alive = d[off + 24];
     return r;
 }
 
 struct SyncEntityData {
-    uint32_t id; // wire-format 4-byte entity ID (cast from EntityId)
+    EntityId id;
     float x, y;
     int hp, max_hp;
     bool alive;
@@ -180,48 +209,51 @@ struct SyncEntityData {
     uint8_t flags;
 };
 
+// Layout: id(8)+x(4)+y(4)+hp(4)+max_hp(4)+alive(1)+team(1)+flags(1) = 27 bytes
 inline SyncEntityData parse_sync_entity(std::vector<uint8_t> const &d,
                                         size_t off = 0)
 {
     SyncEntityData r;
-    memcpy(&r.id, d.data() + off, 4);
-    memcpy(&r.x, d.data() + off + 4, 4);
-    memcpy(&r.y, d.data() + off + 8, 4);
-    memcpy(&r.hp, d.data() + off + 12, 4);
-    memcpy(&r.max_hp, d.data() + off + 16, 4);
-    r.alive = d[off + 20];
-    r.team = d[off + 21];
-    r.flags = d[off + 22];
+    memcpy(&r.id, d.data() + off, 8);
+    memcpy(&r.x, d.data() + off + 8, 4);
+    memcpy(&r.y, d.data() + off + 12, 4);
+    memcpy(&r.hp, d.data() + off + 16, 4);
+    memcpy(&r.max_hp, d.data() + off + 20, 4);
+    r.alive = d[off + 24];
+    r.team = d[off + 25];
+    r.flags = d[off + 26];
     return r;
 }
 
 struct CombatEventData {
-    uint32_t attacker_id, defender_id; // wire-format 4-byte entity ID (cast from EntityId)
+    EntityId attacker_id, defender_id;
     int damage;
     bool killed;
 };
 
+// Layout: attacker(8)+defender(8)+damage(4)+killed(1) = 21 bytes
 inline CombatEventData parse_combat_event(std::vector<uint8_t> const &d)
 {
     CombatEventData r;
-    memcpy(&r.attacker_id, d.data(), 4);
-    memcpy(&r.defender_id, d.data() + 4, 4);
-    memcpy(&r.damage, d.data() + 8, 4);
-    r.killed = d[12];
+    memcpy(&r.attacker_id, d.data(), 8);
+    memcpy(&r.defender_id, d.data() + 8, 8);
+    memcpy(&r.damage, d.data() + 16, 4);
+    r.killed = d[20];
     return r;
 }
 
 struct PlayerInputData {
-    uint32_t pid;
+    EntityId pid;
     float mx, my;
 };
 
+// Layout: pid(8)+mx(4)+my(4) = 16 bytes
 inline PlayerInputData parse_player_input(std::vector<uint8_t> const &d)
 {
     PlayerInputData r;
-    memcpy(&r.pid, d.data(), 4);
-    memcpy(&r.mx, d.data() + 4, 4);
-    memcpy(&r.my, d.data() + 8, 4);
+    memcpy(&r.pid, d.data(), 8);
+    memcpy(&r.mx, d.data() + 8, 4);
+    memcpy(&r.my, d.data() + 12, 4);
     return r;
 }
 
@@ -241,7 +273,60 @@ inline EnemyWaveData parse_enemy_wave(std::vector<uint8_t> const &d)
     return r;
 }
 
-// -- Dialogue sync serialization --
+// Serialize a NetPacket for sending
+inline std::vector<uint8_t> serialize_packet(NetPacket const &pkt)
+{
+    std::vector<uint8_t> data;
+    uint32_t payload_size = static_cast<uint32_t>(pkt.payload.size());
+    write_bytes(data, static_cast<uint32_t>(pkt.type));
+    write_bytes(data, payload_size);
+    data.insert(data.end(), pkt.payload.begin(), pkt.payload.end());
+    return data;
+}
+
+// --- Convenience packet builders ---
+
+inline std::vector<uint8_t> make_entity_update(EntityId id, float x, float y,
+                                                int hp, int max_hp, bool alive)
+{
+    std::vector<uint8_t> p;
+    write_bytes(p, id);
+    write_float(p, x);
+    write_float(p, y);
+    write_bytes(p, hp);
+    write_bytes(p, max_hp);
+    p.push_back(alive ? 1 : 0);
+    return serialize_packet(
+        NetPacket{NetPacket::entity_update, std::move(p)});
+}
+
+inline std::vector<uint8_t> make_combat_event(EntityId att_id, EntityId def_id,
+                                               int dmg, bool killed)
+{
+    std::vector<uint8_t> p;
+    write_bytes(p, att_id);
+    write_bytes(p, def_id);
+    write_bytes(p, dmg);
+    p.push_back(killed ? 1 : 0);
+    return serialize_packet(
+        NetPacket{NetPacket::combat_event, std::move(p)});
+}
+
+inline std::vector<uint8_t> make_chat(std::string const &msg)
+{
+    std::vector<uint8_t> p(msg.begin(), msg.end());
+    return serialize_packet(NetPacket{NetPacket::chat, std::move(p)});
+}
+
+inline std::vector<uint8_t> make_entity_removed(EntityId eid)
+{
+    std::vector<uint8_t> p;
+    write_bytes(p, eid);
+    return serialize_packet(NetPacket{NetPacket::entity_removed, std::move(p)});
+}
+
+
+// --- Dialogue sync parsing ---
 
 struct DialogueLineData {
     uint8_t speaker;
@@ -249,54 +334,6 @@ struct DialogueLineData {
     bool use_raw;
     std::string npc_name;
 };
-
-inline std::vector<uint8_t>
-serialize_dialogue_sync(std::string const &npc_name, int npc_trust,
-                        std::vector<DialogueLineData> const &lines,
-                        std::vector<std::string> const &topics,
-                        std::vector<std::string> const &actions, bool can_gift,
-                        bool can_threaten)
-{
-    std::vector<uint8_t> p;
-    auto wstr = [&](std::string const &s) {
-        uint16_t len = static_cast<uint16_t>(s.size());
-        write_bytes(p, len);
-        p.insert(p.end(), s.begin(), s.end());
-    };
-    wstr(npc_name);
-    write_bytes(p, npc_trust);
-    p.push_back(static_cast<uint8_t>(lines.size()));
-    for (auto const &l : lines) {
-        p.push_back(l.speaker);
-        wstr(l.text);
-        p.push_back(l.use_raw ? 1 : 0);
-        wstr(l.npc_name);
-    }
-    p.push_back(static_cast<uint8_t>(topics.size()));
-    for (auto const &t : topics)
-        wstr(t);
-    p.push_back(static_cast<uint8_t>(actions.size()));
-    for (auto const &a : actions)
-        wstr(a);
-    p.push_back((can_gift ? 1 : 0) | (can_threaten ? 2 : 0));
-    return p;
-}
-
-inline std::vector<uint8_t> make_dialogue_action(std::string const &action)
-{
-    std::vector<uint8_t> p;
-    uint16_t len = static_cast<uint16_t>(action.size());
-    write_bytes(p, len);
-    p.insert(p.end(), action.begin(), action.end());
-    return p;
-}
-
-inline std::string parse_dialogue_action(std::vector<uint8_t> const &d)
-{
-    uint16_t len;
-    memcpy(&len, d.data(), 2);
-    return {d.begin() + 2, d.begin() + 2 + len};
-}
 
 struct DialogueSyncData {
     std::string npc_name;

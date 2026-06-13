@@ -26,10 +26,7 @@ class NetworkTransport : public ITransport {
 
     NetworkTransport() = default;
     explicit NetworkTransport(tcp::socket sock);
-    ~NetworkTransport()
-    {
-        socket_.close();
-    }
+    ~NetworkTransport();
 
     static awaitable<std::unique_ptr<NetworkTransport>>
     connect(std::string const &ip, int port);
@@ -37,11 +34,9 @@ class NetworkTransport : public ITransport {
     awaitable<void> write(TransportMessage msg) override;
     awaitable<TransportMessage> read() override;
     bool is_connected() const override;
+    void disconnect() override;
 
-    tcp_socket &socket()
-    {
-        return socket_;
-    }
+    tcp_socket &socket();
 
   private:
     tcp_socket socket_{io()};

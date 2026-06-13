@@ -2,42 +2,66 @@
 
 #include "core/game-types.hpp"
 #include "core/math.hpp"
+#include "dialogue/dialogue-engine.hpp"
 #include "dialogue/relationship-table.hpp"
 #include "dialogue/topic-registry.hpp"
 #include "entities/components/combat-stats.hpp"
+#include "factions/event-simulator.hpp"
+#include "factions/faction-network.hpp"
+#include "knowledge/knowledge-graph.hpp"
+#include "knowledge/rumor-propagator.hpp"
+#include "net/transport.hpp"
 #include "save/save-manager.hpp"
-#include <flecs.h>
+#include "systems/combat-system.hpp"
+#include "systems/quest-manager.hpp"
+#include "world/world-state.hpp"
 #include <cstdint>
+#include <flecs.h>
 #include <memory>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
-class KnowledgeGraph;
-class DialogueEngine;
-class FactionNetwork;
-class EventSimulator;
-class RumorPropagator;
-class CombatSystem;
-class QuestManager;
-class WorldState;
-class ConditionTracker;
-struct NPCState;
-#include "entities/components/position.hpp"
+// ========== 楔形阵参数 ==========
+constexpr float ROW_SPACING = 45.0f; // 行距（前后）
+constexpr float BASE_OFFSET = 50.0f; // 第一行距离玩家的距离
+constexpr float ANGLE_DEG = 30.0f;   // 楔形半角（度数），总夹角=2*ANGLE_DEG
+// =================================
+
+class Server;
 
 class GameMode {
   public:
     GameMode();
-    void init_world(WorldState &ws, KnowledgeGraph &kg, DialogueEngine &de,
-                    FactionNetwork &fn, EventSimulator &es, RumorPropagator &rp,
-                    CombatSystem &cs, QuestManager &qm);
+    ~GameMode();
+    void init_world();
+    awaitable<void> start_host(int port);
+    Server *server()
+    {
+        return server_.get();
+    }
 
-    EntityId spawn_player(float x, float y);
+    // World state access
+    WorldState const &world_state() const
+    {
+        return world_state_;
+    }
+    QuestManager const &quests() const
+    {
+        return quests_;
+    }
+    DialogueEngine &dialogue_engine()
+    {
+        return dialogue_engine_;
+    }
+
+    EntityId spawn_player(Vec2f pos);
     void spawn_npc(std::string const &id, std::string const &name, float x,
                    float y, std::string const &personality,
                    std::vector<NPCKnowledgeEntry> const &known_facts);
     EntityId spawn_soldier(EntityId leader, int index, Vec2f const &facing,
                            Vec2f extra_offset = {});
+    EntityId spawn_recruit(EntityId leader);
     void spawn_guards(EntityId captain_eid, int count, Team team);
 
     void update(float dt);
@@ -46,35 +70,33 @@ class GameMode {
     void do_dialogue_action(std::string const &action);
     void end_dialogue();
 
-    // ECS mutators (used by Server instead of direct world access)
     void apply_player_input(EntityId entity, Vec2f dir);
     void spawn_enemy_wave(int count, Vec2f center, float spread, Team team);
     void apply_damage(EntityId target, int damage, bool killed);
     void heal_entity(EntityId entity, int amount);
+
     void sync_entity_state(EntityId entity, Vec2f pos, int hp, int max_hp,
                            bool alive);
-    void set_entity_position(EntityId entity, Vec2f pos);
-    const Position *get_position(EntityId entity) const;
 
-    // Dirty tracking + network sync payloads
     bool has_dirty_entities() const;
     std::vector<uint8_t> build_dirty_payload();
     std::vector<uint8_t> build_full_payload() const;
     void mark_frame_clean();
 
-    void set_survival(ConditionTracker *s)
-    {
-        survival_ = s;
-    }
-    void set_event_simulator(EventSimulator *ev)
-    {
-        events_ = ev;
-    }
     void register_player(EntityId pid)
     {
         player_entities_.insert(pid);
     }
-    EntityId spawn_player_for_server(Vec2f pos);
+    void remove_player(EntityId pid)
+    {
+        world_.entity(pid).destruct();
+        player_entities_.erase(pid);
+        dirty_entities_.erase(pid);
+    }
+    bool is_player(EntityId eid) const
+    {
+        return player_entities_.contains(eid);
+    }
 
     EntityId load_world(SaveManager::SaveData const &data);
     std::vector<SaveManager::NPCData> collect_npc_save_data();
@@ -95,16 +117,24 @@ class GameMode {
     {
         npc_entities_.clear();
     }
+
   private:
-    flecs::world &world()
-    {
-        return world_;
-    }
-    flecs::world const &world() const
-    {
-        return world_;
-    }
     flecs::world world_;
+
+    // Owned game systems
+    WorldState world_state_;
+    KnowledgeGraph knowledge_;
+    DialogueEngine dialogue_engine_;
+    FactionNetwork factions_;
+    CombatSystem combat_;
+    QuestManager quests_;
+    std::unique_ptr<EventSimulator> events_;
+    std::unique_ptr<RumorPropagator> rumors_;
+    std::unique_ptr<Server> server_;
+
+    // Persistent flecs system entities (registered once in init_world)
+    flecs::entity movement_sys_;
+    flecs::entity death_sys_;
 
     std::vector<EntityId> npc_entities_;
     std::unique_ptr<DialogueState> dialogue_ =
@@ -112,21 +142,17 @@ class GameMode {
     TopicRegistry topic_registry_;
     RelationshipTable relationships_;
 
-    KnowledgeGraph *kg_ = nullptr;
-    DialogueEngine *de_ = nullptr;
-    CombatSystem *cs_ = nullptr;
-    QuestManager *qm_ = nullptr;
-    WorldState *ws_ = nullptr;
-    EventSimulator *events_ = nullptr;
-    ConditionTracker *survival_ = nullptr;
-
     std::unordered_set<EntityId> player_entities_;
     std::unordered_set<EntityId> dirty_entities_;
+    int soldier_idx_ = 0;
     size_t last_event_count_ = 0;
+    std::chrono::duration<double> dt_{}; // In seconds
 
     void mark_dirty(EntityId eid)
     {
         dirty_entities_.insert(eid);
     }
+    uint8_t entity_kind(flecs::entity e) const;
+    void serialize_entity(flecs::entity e, std::vector<uint8_t> &out) const;
     EntityId find_nearest_interactable(EntityId player, Vec2f player_pos);
 };

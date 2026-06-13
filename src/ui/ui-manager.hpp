@@ -14,18 +14,19 @@ class UIManager {
     UIManager(SDL_Window *window, SDL_Renderer *renderer);
     ~UIManager();
 
-    void process_event(SDL_Event const &event);
+    /// @return If recognized and handled
+    bool process_event(SDL_Event const &event);
     void update(float dt);
-    void render(WorldState const &world_state, App const &app);
+    void render(WorldState *world_state, App &app);
 
   private:
-    SDL_Window *window_;
+    [[maybe_unused]] SDL_Window *window_;
     SDL_Renderer *renderer_;
     bool show_journal_ = false;
     bool show_inventory_ = false;
     bool show_map_ = false;
 
-    void render_hud(WorldState const &world_state, App const &app);
+    void render_hud(WorldState const &world_state, App &app);
     void render_journal(App const &app);
     void render_inventory(App const &app);
     void render_map(App const &app);

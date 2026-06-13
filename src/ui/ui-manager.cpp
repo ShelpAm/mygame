@@ -3,7 +3,7 @@
 #include "core/game-mode.hpp"
 #include "core/locale-manager.hpp"
 #include "entities/components/combat-stats.hpp"
-#include "survival/condition-tracker.hpp"
+#include "net/server.hpp"
 #include "world/world-state.hpp"
 #include <algorithm>
 #include <cstring>
@@ -58,8 +58,8 @@ UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer)
     for (char const *path : cjkPaths) {
         if (std::filesystem::exists(path)) {
             spdlog::info("Loading font in {}", path);
-            assert(fonts.AddFontFromFileTTF(path, 16.f, &cfg, cjkRanges) !=
-                   nullptr);
+            auto *f = fonts.AddFontFromFileTTF(path, 16.f, &cfg, cjkRanges);
+            assert(f != nullptr);
             break;
         }
     }
@@ -75,20 +75,21 @@ UIManager::~UIManager()
     ImGui::DestroyContext();
 }
 
-void UIManager::process_event(SDL_Event const &event)
+bool UIManager::process_event(SDL_Event const &event)
 {
-    ImGui_ImplSDL3_ProcessEvent(&event);
+    return ImGui_ImplSDL3_ProcessEvent(&event);
 }
 
 void UIManager::update(float /*dt*/) {}
 
-void UIManager::render(WorldState const &world_state, App const &app)
+void UIManager::render(WorldState *world_state, App &app)
 {
     ImGui_ImplSDL3_NewFrame();
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui::NewFrame();
 
-    render_hud(world_state, app);
+    if (world_state)
+        render_hud(*world_state, app);
 
     // clang-format off
     if (app.dialogue().active) render_dialogue(app);
@@ -117,7 +118,7 @@ void UIManager::render(WorldState const &world_state, App const &app)
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
 }
 
-void UIManager::render_hud(WorldState const &world_state, App const &app)
+void UIManager::render_hud(WorldState const &world_state, App &app)
 {
     auto const &loc = app.locale();
 
@@ -143,22 +144,15 @@ void UIManager::render_hud(WorldState const &world_state, App const &app)
                 loc.get("hud.time").c_str(), world_state.time_of_day());
     ImGui::TextDisabled("%s", loc.get("hud.keys").c_str());
 
-    auto const &sv = app.survival().state();
-    auto *cs = app.player_combat_stats();
+    auto const &sv = app.client().survival();
+    auto *cs = app.client().player_stats();
     ImGui::Separator();
-    if (cs) {
-        ImGui::Text("%s: %d/%d | %s: %.0f | %s: %.0f | %s: %.0f",
-                    loc.get("hud.hp").c_str(), cs->hp, cs->max_hp,
-                    loc.get("hud.food").c_str(), sv.food,
-                    loc.get("hud.water").c_str(), sv.water,
-                    loc.get("hud.energy").c_str(), sv.energy);
-    }
-    else {
-        ImGui::Text("%s: %.0f | %s: %.0f | %s: %.0f",
-                    loc.get("hud.food").c_str(), sv.food,
-                    loc.get("hud.water").c_str(), sv.water,
-                    loc.get("hud.energy").c_str(), sv.energy);
-    }
+    assert(cs != nullptr);
+    ImGui::Text("%s: %d/%d | %s: %.0f | %s: %.0f | %s: %.0f",
+                loc.get("hud.hp").c_str(), cs->hp, cs->max_hp,
+                loc.get("hud.food").c_str(), sv.food,
+                loc.get("hud.water").c_str(), sv.water,
+                loc.get("hud.energy").c_str(), sv.energy);
     ImGui::End();
 
     // Language switcher
@@ -170,14 +164,14 @@ void UIManager::render_hud(WorldState const &world_state, App const &app)
         if (i > 0)
             ImGui::SameLine();
         if (ImGui::Button(app.locale().language_name(i).c_str())) {
-            const_cast<App &>(app).set_ui_language(i);
+            app.set_ui_language(i);
         }
     }
     ImGui::End();
 
     // Death overlay
-    auto const &surv = app.survival().state();
-    auto *pcs = app.player_combat_stats();
+    auto const &surv = app.client().survival();
+    auto *pcs = app.client().player_stats();
     if ((pcs && !pcs->alive) || surv.health <= 0.f) {
         ImGui::SetNextWindowPos(ImVec2(440, 300), ImGuiCond_Always);
         ImGui::Begin("DeathOverlay", nullptr,
@@ -517,7 +511,7 @@ void UIManager::render_client(App &app)
 void UIManager::render_client_list(App &app)
 {
     auto const &loc = app.locale();
-    auto *server = app.server(); // 假设有 server() 方法
+    auto *server = app.game_mode().server();
 
     if (server->transports().empty()) {
         ImGui::TextDisabled("%s", loc.get("mp.no_clients").c_str());
@@ -529,7 +523,7 @@ void UIManager::render_client_list(App &app)
         ImGui::Indent();
 
         // 表格方式显示
-        if (ImGui::BeginTable("client_list", 3,
+        if (ImGui::BeginTable("client_list", 4,
                               ImGuiTableFlags_Borders |
                                   ImGuiTableFlags_RowBg)) {
 
@@ -539,6 +533,8 @@ void UIManager::render_client_list(App &app)
                                     ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn(loc.get("mp.status").c_str(),
                                     ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableSetupColumn("Kick",
+                                    ImGuiTableColumnFlags_WidthFixed, 50.0f);
             ImGui::TableHeadersRow();
 
             for (auto const &trans : server->transports()) {
@@ -546,7 +542,7 @@ void UIManager::render_client_list(App &app)
 
                 // ID
                 ImGui::TableSetColumnIndex(0);
-                ImGui::Text("%p", trans);
+                ImGui::Text("%p", trans.get());
 
                 // Address
                 ImGui::TableSetColumnIndex(1);
@@ -562,6 +558,13 @@ void UIManager::render_client_list(App &app)
                     ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "%s",
                                        loc.get("mp.disconnected").c_str());
                 }
+
+                // Kick
+                ImGui::TableSetColumnIndex(3);
+                ImGui::PushID(trans.get());
+                if (ImGui::SmallButton("X"))
+                    server->kick(trans.get(), "kicked by host");
+                ImGui::PopID();
             }
 
             ImGui::EndTable();

@@ -15,10 +15,11 @@ class LocalTransportEndpoint : public ITransport {
     awaitable<void> write(TransportMessage msg) override;
     awaitable<TransportMessage> read() override;
     bool is_connected() const override;
+    void disconnect() override;
 
   private:
     LocalTransportEndpoint *peer_ = nullptr;
-    asio::experimental::channel<void(boost::system::error_code,
+    deferred_concurrent_channel<void(boost::system::error_code,
                                      TransportMessage)>
         channel_;
 };
