@@ -47,7 +47,7 @@ class CombatSystem {
     void resolve_combat(flecs::world &world, float dt);
     void process_soldier_ai(flecs::world &world);
     EntityId find_nearest_enemy(
-        flecs::world &world, EntityId self, Team enemy_team,
+        flecs::world &world, EntityId self, Team my_team,
         std::unordered_map<EntityId, int> const &extra_damage = {}) const;
     int calc_damage(int attack, int defense) const;
 };

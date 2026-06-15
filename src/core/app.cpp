@@ -13,7 +13,7 @@
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 
-App::App() = default;
+App::App() : camera_system_(window_width_, window_height_) {}
 App::~App()
 {
     shutdown();
@@ -27,19 +27,25 @@ void App::init()
     SDL_SetAppMetadata("The Sunset Straits App name", "1.0",
                        "com.example.app-identifier");
 
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS |
+                  SDL_INIT_CAMERA))
         throw std::runtime_error("Failed to initialize SDL");
 
-    if (!SDL_CreateWindowAndRenderer(window_title, window_width, window_height,
-                                     SDL_WINDOW_RESIZABLE, &window_,
-                                     &renderer_))
+    if (!SDL_CreateWindowAndRenderer(window_title, window_width_,
+                                     window_height_, SDL_WINDOW_RESIZABLE,
+                                     &window_, &renderer_))
         throw std::runtime_error("Failed to create window and renderer");
 
-    SDL_SetRenderLogicalPresentation(renderer_, window_width, window_height,
-                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    camera_system_.resize(window_width_, window_height_);
     SDL_SetRenderVSync(renderer_, 1);
 
     resources_ = std::make_unique<ResourceManager>();
+    resources_->load_texture(
+        renderer_, "entity",
+        "/home/shelpam/Documents/xwechat_files/wxid_61hxqg13pdyk22_bde8/"
+        "msg/file/2026-06/CHIBI KNIGHT-PNG/CHIBI "
+        "KNIGHT-PNG/01-Idle_/2D_KNIGHT__Idle_000.png");
+
     render_system_ =
         std::make_unique<RenderSystem>(renderer_, *resources_, camera_system_);
     navigation_system_ = NavigationSystem{};
@@ -63,6 +69,7 @@ void App::init()
 
     game_mode_ = std::make_unique<GameMode>();
     game_mode_->init_world();
+    game_mode_->set_navigation(&navigation_system_);
 
     client_ = std::make_unique<Client>(this);
 
@@ -74,10 +81,10 @@ void App::init()
     spdlog::info("App: initialization complete");
 }
 
-awaitable<void> App::start_host_session(int port)
+void App::start_host_session(int port)
 {
     session_mode_ = SessionMode::host;
-    co_await game_mode_->start_host(port);
+    game_mode_->start_host(port);
 }
 
 void App::start_local_session()
@@ -94,7 +101,7 @@ void App::start_local_session()
     session_mode_ = SessionMode::local;
 }
 
-awaitable<void> App::start_client_session(std::string const &host, int port)
+void App::start_client_session(std::string const &host, int port)
 {
     // Resolve domain name if needed.
     std::string resolved_ip = host;
@@ -119,11 +126,14 @@ awaitable<void> App::start_client_session(std::string const &host, int port)
     }
 
     try {
-        auto peer = co_await NetworkTransport::connect(resolved_ip, port);
-        client_->attach_transport(std::move(peer));
+        ITransport::spawn([](App *self, std::string resolved_ip,
+                             auto port) -> awaitable<void> {
+            auto peer = co_await NetworkTransport::connect(resolved_ip, port);
+            self->client_->attach_transport(std::move(peer));
 
-        client_->send_join_request();
-        session_mode_ = SessionMode::client;
+            self->client_->send_join_request();
+            self->session_mode_ = SessionMode::client;
+        }(this, resolved_ip, port));
     }
     catch (std::exception &e) {
         spdlog::error("Connect failed: {}, aborting", e.what());
@@ -197,7 +207,7 @@ void App::process_events()
             running_ = false;
             break;
         case SDL_EVENT_WINDOW_RESIZED:
-            camera_system_.resize(event.window.data1, event.window.data2);
+            handle_resize(event.window.data1, event.window.data2);
             break;
         default:
             spdlog::warn("Unhandled SDL event type: {}", event.type);
@@ -342,4 +352,13 @@ void App::load_from_slot(int slot)
     // auto const *pos = game_mode_->get_position(pid);
     // if (pos)
     //     camera_system_.center_on(pos->world_pos);
+}
+
+void App::handle_resize(int new_width, int new_height)
+{
+    spdlog::info("Window resized to {}x{}", new_width, new_height);
+    window_width_ = new_width;
+    window_height_ = new_height;
+    // TODO: Camera keeps unchanged, it's logical
+    camera_system_.resize(window_width_, window_height_);
 }

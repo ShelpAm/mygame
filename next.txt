@@ -1,2 +1,5 @@
 1. ESC 键回退 GUI 界面到上一层
-2. Server 里应该迁移到 GameMode 下的，全都要迁移
+2. [x] Server 里应该迁移到 GameMode 下的，全都要迁移
+3. [x] collision system 会导致应用退出的时候 crash
+4. [x] 对话框位置不对，超出窗口了
+5. 名字，复活

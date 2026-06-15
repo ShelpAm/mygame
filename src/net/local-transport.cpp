@@ -8,7 +8,7 @@ LocalTransportEndpoint::LocalTransportEndpoint()
 
 LocalTransportEndpoint::~LocalTransportEndpoint()
 {
-    disconnect();
+    close();
 }
 
 void LocalTransportEndpoint::set_peer(LocalTransportEndpoint *peer)
@@ -31,18 +31,19 @@ awaitable<TransportMessage> LocalTransportEndpoint::read()
     co_return co_await channel_.async_receive();
 }
 
-bool LocalTransportEndpoint::is_connected() const
+bool LocalTransportEndpoint::is_open() const
 {
     return peer_ != nullptr;
 }
 
-void LocalTransportEndpoint::disconnect()
+void LocalTransportEndpoint::close()
 {
     if (peer_) {
+        peer_->channel_.close(); // cancel peer's pending reads
         peer_->peer_ = nullptr;
         peer_ = nullptr;
-        channel_.close();
     }
+    channel_.close(); // cancel our pending reads
 }
 
 std::pair<std::unique_ptr<LocalTransportEndpoint>,
@@ -54,4 +55,8 @@ create_transport_pair()
     a->set_peer(b.get());
     b->set_peer(a.get());
     return {std::move(a), std::move(b)};
+}
+std::string LocalTransportEndpoint::remote_info() const
+{
+    return "local";
 }

@@ -18,21 +18,21 @@ BOOST_AUTO_TEST_CASE(damage_kills_entity)
 {
     flecs::world world;
     auto e1 = world.entity();
-    e1.set<CombatStats>(CombatStats{.team = Team::player,
-                                     .max_hp = 10,
-                                     .hp = 10,
-                                     .attack = 10,
-                                     .defense = 1,
-                                     .attack_range = 100.f});
+    e1.set<CombatStats>(CombatStats{.team = Team::player_begin,
+                                    .max_hp = 10,
+                                    .hp = 10,
+                                    .attack = 10,
+                                    .defense = 1,
+                                    .attack_range = 100.f});
     e1.set<Position>(Position{{0, 0}, {0, 0}});
 
     auto e2 = world.entity();
     e2.set<CombatStats>(CombatStats{.team = Team::enemy,
-                                     .max_hp = 3,
-                                     .hp = 3,
-                                     .attack = 0,
-                                     .defense = 0,
-                                     .attack_range = 100.f});
+                                    .max_hp = 3,
+                                    .hp = 3,
+                                    .attack = 0,
+                                    .defense = 0,
+                                    .attack_range = 100.f});
     e2.set<Position>(Position{{50, 0}, {1, 0}});
 
     CombatSystem csys;
@@ -50,11 +50,14 @@ BOOST_AUTO_TEST_CASE(soldier_ai_follows_leader)
     flecs::world world;
     auto leader = world.entity();
     leader.set<Position>(Position{{100, 100}, {1, 1}});
+    auto leader_team = (Team)((int)Team::player_begin + 10);
+    leader.set<CombatStats>(
+        CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
 
     auto soldier = world.entity();
     soldier.set<Position>(Position{{0, 0}, {0, 0}});
     soldier.set<CombatStats>(
-        CombatStats{.team = Team::player, .max_hp = 10, .hp = 10});
+        CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
     soldier.set<SoldierAI>(SoldierAI{.follow_target = leader.id(),
                                      .formation_offset = {32.f, -32.f},
                                      .follow_distance = 16.f});
@@ -92,12 +95,14 @@ BOOST_AUTO_TEST_CASE(team_near_position)
     flecs::world world;
     auto e = world.entity();
     e.set<CombatStats>(
-        CombatStats{.team = Team::player, .max_hp = 10, .hp = 10});
+        CombatStats{.team = Team::player_begin, .max_hp = 10, .hp = 10});
     e.set<Position>(Position{{50, 0}, {0, 0}});
 
     CombatSystem csys;
-    BOOST_TEST(csys.team_near_position(world, Team::player, {0, 0}, 100.f));
-    BOOST_TEST(!csys.team_near_position(world, Team::player, {0, 0}, 10.f));
+    BOOST_TEST(
+        csys.team_near_position(world, Team::player_begin, {0, 0}, 100.f));
+    BOOST_TEST(
+        !csys.team_near_position(world, Team::player_begin, {0, 0}, 10.f));
     BOOST_TEST(!csys.team_near_position(world, Team::enemy, {0, 0}, 200.f));
 }
 
@@ -105,34 +110,32 @@ BOOST_AUTO_TEST_CASE(dead_entity_not_in_combat)
 {
     flecs::world world;
     auto e = world.entity();
-    e.set<CombatStats>(
-        CombatStats{.team = Team::player,
-                    .max_hp = 10,
-                    .hp = 10,
-                    .alive = false});
+    e.set<CombatStats>(CombatStats{
+        .team = Team::player_begin, .max_hp = 10, .hp = 10, .alive = false});
     e.set<Position>(Position{{0, 0}, {0, 0}});
 
     CombatSystem csys;
-    BOOST_TEST(!csys.team_near_position(world, Team::player, {0, 0}, 200.f));
+    BOOST_TEST(
+        !csys.team_near_position(world, Team::player_begin, {0, 0}, 200.f));
 }
 
 BOOST_AUTO_TEST_CASE(combat_events_generated)
 {
     flecs::world world;
     auto e1 = world.entity();
-    e1.set<CombatStats>(CombatStats{.team = Team::player,
-                                     .max_hp = 10,
-                                     .hp = 10,
-                                     .attack = 10,
-                                     .attack_range = 100.f});
+    e1.set<CombatStats>(CombatStats{.team = Team::player_begin,
+                                    .max_hp = 10,
+                                    .hp = 10,
+                                    .attack = 10,
+                                    .attack_range = 100.f});
     e1.set<Position>(Position{{0, 0}, {0, 0}});
 
     auto e2 = world.entity();
     e2.set<CombatStats>(CombatStats{.team = Team::enemy,
-                                     .max_hp = 10,
-                                     .hp = 10,
-                                     .attack = 3,
-                                     .attack_range = 100.f});
+                                    .max_hp = 10,
+                                    .hp = 10,
+                                    .attack = 3,
+                                    .attack_range = 100.f});
     e2.set<Position>(Position{{50, 0}, {1, 0}});
 
     CombatSystem csys;

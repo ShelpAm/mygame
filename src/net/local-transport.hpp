@@ -14,8 +14,9 @@ class LocalTransportEndpoint : public ITransport {
 
     awaitable<void> write(TransportMessage msg) override;
     awaitable<TransportMessage> read() override;
-    bool is_connected() const override;
-    void disconnect() override;
+    bool is_open() const override;
+    void close() override;
+    std::string remote_info() const override;
 
   private:
     LocalTransportEndpoint *peer_ = nullptr;

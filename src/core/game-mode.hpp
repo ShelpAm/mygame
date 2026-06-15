@@ -10,15 +10,16 @@
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "knowledge/rumor-propagator.hpp"
-#include "net/transport.hpp"
 #include "save/save-manager.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/quest-manager.hpp"
 #include "world/world-state.hpp"
+#include <chrono>
 #include <cstdint>
 #include <flecs.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -29,13 +30,17 @@ constexpr float ANGLE_DEG = 30.0f;   // 楔形半角（度数），总夹角=2*A
 // =================================
 
 class Server;
+class NavigationSystem;
+class CollisionSystem;
 
 class GameMode {
   public:
     GameMode();
     ~GameMode();
     void init_world();
-    awaitable<void> start_host(int port);
+    void start_host(int port);
+    void stop_host();
+
     Server *server()
     {
         return server_.get();
@@ -55,7 +60,7 @@ class GameMode {
         return dialogue_engine_;
     }
 
-    EntityId spawn_player(Vec2f pos);
+    EntityId spawn_player(Vec2f pos, Team team);
     void spawn_npc(std::string const &id, std::string const &name, float x,
                    float y, std::string const &personality,
                    std::vector<NPCKnowledgeEntry> const &known_facts);
@@ -67,8 +72,8 @@ class GameMode {
     void update(float dt);
     void apply_player_movement(EntityId player, Vec2f new_pos);
     void handle_interaction(EntityId player);
-    void do_dialogue_action(std::string const &action);
-    void end_dialogue();
+    void do_dialogue_action(EntityId player, std::string const &action);
+    void end_dialogue(EntityId player);
 
     void apply_player_input(EntityId entity, Vec2f dir);
     void spawn_enemy_wave(int count, Vec2f center, float spread, Team team);
@@ -101,13 +106,15 @@ class GameMode {
     EntityId load_world(SaveManager::SaveData const &data);
     std::vector<SaveManager::NPCData> collect_npc_save_data();
 
-    DialogueState &dialogue()
+    DialogueState &dialogue(EntityId pid)
     {
-        return *dialogue_;
+        return player_dialogues_[pid];
     }
-    DialogueState const &dialogue() const
+    DialogueState const &dialogue(EntityId pid) const
     {
-        return *dialogue_;
+        static DialogueState empty;
+        auto it = player_dialogues_.find(pid);
+        return it != player_dialogues_.end() ? it->second : empty;
     }
     std::vector<EntityId> const &npc_entities() const
     {
@@ -117,6 +124,8 @@ class GameMode {
     {
         npc_entities_.clear();
     }
+
+    void set_navigation(NavigationSystem const *nav);
 
   private:
     flecs::world world_;
@@ -134,11 +143,13 @@ class GameMode {
 
     // Persistent flecs system entities (registered once in init_world)
     flecs::entity movement_sys_;
-    flecs::entity death_sys_;
+    flecs::entity combat_sys_;
+    flecs::entity collision_sys_;
+
+    std::unique_ptr<CollisionSystem> collision_system_;
 
     std::vector<EntityId> npc_entities_;
-    std::unique_ptr<DialogueState> dialogue_ =
-        std::make_unique<DialogueState>();
+    std::unordered_map<EntityId, DialogueState> player_dialogues_;
     TopicRegistry topic_registry_;
     RelationshipTable relationships_;
 
@@ -147,6 +158,7 @@ class GameMode {
     int soldier_idx_ = 0;
     size_t last_event_count_ = 0;
     std::chrono::duration<double> dt_{}; // In seconds
+    NavigationSystem const *navigation_ = nullptr;
 
     void mark_dirty(EntityId eid)
     {

@@ -64,6 +64,7 @@ set(SOURCES
     src/knowledge/rumor-propagator.cpp
     src/save/save-manager.cpp
     src/systems/combat-system.cpp
+    src/systems/collision-system.cpp
     src/systems/quest-manager.cpp
     src/net/server.cpp
     src/net/client.cpp
@@ -85,9 +86,11 @@ set(HEADERS
     src/entities/components/movement.hpp
     src/entities/components/npc-state.hpp
     src/entities/components/interactable.hpp
+    src/entities/components/collider.hpp
     src/systems/render-system.hpp
     src/systems/camera-system.hpp
     src/systems/navigation-system.hpp
+    src/systems/collision-system.hpp
     src/knowledge/knowledge-graph.hpp
     src/world/world-state.hpp
     src/world/map-data.hpp
@@ -128,12 +131,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         "GNU")
         target_compile_options(TheSunsetStraits PRIVATE
             # -fsanitize=thread
-            # -fsanitize=address
+            -fsanitize=address
             -O0
         )
         target_link_options(TheSunsetStraits PRIVATE
             # -fsanitize=thread
-            # -fsanitize=address
+            -fsanitize=address
         )
         target_link_libraries(TheSunsetStraits PRIVATE pthread)
     endif()

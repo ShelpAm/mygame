@@ -62,26 +62,31 @@ void RenderSystem::render_entities(Client &client, Vec2f player_pos,
             continue;
 
         Vec2f screen = camera_.world_to_screen(re.position);
-        float size = 14.f * re.scale;
-
-        SDL_FColor col =
-            re.hit_flash ? SDL_FColor{1.f, 1.f, 1.f, 1.f} : re.color;
+        float size = 24.f * re.scale;
 
         SDL_FRect rect{screen.x - size, screen.y - size, size * 2, size * 2};
-        SDL_SetRenderDrawColor(renderer_, col.r * 255, col.g * 255, col.b * 255,
-                               col.a * 255);
-        SDL_RenderFillRect(renderer_, &rect);
+        // Main rect
+        // SDL_FColor color =
+        //     re.hit_flash ? SDL_FColor{1.f, 1.f, 1.f, 1.f} : re.color;
+        // SDL_SetRenderDrawColor(renderer_, color.r * 255, color.g * 255,
+        //                        color.b * 255, color.a * 255);
+        // SDL_RenderFillRect(renderer_, &rect);
 
-        if (re.team == Team::enemy) {
-            SDL_SetRenderDrawColor(renderer_, 180, 40, 40, 200);
-            SDL_RenderRect(renderer_, &rect);
-        }
+        /* Display the image */
+        SDL_FRect dst = rect;
+        auto texture = resources_.texture("entity");
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_PIXELART);
+        SDL_RenderTexture(renderer_, texture, NULL, &dst);
 
+        // resources_.camera().update(renderer_);
+        // resources_.camera().render(renderer_, &dst);
+
+        // '!' mark
         if (re.id != player_id && re.interactable) {
             float dist = std::hypot(re.position.x - player_pos.x,
                                     re.position.y - player_pos.y);
             if (dist < 64.f) {
-                SDL_FRect hint{screen.x - 4, screen.y - size - 14, 8, 12};
+                SDL_FRect hint{screen.x - 4, screen.y - size - 14, 10, 14};
                 SDL_SetRenderDrawColor(renderer_, 255, 255, 100, 220);
                 SDL_RenderFillRect(renderer_, &hint);
             }
@@ -96,8 +101,8 @@ void RenderSystem::render_health_bars(Client &client)
             continue;
 
         Vec2f screen = camera_.world_to_screen(re.position);
-        float barW = 30.f, barH = 4.f;
-        float barY = screen.y - 22.f;
+        float barW = 32.f, barH = 4.f;
+        float barY = screen.y - 30.f;
         float barX = screen.x - barW / 2.f;
 
         SDL_FRect bg{barX, barY, barW, barH};
@@ -106,9 +111,9 @@ void RenderSystem::render_health_bars(Client &client)
 
         float ratio = (float)re.hp / (float)re.max_hp;
         SDL_FRect fill{barX, barY, barW * ratio, barH};
-        SDL_FColor col = re.team == Team::player
-                             ? SDL_FColor{0.2f, 0.8f, 0.3f, 1.f}
-                             : SDL_FColor{0.9f, 0.2f, 0.1f, 1.f};
+        bool hostile = is_hostile(re.team, client.player_team());
+        SDL_FColor col = hostile ? SDL_FColor{0.9f, 0.2f, 0.1f, 1.f}  // red
+                                 : SDL_FColor{0.2f, 0.8f, 0.3f, 1.f}; // green
         SDL_SetRenderDrawColor(renderer_, col.r * 255, col.g * 255, col.b * 255,
                                255);
         SDL_RenderFillRect(renderer_, &fill);

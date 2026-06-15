@@ -1,4 +1,5 @@
 #include "systems/combat-system.hpp"
+#include "entities/components/collider.hpp"
 #include "entities/components/position.hpp"
 #include "entities/components/soldier-ai.hpp"
 #include "entities/components/sprite.hpp"
@@ -47,13 +48,9 @@ void CombatSystem::resolve_combat(flecs::world &world, float dt)
             continue;
         }
 
-        Team enemy_team =
-            (atkStats->team == Team::player) ? Team::enemy : Team::player;
-
-        // Find nearest enemy — check current HP accounting for accumulated
-        // damage
-        EntityId targetId =
-            find_nearest_enemy(world, attacker.id(), enemy_team, damage_dealt);
+        // Find nearest hostile entity
+        EntityId targetId = find_nearest_enemy(world, attacker.id(),
+                                               atkStats->team, damage_dealt);
         if (targetId == 0)
             continue;
 
@@ -118,11 +115,8 @@ void CombatSystem::process_soldier_ai(flecs::world &world)
             continue;
 
         bool changed = false;
-        Team enemy_team = cs->team == Team::player ? Team::enemy : Team::player;
-
-        // Find nearest enemy (ignoring accumulated damage — soldier AI checks
-        // alive from component directly)
-        auto enemyId = find_nearest_enemy(world, e.id(), enemy_team, {});
+        // Find nearest hostile entity
+        auto enemyId = find_nearest_enemy(world, e.id(), cs->team, {});
         if (enemyId != 0) {
             auto const *enemyPos = world.entity(enemyId).try_get<Position>();
             assert(enemyPos);
@@ -181,7 +175,7 @@ void CombatSystem::process_soldier_ai(flecs::world &world)
 }
 
 EntityId CombatSystem::find_nearest_enemy(
-    flecs::world &world, EntityId self, Team enemy_team,
+    flecs::world &world, EntityId self, Team my_team,
     std::unordered_map<EntityId, int> const &extra_damage) const
 {
     flecs::entity self_e = world.entity(self);
@@ -195,7 +189,7 @@ EntityId CombatSystem::find_nearest_enemy(
 
     world.query<CombatStats, Position>().each(
         [&](flecs::entity e, CombatStats &cs, Position &pos) {
-            if (e.id() == self || !cs.alive || cs.team != enemy_team)
+            if (e.id() == self || !cs.alive || !is_hostile(my_team, cs.team))
                 return;
             // Skip entities that would be dead from accumulated damage
             auto it = extra_damage.find(e.id());
@@ -253,6 +247,7 @@ void CombatSystem::spawn_enemy_wave(flecs::world &world, int count,
                              .scale = 1.f,
                              .visible = true});
         e.set<CombatStats>(CombatStats{team, 8, 8, 3, 1, 80.f});
+        e.set<Collider>(Collider{14.f});
         if (out_ids)
             out_ids->push_back(e.id());
     }

@@ -43,7 +43,7 @@ class UIManager {
 
     std::string host_ip_ = "127.0.0.1";
     int host_port_ = 27015;
-    char chat_buf_[256] = {};
+    std::string chat_buf_;
     bool chat_active_ = false;
     std::vector<std::string> server_list_;
     void load_server_list();

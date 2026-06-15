@@ -2,7 +2,6 @@
 
 #include "net/transport.hpp"
 #include <memory>
-#include <mutex>
 #include <vector>
 
 using tcp_socket = default_token::as_default_on_t<tcp::socket>;
@@ -33,17 +32,17 @@ class NetworkTransport : public ITransport {
 
     awaitable<void> write(TransportMessage msg) override;
     awaitable<TransportMessage> read() override;
-    bool is_connected() const override;
-    void disconnect() override;
+    bool is_open() const override;
+    void close() override;
+    std::string remote_info() const override;
 
     tcp_socket &socket();
 
   private:
     tcp_socket socket_{io()};
+    std::string cached_socket_info_;
 
     std::vector<std::uint8_t> write_buffer_;
     NetHead read_head_buffer_;
     std::vector<std::uint8_t> read_body_buffer_;
-    std::mutex mutex_;
-    std::vector<TransportMessage> recv_queue_;
 };

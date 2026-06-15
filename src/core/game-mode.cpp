@@ -3,6 +3,7 @@
 #include "dialogue/dialogue-engine.hpp"
 #include "dialogue/relationship-table.hpp"
 #include "dialogue/topic-registry.hpp"
+#include "entities/components/collider.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/defense-structure.hpp"
 #include "entities/components/interactable.hpp"
@@ -16,6 +17,7 @@
 #include "knowledge/rumor-propagator.hpp"
 #include "net/server.hpp"
 #include "survival/condition-tracker.hpp"
+#include "systems/collision-system.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/quest-manager.hpp"
 #include "world/world-state.hpp"
@@ -32,6 +34,41 @@ static std::string readFile(std::string const &path)
             std::istreambuf_iterator<char>()};
 }
 
+// Calculate wedge formation offset for a soldier at the given index.
+// facing: unit vector of the leader's forward direction.
+static Vec2f calc_formation_offset(int index, Vec2f const &facing)
+{
+    float angle_rad = ANGLE_DEG * 3.1415926535f / 180.0f;
+    float tan_half = std::tan(angle_rad);
+
+    int row = 0;
+    int cum = 0;
+    while (true) {
+        int row_size = row + 1;
+        if (index < cum + row_size) {
+            int col = index - cum;
+            float dist = BASE_OFFSET + row * ROW_SPACING;
+            float half_width = dist * tan_half;
+
+            float local_x;
+            if (row_size == 1) {
+                local_x = 0.0f;
+            } else {
+                local_x = -half_width +
+                          (col + 0.5f) * (2.0f * half_width / row_size);
+            }
+            float local_y = -dist;
+
+            float right_x = -facing.y;
+            float right_y = facing.x;
+            return {local_x * right_x + local_y * facing.x,
+                    local_x * right_y + local_y * facing.y};
+        }
+        cum += row_size;
+        ++row;
+    }
+}
+
 GameMode::GameMode() = default;
 GameMode::~GameMode()
 {
@@ -41,6 +78,10 @@ GameMode::~GameMode()
 
 void GameMode::init_world()
 {
+    // 开启 REST 服务（默认监听 27750 端口）
+    // ecs_measure_system_time(world_.c_ptr(), true);
+    // world_.app().enable_rest().enable_stats().run();
+
     events_ =
         std::make_unique<EventSimulator>(factions_, knowledge_, world_state_);
     rumors_ = std::make_unique<RumorPropagator>(knowledge_);
@@ -167,7 +208,7 @@ void GameMode::init_world()
                 int gc = obj.contains("guards")
                              ? static_cast<int>(obj.at("guards").as_int64())
                              : 3;
-                Team t = pers == "hostile" ? Team::enemy : Team::player;
+                Team t = pers == "hostile" ? Team::enemy : Team::neutral;
                 spawn_guards(npc_entities_.back(), gc, t);
             }
         }
@@ -182,31 +223,74 @@ void GameMode::init_world()
     // Register flecs systems once (not per-frame!)
     // Movement: apply velocity to Position
     movement_sys_ =
-        world_.system<Position, Movement>()
+        world_.system<Position, Movement, Collider>()
             .kind(flecs::OnUpdate)
-            .each([this](flecs::entity e, Position &p, Movement &m) {
-                auto dest = p.world_pos + m.velocity * dt_.count();
-                if (player_entities_.contains(e.id()))
-                    apply_player_movement(e.id(), dest);
-                else
-                    p.world_pos = dest;
-                p.tile_pos = {static_cast<int>(p.world_pos.x / 64.f),
-                              static_cast<int>(p.world_pos.y / 64.f)};
-                if (m.moving)
+            .each(
+                [this](flecs::entity e, Position &p, Movement &m, Collider &) {
+                    auto dest = p.world_pos + m.velocity * dt_.count();
+                    if (player_entities_.contains(e.id()))
+                        apply_player_movement(e.id(), dest);
+                    else
+                        p.world_pos = dest;
+                    p.tile_pos = {static_cast<int>(p.world_pos.x / 64.f),
+                                  static_cast<int>(p.world_pos.y / 64.f)};
+                    if (m.moving)
+                        mark_dirty(e.id());
+                });
+
+    // Collision: runs after movement (registered later → later in
+    // OnUpdate). Pushes entities apart and slides on blocked tiles.
+    collision_system_ = std::make_unique<CollisionSystem>();
+    collision_sys_ =
+        world_.system<Position, Collider>()
+            .kind(flecs::OnUpdate)
+            .each([this](flecs::entity e, Position &p, Collider &c) {
+                Vec2f const original = p.world_pos;
+                Vec2f pos = original;
+
+                // Tile push-out
+                pos = collision_system_->resolve_tile_collisions(pos, c.radius);
+
+                // Entity push-apart
+                world_.query<Position, Collider>().each(
+                    [&](flecs::entity other, Position const &op,
+                        Collider const &oc) {
+                        if (other == e)
+                            return;
+                        float dx = pos.x - op.world_pos.x;
+                        float dy = pos.y - op.world_pos.y;
+                        float dist = std::hypot(dx, dy);
+                        float min_dist = c.radius + oc.radius;
+                        if (dist < min_dist) {
+                            if (dist > 0.001f) {
+                                float overlap = min_dist - dist;
+                                pos.x += (dx / dist) * overlap;
+                                pos.y += (dy / dist) * overlap;
+                            }
+                            else {
+                                pos.x += min_dist;
+                            }
+                        }
+                    });
+
+                if (pos.x != original.x || pos.y != original.y) {
+                    p.world_pos = pos;
                     mark_dirty(e.id());
+                }
             });
 
     // Death marker: entities with hp <= 0 become dead
-    death_sys_ = world_.system<CombatStats>()
-                     .kind(flecs::OnUpdate)
-                     .each([this](flecs::entity e, CombatStats &cs) {
-                         if (cs.alive && cs.hp <= 0) {
-                             cs.alive = false;
-                             mark_dirty(e.id());
-                             if (dialogue_->active)
-                                 end_dialogue();
-                         }
-                     });
+    combat_sys_ = world_.system<CombatStats>()
+                      .kind(flecs::OnUpdate)
+                      .each([this](flecs::entity e, CombatStats &cs) {
+                          if (cs.alive && cs.hp <= 0) {
+                              cs.alive = false;
+                              mark_dirty(e.id());
+                              for (auto &[pid, ds] : player_dialogues_)
+                                  if (ds.active && ds.npc_entity == e.id())
+                                      ds = {};
+                          }
+                      });
 
     server_ = std::make_unique<Server>();
     server_->set_combat_system(&combat_);
@@ -215,9 +299,16 @@ void GameMode::init_world()
     combat_.set_dirty_callback([this](EntityId eid) { mark_dirty(eid); });
 }
 
-awaitable<void> GameMode::start_host(int port)
+void GameMode::start_host(int port)
 {
-    co_await server_->listen(port);
+    ITransport::spawn([](GameMode *self, auto port) -> awaitable<void> {
+        co_await self->server_->listen(port);
+    }(this, port));
+}
+
+void GameMode::stop_host()
+{
+    server_->stop_listen();
 }
 
 void GameMode::spawn_npc(std::string const &id, std::string const &name,
@@ -249,6 +340,7 @@ void GameMode::spawn_npc(std::string const &id, std::string const &name,
     e.set<Interactable>(Interactable{64.f, true});
     e.set<NPCState>(npc);
     e.set<CombatStats>(CombatStats{Team::neutral, 15, 15, 2, 1, 60.f});
+    e.set<Collider>(Collider{14.f});
 
     relationships_.set_relation(id, {});
     mark_dirty(eid);
@@ -258,74 +350,37 @@ void GameMode::spawn_npc(std::string const &id, std::string const &name,
 EntityId GameMode::spawn_soldier(EntityId leader, int index,
                                  Vec2f const &facing, Vec2f extra_offset)
 {
-    float angle_rad = ANGLE_DEG * 3.1415926535f / 180.0f;
-    float tan_half = tanf(angle_rad);
+    Vec2f off = calc_formation_offset(index, facing) + extra_offset;
 
-    // 1. 根据 index 确定行号 row 及该行内的列号 col
-    int row = 0;
-    int cum = 0;
-    while (true) {
-        int row_size = row + 1; // 第 row 行有 row+1 个士兵
-        if (index < cum + row_size) {
-            int col = index - cum; // 0 ~ row
-            // 2. 该行到玩家的距离
-            float dist_to_player = BASE_OFFSET + row * ROW_SPACING;
-            // 3. 该行的半宽（由角度和距离决定）
-            float half_width = dist_to_player * tan_half;
+    auto const *lp = world_.entity(leader).try_get<Position>();
+    assert(lp);
+    Vec2f start = lp->world_pos + off;
 
-            // 4. 本地坐标（玩家坐标系：+X 右，+Y 前）
-            float local_x, local_y;
-            if (row_size == 1) {
-                local_x = 0.0f;
-            }
-            else {
-                // 将 col 均匀映射到 [-half_width, half_width]
-                local_x =
-                    -half_width + (col + 0.5f) * (2.0f * half_width / row_size);
-            }
-            local_y = -dist_to_player; // 玩家后方为负
+    auto e = world_.entity();
+    auto eid = e.id();
 
-            // 5. 旋转到世界偏移（基于 facing 方向）
-            // facing 是玩家前向单位向量 (dx, dy)
-            float ox = local_x * (-facing.y) + local_y * facing.x;
-            float oy =
-                local_x * facing.x +
-                local_y * facing.y; // 注意：原代码 ox/oy 公式略有不同，这里修正
-            // 原公式：ox = local_x * facing.y + local_y * facing.x; oy =
-            // local_x * -facing.x + local_y * facing.y;
-            // 我根据标准旋转验证：向右向量 = (-facing.y, facing.x)，前向向量 =
-            // facing 世界偏移 = local_x * right + local_y * forward 因此 ox =
-            // local_x * (-facing.y) + local_y * facing.x
-            //     oy = local_x * facing.x + local_y * facing.y
-            // 如果你希望完全保持原公式的符号习惯，可以取消注释下面的原公式
-            // float ox = local_x * facing.y + local_y * facing.x;
-            // float oy = local_x * -facing.x + local_y * facing.y;
+    auto leader_team = world_.entity(leader).get<CombatStats>().team;
 
-            // 6. 加上额外偏移
-            Vec2f off{ox + extra_offset.x, oy + extra_offset.y};
-
-            auto const *lp = world_.entity(leader).try_get<Position>();
-            Vec2f start = lp ? lp->world_pos + off : off;
-
-            auto e = world_.entity();
-            auto eid = e.id();
-
-            e.set<Position>(Position{start, {0, 0}, 0.8f});
-            e.set<Sprite>(
-                Sprite{"", {}, {12, 12}, {0.3f, 0.5f, 0.9f, 1.f}, 0.8f, true});
-            e.set<CombatStats>(CombatStats{Team::player, 12, 12, 3, 2, 80.f});
-            e.set<SoldierAI>(SoldierAI{leader, off, 32.f, 200.f});
-            mark_dirty(eid);
-            return eid;
-        }
-        cum += row_size;
-        ++row;
-    }
+    e.set<Position>(Position{start, {0, 0}, 0.8f});
+    e.set<Sprite>(
+        Sprite{"", {}, {12, 12}, {0.3f, 0.5f, 0.9f, 1.f}, 0.8f, true});
+    e.set<CombatStats>(CombatStats{leader_team, 12, 12, 3, 2, 80.f});
+    e.set<Collider>(Collider{11.f});
+    e.set<SoldierAI>(SoldierAI{leader, off, 32.f, 200.f});
+    mark_dirty(eid);
+    return eid;
 }
 
 EntityId GameMode::spawn_recruit(EntityId leader)
 {
-    return spawn_soldier(leader, soldier_idx_++, {0, -1}, {32.f, 32.f});
+    Vec2f facing{0, -1};
+    if (auto const *mov = world_.entity(leader).try_get<Movement>()) {
+        float len = std::hypot(mov->velocity.x, mov->velocity.y);
+        if (len > 0.001f) {
+            facing = {mov->velocity.x / len, mov->velocity.y / len};
+        }
+    }
+    return spawn_soldier(leader, soldier_idx_++, facing, {32.f, 32.f});
 }
 
 void GameMode::spawn_guards(EntityId captain_eid, int count, Team team)
@@ -342,6 +397,7 @@ void GameMode::spawn_guards(EntityId captain_eid, int count, Team team)
         e.set<Position>(Position{gp, {0, 0}, 0.5f});
         e.set<Sprite>(Sprite{"", {}, {10, 10}, col, 0.7f, true});
         e.set<CombatStats>(CombatStats{team, 10, 10, 3, 2, 70.f});
+        e.set<Collider>(Collider{10.f});
         e.set<SoldierAI>(SoldierAI{
             captain_eid, {gp.x - center.x, gp.y - center.y}, 32.f, 180.f});
         mark_dirty(e.id());
@@ -349,8 +405,9 @@ void GameMode::spawn_guards(EntityId captain_eid, int count, Team team)
 }
 void GameMode::handle_interaction(EntityId player)
 {
-    if (dialogue_->active) {
-        end_dialogue();
+    auto &dlg = player_dialogues_[player];
+    if (dlg.active) {
+        end_dialogue(player);
         return;
     }
     auto const *pp = world_.entity(player).try_get<Position>();
@@ -368,36 +425,36 @@ void GameMode::handle_interaction(EntityId player)
     auto *rel = relationships_.get_relation(npc->npc_id);
     int trust = rel ? rel->trust : 0;
     auto resp = dialogue_engine_.generate_greeting(*npc, trust);
-    dialogue_->active = true;
-    dialogue_->npc_entity = eid;
-    dialogue_->npc_id = npc->npc_id;
-    dialogue_->npc_name = npc->display_name;
-    dialogue_->history.clear();
-    dialogue_->available_topics.clear();
-    dialogue_->available_actions.clear();
-    dialogue_->can_gift = false;
-    dialogue_->can_threaten = false;
-    dialogue_->history.push_back(
+    dlg.active = true;
+    dlg.npc_entity = eid;
+    dlg.npc_id = npc->npc_id;
+    dlg.npc_name = npc->display_name;
+    dlg.history.clear();
+    dlg.available_topics.clear();
+    dlg.available_actions.clear();
+    dlg.can_gift = false;
+    dlg.can_threaten = false;
+    dlg.history.push_back(
         {DialogueLine::npc, "", resp.text, true, npc->display_name});
-    dialogue_->npc_trust = trust;
+    dlg.npc_trust = trust;
     for (auto const &[tid, _] : npc->knowledge)
-        dialogue_->available_topics.push_back(tid);
+        dlg.available_topics.push_back(tid);
     for (auto const &t : knowledge_.known_topics())
         if (!npc->knowledge.contains(t))
-            dialogue_->available_actions.push_back("tell:" + t);
+            dlg.available_actions.push_back("tell:" + t);
     if (npc->personality == "hostile") {
-        dialogue_->available_topics.push_back("__attack__");
-        dialogue_->can_threaten = true;
+        dlg.available_topics.push_back("__attack__");
+        dlg.can_threaten = true;
     }
-    dialogue_->can_gift = true;
+    dlg.can_gift = true;
     for (auto const *q : quests_.available_quests())
         if (q->giver == npc->npc_id) {
-            dialogue_->available_topics.push_back("__quest__");
+            dlg.available_topics.push_back("__quest__");
             break;
         }
     for (auto const *q : quests_.active_quests())
         if (q->giver == npc->npc_id) {
-            dialogue_->available_topics.push_back("__quest_turnin__");
+            dlg.available_topics.push_back("__quest_turnin__");
             break;
         }
 }
@@ -423,11 +480,16 @@ EntityId GameMode::find_nearest_interactable(EntityId player, Vec2f player_pos)
     return nearest;
 }
 
-void GameMode::do_dialogue_action(std::string const &action)
+void GameMode::do_dialogue_action(EntityId player, std::string const &action)
 {
-    if (!dialogue_->active)
+    auto &dlg = player_dialogues_[player];
+    if (!dlg.active)
         return;
-    auto eid = dialogue_->npc_entity;
+    if (action == "__end__") {
+        end_dialogue(player);
+        return;
+    }
+    auto eid = dlg.npc_entity;
     auto npc_entity = world_.entity(eid);
     auto *npc = npc_entity.try_get_mut<NPCState>();
     if (!npc)
@@ -435,7 +497,7 @@ void GameMode::do_dialogue_action(std::string const &action)
 
     auto addHistory = [&](DialogueLine::Speaker s, std::string const &key,
                           std::string const &raw = "", bool use_raw = false) {
-        dialogue_->history.push_back({s, key, raw, use_raw, npc->display_name});
+        dlg.history.push_back({s, key, raw, use_raw, npc->display_name});
     };
 
     if (action == "__attack__") {
@@ -448,12 +510,12 @@ void GameMode::do_dialogue_action(std::string const &action)
         addHistory(DialogueLine::npc, npc->personality == "hostile"
                                           ? "resp.attack_hostile"
                                           : "resp.attack_neutral");
-        end_dialogue();
+        end_dialogue(player);
         return;
     }
     if (action == "__gift__") {
         relationships_.modify_trust(npc->npc_id, 8);
-        dialogue_->npc_trust += 8;
+        dlg.npc_trust += 8;
         addHistory(DialogueLine::player, "resp.gift_you");
         addHistory(DialogueLine::npc, npc->personality == "friendly"
                                           ? "resp.gift_friendly"
@@ -462,7 +524,7 @@ void GameMode::do_dialogue_action(std::string const &action)
     }
     if (action == "__threaten__") {
         relationships_.modify_fear(npc->npc_id, 15);
-        dialogue_->npc_fear += 15;
+        dlg.npc_fear += 15;
         addHistory(DialogueLine::player, "resp.threaten_you");
         addHistory(DialogueLine::npc, npc->personality == "hostile"
                                           ? "resp.threaten_hostile"
@@ -496,7 +558,7 @@ void GameMode::do_dialogue_action(std::string const &action)
             if (done) {
                 quests_.complete_quest(q->id);
                 relationships_.modify_trust(npc->npc_id, q->reward_trust);
-                dialogue_->npc_trust += q->reward_trust;
+                dlg.npc_trust += q->reward_trust;
                 addHistory(DialogueLine::npc, "quest.reward");
             }
             else {
@@ -515,7 +577,7 @@ void GameMode::do_dialogue_action(std::string const &action)
                    known ? "resp.already_known" : "resp.learned");
         if (!known) {
             relationships_.modify_trust(npc->npc_id, 5);
-            dialogue_->npc_trust += 5;
+            dlg.npc_trust += 5;
         }
         return;
     }
@@ -531,7 +593,7 @@ void GameMode::do_dialogue_action(std::string const &action)
     quests_.report_talk(npc->npc_id);
     if (resp.trust_delta != 0) {
         relationships_.modify_trust(npc->npc_id, resp.trust_delta);
-        dialogue_->npc_trust += resp.trust_delta;
+        dlg.npc_trust += resp.trust_delta;
     }
     if (resp.is_truthful && !resp.fact_id.empty() &&
         npc->knowledge.contains(action)) {
@@ -545,54 +607,63 @@ void GameMode::do_dialogue_action(std::string const &action)
     }
 }
 
-void GameMode::end_dialogue()
+void GameMode::end_dialogue(EntityId player)
 {
-    *dialogue_ = {};
+    player_dialogues_[player] = {};
+}
+
+void GameMode::set_navigation(NavigationSystem const *nav)
+{
+    navigation_ = nav;
+    if (collision_system_)
+        collision_system_->set_navigation(nav);
 }
 
 EntityId GameMode::load_world(SaveManager::SaveData const &data)
 {
-    world_.each([](flecs::entity e) { e.destruct(); });
-    npc_entities_.clear();
-
-    auto pid = spawn_player({data.player_pos.x, data.player_pos.y});
-    auto *pcs = world_.entity(pid).try_get_mut<CombatStats>();
-    if (pcs) {
-        pcs->hp = data.player_hp;
-        pcs->max_hp = data.player_max_hp;
-    }
-
-    world_state_.set_day(data.day);
-    world_state_.set_season(data.season);
-    for (auto const &t : data.seen_tiles)
-        world_state_.reveal_tile(t);
-
-    knowledge_.mark_topic_known("ugarit_sack");
-    knowledge_.mark_topic_known("sea_peoples");
-    knowledge_.mark_topic_known("byblos_king");
-    for (auto const &t : data.known_topics)
-        knowledge_.mark_topic_known(t);
-
-    relationships_ = {};
-    for (auto const &[nid, rel] : data.relations)
-        relationships_.set_relation(nid, {rel[0], rel[1], rel[2]});
-
-    for (auto const &nd : data.npcs) {
-        std::vector<NPCKnowledgeEntry> facts;
-        for (auto const &[fid, ver] : nd.knowledge)
-            facts.push_back({fid, ver, 70, false, ""});
-        spawn_npc(nd.id, nd.name, nd.position.x, nd.position.y, nd.personality,
-                  facts);
-        EntityId eid = npc_entities_.back();
-        auto *ncs = world_.entity(eid).try_get_mut<CombatStats>();
-        if (ncs) {
-            ncs->hp = nd.hp;
-            ncs->max_hp = nd.max_hp;
-            ncs->alive = nd.alive;
-        }
-    }
-
-    return pid;
+    throw std::runtime_error("Load world not implemented yet");
+    // world_.each([](flecs::entity e) { e.destruct(); });
+    // npc_entities_.clear();
+    //
+    // auto pid = spawn_player({data.player_pos.x, data.player_pos.y});
+    // auto *pcs = world_.entity(pid).try_get_mut<CombatStats>();
+    // if (pcs) {
+    //     pcs->hp = data.player_hp;
+    //     pcs->max_hp = data.player_max_hp;
+    // }
+    //
+    // world_state_.set_day(data.day);
+    // world_state_.set_season(data.season);
+    // for (auto const &t : data.seen_tiles)
+    //     world_state_.reveal_tile(t);
+    //
+    // knowledge_.mark_topic_known("ugarit_sack");
+    // knowledge_.mark_topic_known("sea_peoples");
+    // knowledge_.mark_topic_known("byblos_king");
+    // for (auto const &t : data.known_topics)
+    //     knowledge_.mark_topic_known(t);
+    //
+    // relationships_ = {};
+    // for (auto const &[nid, rel] : data.relations)
+    //     relationships_.set_relation(nid, {rel[0], rel[1], rel[2]});
+    //
+    // for (auto const &nd : data.npcs) {
+    //     std::vector<NPCKnowledgeEntry> facts;
+    //     for (auto const &[fid, ver] : nd.knowledge)
+    //         facts.push_back({fid, ver, 70, false, ""});
+    //     spawn_npc(nd.id, nd.name, nd.position.x, nd.position.y,
+    //     nd.personality,
+    //               facts);
+    //     EntityId eid = npc_entities_.back();
+    //     auto *ncs = world_.entity(eid).try_get_mut<CombatStats>();
+    //     if (ncs) {
+    //         ncs->hp = nd.hp;
+    //         ncs->max_hp = nd.max_hp;
+    //         ncs->alive = nd.alive;
+    //     }
+    // }
+    //
+    // return pid;
 }
 
 std::vector<SaveManager::NPCData> GameMode::collect_npc_save_data()
@@ -619,15 +690,16 @@ std::vector<SaveManager::NPCData> GameMode::collect_npc_save_data()
     return npcData;
 }
 
-EntityId GameMode::spawn_player(Vec2f pos)
+EntityId GameMode::spawn_player(Vec2f pos, Team team)
 {
     auto e = world_.entity();
     auto eid = e.id();
 
     e.set<Position>(Position{pos, {0, 0}, 1.f});
-    e.set<CombatStats>(CombatStats{Team::player, 20, 20, 4, 3, 80.f});
+    e.set<CombatStats>(CombatStats{team, 200, 200, 4, 3, 80.f});
     e.set<Movement>(Movement{});
     e.set<SurvivalState>(SurvivalState{});
+    e.set<Collider>(Collider{14.f});
 
     e.set<Sprite>(
         Sprite{"player", {}, {16, 16}, {0.3f, 0.8f, 0.3f, 1.f}, 1.f, true});
@@ -639,10 +711,11 @@ EntityId GameMode::spawn_player(Vec2f pos)
 
 void GameMode::update(float dt)
 {
-    while (server_->messages().try_receive(
-        [this](boost::system::error_code, ITransport *t, TransportMessage msg) {
-            server_->handle_message(*t, std::move(msg));
-        })) {
+    while (server_->messages().try_receive([this](boost::system::error_code,
+                                                  std::shared_ptr<ITransport> t,
+                                                  TransportMessage msg) {
+        server_->handle_message(*t, std::move(msg));
+    })) {
     }
 
     dt_ = std::chrono::duration<double>(dt);
@@ -686,8 +759,8 @@ void GameMode::update(float dt)
         push(ev.defender_id);
         push(ev.damage);
         p.push_back(ev.killed ? 1 : 0);
-        for (auto &t : server_->transports_)
-            ITransport::spawn(t->write({NetPacket::combat_event, p}));
+        for (auto &tg : server_->transport_guards_)
+            ITransport::spawn(tg.get()->write({NetPacket::combat_event, p}));
     }
 
     // 3. Check event spawns
@@ -734,51 +807,12 @@ void GameMode::apply_player_movement(EntityId player, Vec2f new_pos)
     int si = 0;
 
     world_.query<SoldierAI>().each([&](flecs::entity e, SoldierAI &ai) {
-        // 楔形阵
-        float angle_rad = ANGLE_DEG * 3.1415926535f / 180.0f;
-        float tan_half = tanf(angle_rad); // 用于计算每行半宽
-
         if (ai.follow_target != player)
             return;
 
-        int idx = si++; // si 需要在外部定义并重置
-
-        // 1. 根据序号 idx 确定行号 row 及该行内的列号 col
-        int row = 0;
-        int cum = 0;
-        while (true) {
-            int row_size = row + 1; // 第 row 行有 row+1 个士兵
-            if (idx < cum + row_size) {
-                int col = idx - cum; // 0 ~ row
-                // 2. 该行的半宽（由角度和行距决定）
-                float dist_to_player =
-                    BASE_OFFSET + row * ROW_SPACING; // 该行到玩家的距离
-                float half_width = dist_to_player * tan_half; // 楔形半宽
-
-                // 3. 本地坐标（玩家坐标系：+X 右，+Y 前）
-                float local_x, local_y;
-                if (row_size == 1) {
-                    local_x = 0.0f;
-                }
-                else {
-                    // 将 col 均匀映射到 [-half_width, half_width]
-                    local_x = -half_width +
-                              (col + 0.5f) * (2.0f * half_width / row_size);
-                }
-                local_y = -dist_to_player; // 玩家后方为负
-
-                // 4. 根据玩家朝向旋转到世界偏移
-                // dir 是玩家前向单位向量 (dx, dy)
-                float right_x = -dir.y;
-                float right_y = dir.x;
-                ai.formation_offset.x = local_x * right_x + local_y * dir.x;
-                ai.formation_offset.y = local_x * right_y + local_y * dir.y;
-                mark_dirty(e.id());
-                return;
-            }
-            cum += row_size;
-            ++row;
-        }
+        int idx = si++;
+        ai.formation_offset = calc_formation_offset(idx, dir);
+        mark_dirty(e.id());
     });
 }
 

@@ -1,8 +1,45 @@
 #pragma once
 
-#include <string>
+#include <cstdint>
+#include <format>
+#include <string_view>
 
-enum class Team { player, enemy, neutral };
+// using Team = uint8_t;
+enum class Team : uint8_t {
+    invalid_team = 0,
+    neutral = 1,
+    player_begin = 2,
+    player_end = 100, // exclusive
+    enemy = player_end,
+};
+
+template <> struct std::formatter<Team> : std::formatter<std::string_view> {
+    auto format(Team t, std::format_context &ctx) const
+    {
+        using enum Team;
+        std::string name = "unknown";
+        switch (t) {
+        case invalid_team:
+            name = "invalid_team";
+            break;
+        case Team::neutral:
+            name = "neutral";
+            break;
+        case Team::enemy:
+            name = "enemy";
+            break;
+        default:
+            name =
+                "player-team-" + std::to_string(static_cast<std::uint8_t>(t));
+        }
+        return std::formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+inline bool is_hostile(Team a, Team b)
+{
+    return a != Team::neutral && b != Team::neutral && a != b;
+}
 
 struct CombatStats {
     Team team = Team::neutral;

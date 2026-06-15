@@ -6,7 +6,6 @@
 #include <cstring>
 #include <optional>
 #include <spdlog/spdlog.h>
-#include <unordered_set>
 
 Client::Client(App *app) : app_(app), messages_(ITransport::io(), 128)
 {
@@ -18,13 +17,14 @@ Client::~Client()
     spdlog::info("Client: destructing this");
 }
 
-void Client::attach_transport(std::unique_ptr<ITransport> t)
+void Client::attach_transport(std::unique_ptr<ITransport> uniq_t)
 {
-    auto raw = t.get();
-    transport_ = std::move(t);
-    // Note to ensure that `t` and `c` should outlive this coro.
-    auto reading_loop = [](Client *c, ITransport *t) -> awaitable<void> {
-        spdlog::info("Client: Transport ({}) attached", static_cast<void *>(t));
+    auto t = std::shared_ptr(std::move(uniq_t));
+    transport_guard_ = std::make_unique<TransportGuard>(t);
+    // Note to ensure that `c` should outlive this coro.
+    auto reading_loop = [](Client *c,
+                           std::shared_ptr<ITransport> t) -> awaitable<void> {
+        spdlog::info("Client: transport ({}) attached", t->remote_info());
         try {
             while (true) {
                 auto msg = co_await t->read();
@@ -33,32 +33,30 @@ void Client::attach_transport(std::unique_ptr<ITransport> t)
                                  : spdlog::level::debug),
                             "Client: received message {} with payload size {} "
                             "from transport {}",
-                            msg.type, msg.payload.size(), (void *)t);
+                            msg.type, msg.payload.size(), t->remote_info());
                 if (!c->messages_.try_send(boost::system::error_code{}, t, msg))
                     co_await c->messages_.async_send(
                         boost::system::error_code{}, t, std::move(msg));
             }
         }
         catch (boost::system::system_error const &e) {
-            if (e.code() == asio::error::operation_aborted) {
-                c->transport_.reset();
-                spdlog::info("Client: transport ({}) detached",
-                             static_cast<void *>(t));
+            if (e.code() == asio::error::operation_aborted ||
+                e.code() == asio::error::eof ||
+                e.code() == asio::experimental::error::channel_closed ||
+                e.code() == asio::experimental::error::channel_cancelled) {
+                spdlog::info("Client: transport {} detached", t->remote_info());
+                c->detach_transport();
                 co_return;
             }
             throw;
         }
     };
-    ITransport::spawn(reading_loop(this, raw));
+    ITransport::spawn(reading_loop(this, t));
 }
 
 void Client::detach_transport()
 {
-    if (transport_) // transport can be nullptr if not initialized
-        transport_->disconnect();
-    // We cannot assign transport_ = nullptr here because the reading loop may
-    // still be running and accessing transport_. Instead, we rely on the
-    // reading loop to reset transport_ when it catches the disconnect.
+    transport_guard_.reset(); // Guards transport to close.
 
     player_id_ = invalid_entity;
     remote_entities_.clear();
@@ -68,69 +66,74 @@ void Client::detach_transport()
 
 void Client::send_join_request()
 {
-    if (!transport_)
+    if (!transport_guard_ || !transport_guard_->get()->is_open())
         throw std::runtime_error(
-            "send_join_request: transport already attached");
-    ITransport::spawn(
-        transport_->write({NetPacket::join, std::vector<std::uint8_t>{}}));
+            "send_join_request: transport not attached or closed");
+    ITransport::spawn(transport_guard_->get()->write(
+        {NetPacket::join, std::vector<std::uint8_t>{}}));
 }
 
 void Client::send_player_direction(Vec2f dir)
 {
-    assert(transport_ && transport_->is_connected());
+    if (!transport_guard_ || !transport_guard_->get()->is_open()) {
+        throw std::runtime_error(
+            "send_player_direction: transport not attached or closed");
+    }
     std::vector<uint8_t> payload;
     write_bytes(payload, player_id_);
     write_float(payload, dir.x);
     write_float(payload, dir.y);
     spdlog::debug("Client: sending move dir: {}, {}", dir.x, dir.y);
-    ITransport::spawn(
-        transport_->write({NetPacket::player_input, std::move(payload)}));
+    ITransport::spawn(transport_guard_->get()->write(
+        {NetPacket::player_input, std::move(payload)}));
 }
 
 void Client::send_recruit()
 {
-    assert(transport_);
+    assert(transport_guard_);
     std::vector<uint8_t> payload;
     write_bytes(payload, player_id_);
-    co_spawn(
-        ITransport::io(),
-        transport_->write({NetPacket::recruit_soldier, std::move(payload)}),
-        detached);
+    co_spawn(ITransport::io(),
+             transport_guard_->get()->write(
+                 {NetPacket::recruit_soldier, std::move(payload)}),
+             detached);
 }
 
 void Client::send_interact()
 {
-    assert(transport_);
+    assert(transport_guard_);
     std::vector<uint8_t> payload;
     write_bytes(payload, player_id_);
     co_spawn(ITransport::io(),
-             transport_->write({NetPacket::interact, std::move(payload)}),
+             transport_guard_->get()->write(
+                 {NetPacket::interact, std::move(payload)}),
              detached);
 }
 
 void Client::send_rest()
 {
-    assert(transport_);
+    assert(transport_guard_);
     std::vector<uint8_t> payload;
     write_bytes(payload, player_id_);
-    co_spawn(ITransport::io(),
-             transport_->write({NetPacket::rest, std::move(payload)}),
-             detached);
+    co_spawn(
+        ITransport::io(),
+        transport_guard_->get()->write({NetPacket::rest, std::move(payload)}),
+        detached);
 }
 
 void Client::send_chat(std::string const &msg)
 {
-    assert(transport_);
+    assert(transport_guard_);
     chat_history_.push_back("You: " + msg);
     std::vector<uint8_t> p(msg.begin(), msg.end());
-    co_spawn(ITransport::io(),
-             transport_->write({NetPacket::chat, std::move(p)}), detached);
+    ITransport::spawn(
+        transport_guard_->get()->write({NetPacket::chat, std::move(p)}));
 }
 
 void Client::send_dialogue_action(std::string const &action)
 {
-    assert(transport_);
-    ITransport::spawn(transport_->write(
+    assert(transport_guard_);
+    ITransport::spawn(transport_guard_->get()->write(
         {NetPacket::dialogue_action,
          std::vector<uint8_t>(action.begin(), action.end())}));
 }
@@ -138,9 +141,12 @@ void Client::send_dialogue_action(std::string const &action)
 void Client::handle_message(ITransport &from, TransportMessage const &msg)
 {
     // Quick handlers: tiny writes that don't touch remote_entities_
-    if (msg.type == NetPacket::return_pid && msg.payload.size() >= 8) {
+    if (msg.type == NetPacket::return_pid) {
+        assert(msg.payload.size() >= 9);
         memcpy(&player_id_, msg.payload.data(), 8);
-        spdlog::info("Client: Returned player ID from server: {}", player_id_);
+        player_team_ = static_cast<Team>(msg.payload[8]);
+        spdlog::info("Client: Returned player ID from server: {} team: {}",
+                     player_id_, player_team_);
         return;
     }
     if (msg.type == NetPacket::chat) {
@@ -217,9 +223,8 @@ void Client::handle_entity_update(NetPacket const &pkt)
 void Client::update(float dt)
 {
     while (messages_.try_receive(
-        [this](boost::system::error_code, ITransport *t, TransportMessage msg) {
-            handle_message(*t, msg);
-        })) {
+        [this](boost::system::error_code, std::shared_ptr<ITransport> t,
+               TransportMessage msg) { handle_message(*t, msg); })) {
     }
 
     if (player_id_ != invalid_entity) {
@@ -376,10 +381,7 @@ std::optional<ParsedEntity> parse_one_entity(SyncParser &p)
         re.hp = p.read_i32();
         re.max_hp = p.read_i32();
         re.alive = p.read_u8();
-        uint8_t tb = p.read_u8();
-        re.team = tb == 1   ? Team::enemy
-                  : tb == 2 ? Team::neutral
-                            : Team::player;
+        re.team = static_cast<Team>(p.read_u8());
         pe.attack = p.read_i32();
         pe.defense = p.read_i32();
         pe.attack_range = p.read_f32();
@@ -390,10 +392,10 @@ std::optional<ParsedEntity> parse_one_entity(SyncParser &p)
         re.moving = p.read_u8();
     }
     if (mask & SyncComponent::soldier_ai) {
-        re.follow_target = p.read_u64();
-        re.formation_offset.x = p.read_f32();
-        re.formation_offset.y = p.read_f32();
-        re.in_combat = p.read_u8();
+        p.read_u64();       // follow_target
+        p.read_f32();       // formation_offset.x
+        p.read_f32();       // formation_offset.y
+        p.read_u8();        // in_combat
     }
     if (mask & SyncComponent::interact)
         re.interactable = p.read_u8();
@@ -444,6 +446,7 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
             player_alive_ = re.alive;
             player_velocity_ = re.velocity;
             player_moving_ = re.moving;
+            player_team_ = re.team;
             player_attack_ = pe.attack;
             player_defense_ = pe.defense;
             player_attack_range_ = pe.attack_range;
@@ -470,9 +473,6 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
             rp->team = re.team;
             rp->velocity = re.velocity;
             rp->moving = re.moving;
-            rp->follow_target = re.follow_target;
-            rp->formation_offset = re.formation_offset;
-            rp->in_combat = re.in_combat;
             rp->interactable = re.interactable;
             set_visual_from_kind(*rp);
         }
@@ -504,6 +504,7 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
             player_alive_ = re.alive;
             player_velocity_ = re.velocity;
             player_moving_ = re.moving;
+            player_team_ = re.team;
             player_attack_ = pe.attack;
             player_defense_ = pe.defense;
             player_attack_range_ = pe.attack_range;
@@ -529,9 +530,6 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
             rp->team = re.team;
             rp->velocity = re.velocity;
             rp->moving = re.moving;
-            rp->follow_target = re.follow_target;
-            rp->formation_offset = re.formation_offset;
-            rp->in_combat = re.in_combat;
             rp->interactable = re.interactable;
             set_visual_from_kind(*rp);
         }
@@ -582,14 +580,15 @@ void Client::interpolate_entities(float dt)
 void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
 {
     if (data.size() < 4)
-        return;
+        throw std::runtime_error(
+            "handle_dialogue_sync: data too short, maybe corrupted");
     uint32_t name_len;
     memcpy(&name_len, data.data(), 4);
     if (name_len == 0) {
         dialogue_ = {};
         return;
     }
-    auto s = parse_dialogue_sync(data);
+    auto s = parse_dialogue_sync({data.begin() + 4, data.end()});
     dialogue_.active = true;
     dialogue_.npc_name = std::move(s.npc_name);
     dialogue_.npc_trust = s.npc_trust;

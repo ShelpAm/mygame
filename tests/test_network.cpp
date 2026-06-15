@@ -166,15 +166,15 @@ BOOST_AUTO_TEST_CASE(local_transport_multiple_messages)
 BOOST_AUTO_TEST_CASE(local_transport_is_connected)
 {
     auto [a, b] = create_transport_pair();
-    BOOST_TEST(a->is_connected());
-    BOOST_TEST(b->is_connected());
+    BOOST_TEST(a->is_open());
+    BOOST_TEST(b->is_open());
 }
 
 // -- NetworkTransport lifecycle --
 BOOST_AUTO_TEST_CASE(network_transport_not_connected_initially)
 {
     auto peer = std::make_unique<NetworkTransport>();
-    BOOST_TEST(!peer->is_connected());
+    BOOST_TEST(!peer->is_open());
 }
 
 BOOST_AUTO_TEST_CASE(network_transport_has_socket)
@@ -285,8 +285,51 @@ BOOST_AUTO_TEST_CASE(disconnect_during_read)
             .async_wait(asio::use_awaitable);
 
         BOOST_TEST(read_failed);
-        BOOST_TEST(!r->is_connected());
+        BOOST_TEST(!r->is_open());
     }());
+}
+
+BOOST_AUTO_TEST_CASE(close_wakes_read_loop)
+{
+    NetworkFixture fx;
+    auto [a, b] = create_transport_pair();
+    std::atomic<bool> read_closed{false};
+    std::atomic<int> msg_count{0};
+
+    co_spawn(
+        ITransport::io(),
+        [&](std::unique_ptr<ITransport> t) -> asio::awaitable<void> {
+            try {
+                while (true) {
+                    co_await t->read();
+                    msg_count++;
+                }
+            }
+            catch (boost::system::system_error const &) {
+                read_closed = true;
+            }
+        }(std::move(a)),
+        asio::detached);
+
+    // Write a message so we know the loop is running
+    run_sync([&]() -> asio::awaitable<void> {
+        co_await b->write({NetPacket::chat, {}});
+    }());
+
+    // Give the read loop time to process
+    while (msg_count == 0)
+        fx.io.poll_one();
+
+    // Close the transport — should wake the read loop
+    b->close();
+    b.reset();
+
+    // Drain io until the read coroutine exits
+    while (!read_closed)
+        fx.io.poll_one();
+
+    BOOST_TEST(msg_count == 1);
+    BOOST_TEST(read_closed);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

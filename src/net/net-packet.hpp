@@ -1,8 +1,6 @@
 #pragma once
 
 #include "core/game-types.hpp"
-#include "core/math.hpp"
-#include "entities/components/combat-stats.hpp"
 #include <array>
 #include <bit>
 #include <concepts>
@@ -16,24 +14,32 @@
 // component block in the per-entity payload.  LSB is checked first.
 namespace SyncComponent {
 enum Mask : uint16_t {
-    entity_kind = 1 << 0,  // EntityKindComp    (1 byte)
-    position    = 1 << 1,  // PositionComp      (8 bytes)
-    combat      = 1 << 2,  // CombatComp        (22 bytes: hp,max_hp,alive,team,atk,def,range)
-    movement    = 1 << 3,  // MovementComp      (9 bytes)
-    soldier_ai  = 1 << 4,  // SoldierAIComp     (17 bytes)
-    interact    = 1 << 5,  // InteractComp      (1 byte)
-    survival    = 1 << 6,  // SurvivalComp      (16 bytes: food,water,health,energy)
+    entity_kind = 1 << 0, // EntityKindComp    (1 byte)
+    position = 1 << 1,    // PositionComp      (8 bytes)
+    combat = 1 << 2,      // CombatComp        (22 bytes:
+                          // hp,max_hp,alive,team,atk,def,range)
+    movement = 1 << 3,    // MovementComp      (9 bytes)
+    soldier_ai = 1 << 4,  // SoldierAIComp     (17 bytes)
+    interact = 1 << 5,    // InteractComp      (1 byte)
+    survival = 1 << 6, // SurvivalComp      (16 bytes: food,water,health,energy)
 };
 constexpr uint16_t wire_size(uint16_t mask)
 {
     uint16_t sz = 0;
-    if (mask & entity_kind) sz += 1;
-    if (mask & position)    sz += 8;
-    if (mask & combat)      sz += 22;
-    if (mask & movement)    sz += 9;
-    if (mask & soldier_ai)  sz += 17;
-    if (mask & interact)    sz += 1;
-    if (mask & survival)    sz += 16;
+    if (mask & entity_kind)
+        sz += 1;
+    if (mask & position)
+        sz += 8;
+    if (mask & combat)
+        sz += 22;
+    if (mask & movement)
+        sz += 9;
+    if (mask & soldier_ai)
+        sz += 17;
+    if (mask & interact)
+        sz += 1;
+    if (mask & survival)
+        sz += 16;
     return sz;
 }
 } // namespace SyncComponent
@@ -41,10 +47,10 @@ constexpr uint16_t wire_size(uint16_t mask)
 // Entity kind values for SyncComponent::entity_kind
 namespace EntityKind {
 enum Value : uint8_t {
-    player   = 1,
-    soldier  = 2,
-    npc      = 3,
-    enemy    = 4,
+    player = 1,
+    soldier = 2,
+    npc = 3,
+    enemy = 4,
     structure = 5,
 };
 }
@@ -171,8 +177,8 @@ T read_bytes(std::vector<uint8_t> const &data, size_t offset)
 
 inline float read_float(std::vector<uint8_t> const &data, size_t offset)
 {
-    std::array<uint8_t, 4> arr{data[offset], data[offset + 1],
-                                data[offset + 2], data[offset + 3]};
+    std::array<uint8_t, 4> arr{data[offset], data[offset + 1], data[offset + 2],
+                               data[offset + 3]};
     return std::bit_cast<float>(arr);
 }
 
@@ -287,7 +293,7 @@ inline std::vector<uint8_t> serialize_packet(NetPacket const &pkt)
 // --- Convenience packet builders ---
 
 inline std::vector<uint8_t> make_entity_update(EntityId id, float x, float y,
-                                                int hp, int max_hp, bool alive)
+                                               int hp, int max_hp, bool alive)
 {
     std::vector<uint8_t> p;
     write_bytes(p, id);
@@ -296,20 +302,18 @@ inline std::vector<uint8_t> make_entity_update(EntityId id, float x, float y,
     write_bytes(p, hp);
     write_bytes(p, max_hp);
     p.push_back(alive ? 1 : 0);
-    return serialize_packet(
-        NetPacket{NetPacket::entity_update, std::move(p)});
+    return serialize_packet(NetPacket{NetPacket::entity_update, std::move(p)});
 }
 
 inline std::vector<uint8_t> make_combat_event(EntityId att_id, EntityId def_id,
-                                               int dmg, bool killed)
+                                              int dmg, bool killed)
 {
     std::vector<uint8_t> p;
     write_bytes(p, att_id);
     write_bytes(p, def_id);
     write_bytes(p, dmg);
     p.push_back(killed ? 1 : 0);
-    return serialize_packet(
-        NetPacket{NetPacket::combat_event, std::move(p)});
+    return serialize_packet(NetPacket{NetPacket::combat_event, std::move(p)});
 }
 
 inline std::vector<uint8_t> make_chat(std::string const &msg)
@@ -324,7 +328,6 @@ inline std::vector<uint8_t> make_entity_removed(EntityId eid)
     write_bytes(p, eid);
     return serialize_packet(NetPacket{NetPacket::entity_removed, std::move(p)});
 }
-
 
 // --- Dialogue sync parsing ---
 
@@ -379,4 +382,50 @@ inline DialogueSyncData parse_dialogue_sync(std::vector<uint8_t> const &d)
     r.can_gift = flags & 1;
     r.can_threaten = flags & 2;
     return r;
+}
+
+inline void serialize_dialogue_sync(std::vector<uint8_t> &out,
+                                    DialogueState const &ds)
+{
+    if (!ds.active || ds.npc_name.empty()) {
+        write_bytes(out, uint32_t{0}); // name_len=0 → client clears dialogue
+        return;
+    }
+    write_bytes(out, static_cast<uint32_t>(ds.npc_name.size()));
+    // npc_name (2-byte-prefixed, matching parse_dialogue_sync's rstr)
+    write_bytes(out, static_cast<uint16_t>(ds.npc_name.size()));
+    out.insert(out.end(), ds.npc_name.begin(), ds.npc_name.end());
+    // npc_trust
+    write_bytes(out, ds.npc_trust);
+    // lines
+    out.push_back(static_cast<uint8_t>(ds.history.size()));
+    for (auto const &line : ds.history) {
+        out.push_back(static_cast<uint8_t>(line.speaker));
+        auto const &text = line.use_raw ? line.raw_text : line.text_key;
+        uint16_t tlen = static_cast<uint16_t>(text.size());
+        write_bytes(out, tlen);
+        out.insert(out.end(), text.begin(), text.end());
+        out.push_back(line.use_raw ? 1 : 0);
+        uint16_t nlen = static_cast<uint16_t>(line.npc_name.size());
+        write_bytes(out, nlen);
+        out.insert(out.end(), line.npc_name.begin(), line.npc_name.end());
+    }
+    // topics
+    out.push_back(static_cast<uint8_t>(ds.available_topics.size()));
+    for (auto const &t : ds.available_topics) {
+        uint16_t tlen = static_cast<uint16_t>(t.size());
+        write_bytes(out, tlen);
+        out.insert(out.end(), t.begin(), t.end());
+    }
+    // actions
+    out.push_back(static_cast<uint8_t>(ds.available_actions.size()));
+    for (auto const &a : ds.available_actions) {
+        uint16_t alen = static_cast<uint16_t>(a.size());
+        write_bytes(out, alen);
+        out.insert(out.end(), a.begin(), a.end());
+    }
+    // flags: bit0=can_gift, bit1=can_threaten
+    uint8_t flags =
+        (ds.can_gift ? 1 : 0) | (ds.can_threaten ? 2 : 0);
+    out.push_back(flags);
 }

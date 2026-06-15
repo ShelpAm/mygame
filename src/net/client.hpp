@@ -3,6 +3,7 @@
 #include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "entities/components/combat-stats.hpp"
+#include "net/transport-guard.hpp"
 #include "net/transport.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/combat-system.hpp"
@@ -31,11 +32,6 @@ struct RemoteEntity {
     Vec2f velocity{0, 0};
     bool moving = false;
 
-    // SoldierAI (optional, set when synced)
-    EntityId follow_target = 0;
-    Vec2f formation_offset{0, 0};
-    bool in_combat = false;
-
     // Interactable
     bool interactable = false;
 
@@ -58,6 +54,10 @@ class Client {
     {
         return player_id_;
     }
+    Team player_team() const
+    {
+        return player_team_;
+    }
 
     void send_join_request();
     void send_player_direction(Vec2f dir);
@@ -72,11 +72,11 @@ class Client {
     bool is_player_dead();
     CombatStats const *player_stats();
 
-    void attach_transport(std::unique_ptr<ITransport> t);
+    void attach_transport(std::unique_ptr<ITransport> uniq_t);
     void detach_transport();
     ITransport *transport() const
     {
-        return transport_.get();
+        return transport_guard_->get();
     }
 
     void interpolate_entities(float dt);
@@ -141,6 +141,7 @@ class Client {
     QuestManager const *quests_ = nullptr;
 
     EntityId player_id_ = invalid_entity;
+    Team player_team_ = Team::invalid_team;
     Vec2f player_pos_, player_target_pos_;
     Vec2f player_velocity_{0, 0};
     bool player_moving_ = false;
@@ -149,14 +150,15 @@ class Client {
     float player_attack_range_ = 80.f;
     bool player_alive_ = true;
 
-    std::unique_ptr<ITransport> transport_;
+    std::unique_ptr<TransportGuard> transport_guard_;
     std::vector<RemoteEntity> remote_entities_;
     std::vector<CombatEvent> combat_events_;
     std::vector<std::string> chat_history_;
     DialogueState dialogue_;
 
     // Deferred sync processing (io_context thread → main thread)
-    deferred_concurrent_channel<void(boost::system::error_code, ITransport *,
+    deferred_concurrent_channel<void(boost::system::error_code,
+                                     std::shared_ptr<ITransport>,
                                      TransportMessage)>
         messages_;
 

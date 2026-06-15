@@ -5,6 +5,7 @@
 #include <boost/asio.hpp>
 #include <boost/asio/experimental/concurrent_channel.hpp>
 #include <cstdint>
+#include <memory>
 #include <spdlog/spdlog.h>
 #include <vector>
 
@@ -34,7 +35,9 @@ struct TransportMessage {
 // Server and Client both speak through this without knowing
 // whether the other side is in-process (LocalTransportEndpoint)
 // or across the network (NetworkTransport wrapping sockets).
-class ITransport {
+//
+// ITrasnsport implements a custom protocol design for the game.
+class ITransport : std::enable_shared_from_this<ITransport> {
   public:
     static void set_io(asio::io_context *io)
     {
@@ -47,7 +50,7 @@ class ITransport {
                 "ITransport: access io_context before set");
         return *s_io_;
     }
-    static void spawn(auto awaitable)
+    template <typename T> static void spawn(asio::awaitable<T> awaitable)
     {
         // co_spawn(io(), std::move(awaitable), detached);
         co_spawn(io(), std::move(awaitable), [](std::exception_ptr ep) {
@@ -59,11 +62,14 @@ class ITransport {
                     spdlog::error("ITransport: unhandled exception in spawned "
                                   "coroutine: {}",
                                   e.what());
+                    // spdlog::error("ITransport: stacktrace: {}",
+                    //               std::stacktrace::current());
                 }
                 catch (...) {
-                    spdlog::error(
-                        "ITransport: unhandled unknown exception in spawned "
-                        "coroutine");
+                    spdlog::error("ITransport: unhandled unknown exception in "
+                                  "spawned coroutine");
+                    // spdlog::error("ITransport: stacktrace: {}",
+                    //               std::stacktrace::current());
                 }
         });
     }
@@ -77,9 +83,11 @@ class ITransport {
     virtual awaitable<TransportMessage> read() = 0;
 
     // Whether the transport is still connected to its peer.
-    virtual bool is_connected() const = 0;
+    virtual bool is_open() const = 0;
 
-    virtual void disconnect() = 0;
+    virtual void close() = 0;
+
+    virtual std::string remote_info() const = 0;
 
   private:
     static inline asio::io_context *s_io_ = nullptr;

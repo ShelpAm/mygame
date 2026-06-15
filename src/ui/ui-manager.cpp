@@ -92,7 +92,7 @@ void UIManager::render(WorldState *world_state, App &app)
         render_hud(*world_state, app);
 
     // clang-format off
-    if (app.dialogue().active) render_dialogue(app);
+    if (app.dialogue().active)             render_dialogue(app);
     if (show_journal_)                     render_journal(app);
     if (show_inventory_)                   render_inventory(app);
     if (show_map_)                         render_map(app);
@@ -133,6 +133,9 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
     ImGui::SameLine();
     ImGui::Text(" | %s: %s", loc.get("menu.language").c_str(),
                 loc.language_name().c_str());
+
+    ImGui::SameLine();
+    ImGui::Text(" | %s: %.02f", "FPS", app.game_clock().fps());
 
     ImGui::Separator();
 
@@ -191,7 +194,7 @@ void UIManager::render_dialogue(App const &app)
     auto const &loc = app.locale();
 
     ImGui::SetNextWindowSize(ImVec2(500, 480), ImGuiCond_Appearing);
-    ImGui::SetNextWindowPos(ImVec2(50, 200), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(50, 50), ImGuiCond_Appearing);
     ImGui::Begin(loc.get("dialogue.title").c_str(), nullptr,
                  ImGuiWindowFlags_NoResize);
 
@@ -417,6 +420,11 @@ void UIManager::render_hosting(App &app)
                 app.client().remote_entities().size());
     ImGui::Separator();
 
+    if (ImGui::Button(loc.get("mp.stop_hosting").c_str())) {
+        app.game_mode().stop_host();
+        app.start_local_session();
+    }
+
     render_client_list(app);
 
     render_chat(app);
@@ -433,21 +441,20 @@ void UIManager::render_local(App &app)
     ImGui::InputInt("Port", &host_port_);
     host_port_ = std::clamp(host_port_, 1, 65535);
     if (ImGui::Button(loc.get("mp.host_btn").c_str())) {
-        co_spawn(ITransport::io(), app.start_host_session(host_port_),
-                 detached);
+        app.start_host_session(host_port_);
     }
     ImGui::Separator();
     ImGui::Text("%s", loc.get("mp.join").c_str());
-    host_ip_.reserve(64);
+    host_ip_.resize(63);
     ImGui::InputText(loc.get("mp.ip").c_str(), host_ip_.data(),
-                     host_ip_.size());
+                     host_ip_.size() + 1);
+    host_ip_.resize(std::strlen(host_ip_.c_str()));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80);
     ImGui::InputInt("##port", &host_port_);
     host_port_ = std::clamp(host_port_, 1, 65535);
     if (ImGui::Button(loc.get("mp.connect").c_str())) {
-        co_spawn(ITransport::io(),
-                 app.start_client_session(host_ip_, host_port_), detached);
+        app.start_client_session(host_ip_, host_port_);
         auto entry = host_ip_ + ":" + std::to_string(host_port_);
         if (!std::ranges::contains(server_list_, entry)) {
             server_list_.push_back(entry);
@@ -477,9 +484,7 @@ void UIManager::render_local(App &app)
                 }
                 spdlog::debug("Clicked button, Connecting to {}:{}", host_ip_,
                               host_port_);
-                co_spawn(ITransport::io(),
-                         app.start_client_session(host_ip_, host_port_),
-                         detached);
+                app.start_client_session(host_ip_, host_port_);
             }
             ImGui::SameLine();
             if (ImGui::Button("X")) {
@@ -513,7 +518,7 @@ void UIManager::render_client_list(App &app)
     auto const &loc = app.locale();
     auto *server = app.game_mode().server();
 
-    if (server->transports().empty()) {
+    if (server->transports_guards().empty()) {
         ImGui::TextDisabled("%s", loc.get("mp.no_clients").c_str());
         return;
     }
@@ -533,24 +538,24 @@ void UIManager::render_client_list(App &app)
                                     ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn(loc.get("mp.status").c_str(),
                                     ImGuiTableColumnFlags_WidthFixed, 80.0f);
-            ImGui::TableSetupColumn("Kick",
-                                    ImGuiTableColumnFlags_WidthFixed, 50.0f);
+            ImGui::TableSetupColumn("Kick", ImGuiTableColumnFlags_WidthFixed,
+                                    50.0f);
             ImGui::TableHeadersRow();
 
-            for (auto const &trans : server->transports()) {
+            for (auto const &tg : server->transports_guards()) {
                 ImGui::TableNextRow();
 
                 // ID
                 ImGui::TableSetColumnIndex(0);
-                ImGui::Text("%p", trans.get());
+                ImGui::Text("%s", typeid(tg.get()).name());
 
                 // Address
                 ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%s", "Unknown");
+                ImGui::Text("%p", tg.get());
 
                 // Status
                 ImGui::TableSetColumnIndex(2);
-                if (trans->is_connected()) {
+                if (tg.get()->is_open()) {
                     ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s",
                                        loc.get("mp.connected").c_str());
                 }
@@ -561,9 +566,9 @@ void UIManager::render_client_list(App &app)
 
                 // Kick
                 ImGui::TableSetColumnIndex(3);
-                ImGui::PushID(trans.get());
+                ImGui::PushID(tg.get());
                 if (ImGui::SmallButton("X"))
-                    server->kick(trans.get(), "kicked by host");
+                    server->kick(tg.get(), "kicked by host");
                 ImGui::PopID();
             }
 
@@ -584,21 +589,23 @@ void UIManager::render_chat(App &app)
     if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 5.f)
         ImGui::SetScrollHereY(1.f);
     ImGui::EndChild();
-    ImGui::InputText("##chat", chat_buf_, sizeof(chat_buf_),
+    chat_buf_.resize(255);
+    ImGui::InputText("##chat", chat_buf_.data(), chat_buf_.size() + 1,
                      ImGuiInputTextFlags_EnterReturnsTrue);
+    chat_buf_.resize(std::strlen(chat_buf_.c_str()));
     if (ImGui::IsItemDeactivatedAfterEdit() ||
         ImGui::IsKeyPressed(ImGuiKey_Enter)) {
-        if (strlen(chat_buf_) > 0) {
+        if (!chat_buf_.empty()) {
             app.client().send_chat(chat_buf_);
-            chat_buf_[0] = '\0';
+            chat_buf_.clear();
             ImGui::SetKeyboardFocusHere(-1);
         }
     }
     ImGui::SameLine();
     if (ImGui::Button(loc.get("mp.send").c_str())) {
-        if (strlen(chat_buf_) > 0) {
+        if (!chat_buf_.empty()) {
             app.client().send_chat(chat_buf_);
-            chat_buf_[0] = '\0';
+            chat_buf_.clear();
         }
     }
 }

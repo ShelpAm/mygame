@@ -7,6 +7,13 @@ using namespace asio::experimental::awaitable_operators;
 
 NetworkTransport::NetworkTransport(tcp::socket sock) : socket_(std::move(sock))
 {
+    if (!socket_.is_open())
+        throw std::runtime_error("NetworkTransport: socket is not open (why do "
+                                 "you pass an closed/uninit socket?)");
+
+    cached_socket_info_ =
+        std::format("{}:{}", socket_.remote_endpoint().address().to_string(),
+                    std::to_string(socket_.remote_endpoint().port()));
 }
 
 NetworkTransport::Acceptor::Acceptor(std::uint16_t port)
@@ -31,7 +38,7 @@ void NetworkTransport::Acceptor::stop()
 awaitable<std::unique_ptr<NetworkTransport>>
 NetworkTransport::connect(std::string const &ip, int port)
 {
-    spdlog::info("NetworkTransport: Initiating connection to {}:{}", ip, port);
+    spdlog::info("NetworkTransport: initiating connection to {}:{}", ip, port);
     auto t = std::make_unique<NetworkTransport>();
     auto ep = tcp::endpoint(asio::ip::make_address(ip), port);
 
@@ -46,18 +53,22 @@ NetworkTransport::connect(std::string const &ip, int port)
         throw std::runtime_error("Connection timed out after 5s");
     }
 
-    assert(r.index() == 0);
-    if (auto [ec] = std::get<0>(r); ec)
-        throw std::runtime_error("Connection failed: " + ec.message());
+    if (r.index() == 0) {
+        if (auto [ec] = std::get<0>(r); ec)
+            throw std::runtime_error("Connection failed: " + ec.message());
+    }
 
-    // t->on_connected();
-    spdlog::info("NetworkTransport: Connected!");
+    t->cached_socket_info_ = std::format(
+        "{}:{}", t->socket().remote_endpoint().address().to_string(),
+        std::to_string(t->socket().remote_endpoint().port()));
+    spdlog::info("NetworkTransport: connected to {}",
+                 t->socket_.remote_endpoint().address().to_string());
     co_return t;
 }
 
 NetworkTransport::~NetworkTransport()
 {
-    disconnect();
+    close();
 }
 
 awaitable<void> NetworkTransport::write(TransportMessage msg)
@@ -67,9 +78,9 @@ awaitable<void> NetworkTransport::write(TransportMessage msg)
 
     spdlog::log(msg.type == NetPacket::state_delta ? spdlog::level::trace
                                                    : spdlog::level::debug,
-                "NetwortTransport ({}) writing message of type \"{}\" with "
+                "NetwortTransport {} ({}) writing message of type \"{}\" with "
                 "payload size {}",
-                (void *)this, msg.type, msg.payload.size());
+                remote_info(), (void *)this, msg.type, msg.payload.size());
     write_buffer_ = serialize_packet({msg.type, std::move(msg.payload)});
     co_await asio::async_write(socket_, asio::buffer(write_buffer_));
 }
@@ -97,17 +108,26 @@ awaitable<TransportMessage> NetworkTransport::read()
                                .payload = read_body_buffer_};
 }
 
-bool NetworkTransport::is_connected() const
+bool NetworkTransport::is_open() const
 {
     return socket_.is_open();
 }
 
-void NetworkTransport::disconnect()
+void NetworkTransport::close()
 {
+    cached_socket_info_ += " (closed)";
     socket_.close();
 }
 
 tcp_socket &NetworkTransport::socket()
 {
     return socket_;
+}
+std::string NetworkTransport::remote_info() const
+{
+    // if (!is_open())
+    //     throw std::runtime_error(
+    //         "NetworkTransport: unknown remote_info on closed transport");
+
+    return cached_socket_info_;
 }

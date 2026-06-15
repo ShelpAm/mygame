@@ -1,10 +1,10 @@
 #pragma once
 
 #include "net/network-transport.hpp"
+#include "net/transport-guard.hpp"
 #include "net/transport.hpp"
 #include <memory>
 #include <unordered_map>
-#include <vector>
 
 class CombatSystem;
 class GameMode;
@@ -20,8 +20,16 @@ class Server {
     void set_game_mode(GameMode *gm);
 
     awaitable<void> listen(std::uint16_t port);
+    void stop_listen()
+    {
+        if (acceptor_) {
+            acceptor_->stop(); // No guard here because I'm lazy. :)
+            acceptor_.reset();
+        }
+    }
 
-    void attach_transport(std::unique_ptr<ITransport> t);
+    void attach_transport(std::unique_ptr<ITransport> uniq_t);
+    void detach_transport(ITransport *t);
     void clear_transports();
 
     void kick(ITransport *t, std::string const &reason);
@@ -37,9 +45,9 @@ class Server {
         return v;
     }
 
-    std::vector<std::unique_ptr<ITransport>> const &transports() const
+    auto const &transports_guards() const
     {
-        return transports_;
+        return transport_guards_;
     }
 
     auto &messages()
@@ -53,15 +61,19 @@ class Server {
     CombatSystem *cs_ = nullptr;
     GameMode *game_mode_ = nullptr;
 
-    deferred_concurrent_channel<void(boost::system::error_code, ITransport *,
+    deferred_concurrent_channel<void(boost::system::error_code,
+                                     std::shared_ptr<ITransport>,
                                      TransportMessage)>
         messages_;
 
     std::unordered_map<ITransport *, EntityId> player_transport_;
+    std::uint8_t next_team_;
     std::unique_ptr<NetworkTransport::Acceptor> acceptor_;
-    std::vector<std::unique_ptr<ITransport>> transports_;
+    std::vector<TransportGuard>
+        transport_guards_; // Ensures lifetime of transports.
 
     void broadcast_sync();
     void broadcast_entity_removed(EntityId eid);
     void handle_message(ITransport &from, TransportMessage msg);
+    void send_dialogue_to(ITransport &to, EntityId pid);
 };

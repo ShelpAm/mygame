@@ -29,6 +29,10 @@ class App {
     void run();
     void shutdown();
 
+    auto const &game_clock() const
+    {
+        return game_clock_;
+    }
     LocaleManager const &locale() const
     {
         return locale_;
@@ -87,20 +91,22 @@ class App {
         return session_mode_;
     }
 
-    awaitable<void> start_host_session(int port);
-    awaitable<void> start_client_session(std::string const &ip, int port);
+    void start_host_session(int port);
+    void start_client_session(std::string const &ip, int port);
 
     void set_ui_language(int lang_index);
     DialogueState const &dialogue() const
     {
-        return session_mode_ == SessionMode::client ? client_->dialogue()
-                                                    : game_mode_->dialogue();
+        return session_mode_ == SessionMode::client
+                   ? client_->dialogue()
+                   : game_mode_->dialogue(client_->player_id());
     }
     void end_dialogue()
     {
         if (session_mode_ == SessionMode::client)
             client_->send_dialogue_action("__end__");
-        game_mode_->end_dialogue();
+        else
+            game_mode_->end_dialogue(client_->player_id());
     }
     void ask_topic(std::string const &t)
     {
@@ -110,7 +116,8 @@ class App {
     {
         if (session_mode_ == SessionMode::client)
             client_->send_dialogue_action(a);
-        game_mode_->do_dialogue_action(a);
+        else
+            game_mode_->do_dialogue_action(client_->player_id(), a);
     }
 
     void quick_save();
@@ -123,12 +130,18 @@ class App {
     void update(float dt);
     void render();
 
+    void handle_resize(int new_width, int new_height);
+
     SDL_Window *window_ = nullptr;
     SDL_Renderer *renderer_ = nullptr;
 
+    int window_width_ = 800;
+    int window_height_ = 450;
+    static constexpr char const *window_title = "The Sunset Straits";
+
     InputManager input_;
     GameClock game_clock_;
-    CameraSystem camera_system_{window_width, window_height};
+    CameraSystem camera_system_;
     NavigationSystem navigation_system_;
     LocaleManager locale_;
 
@@ -150,8 +163,4 @@ class App {
     bool show_multiplayer_ = false;
     bool running_ = false;
     int next_save_slot_ = 1;
-
-    static constexpr int window_width = 960;
-    static constexpr int window_height = 540;
-    static constexpr char const *window_title = "The Sunset Straits";
 };
