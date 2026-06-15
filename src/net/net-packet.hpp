@@ -18,8 +18,7 @@ enum Mask : uint16_t {
     position = 1 << 1,    // PositionComp      (8 bytes)
     combat = 1 << 2,      // CombatComp        (22 bytes:
                           // hp,max_hp,alive,team,atk,def,range)
-    movement = 1 << 3,    // MovementComp      (17 bytes:
-                          // vx,vy,moving,fx,fy)
+    movement = 1 << 3,    // MovementComp      (16 bytes: vx,vy,fx,fy)
     soldier_ai = 1 << 4,  // SoldierAIComp     (17 bytes)
     interact = 1 << 5,    // InteractComp      (1 byte)
     survival = 1 << 6, // SurvivalComp      (16 bytes: food,water,health,energy)
@@ -35,6 +34,14 @@ enum Value : uint8_t {
     enemy = 4,
     structure = 5,
 };
+}
+
+inline auto const &auth_payload()
+{
+    constexpr std::string_view auth_string = "thesunsetstraits";
+    static std::vector<std::uint8_t> auth_payload(auth_string.begin(),
+                                                  auth_string.end());
+    return auth_payload;
 }
 
 struct NetPacket {
@@ -277,6 +284,8 @@ inline std::vector<uint8_t> serialize_packet(NetPacket const &pkt)
 }
 
 // --- Convenience packet builders ---
+// Each returns the raw payload (no header). ITransport::write()
+// calls serialize_packet() to produce the final wire format.
 
 inline std::vector<uint8_t> make_entity_update(EntityId id, float x, float y,
                                                int hp, int max_hp, bool alive)
@@ -288,7 +297,7 @@ inline std::vector<uint8_t> make_entity_update(EntityId id, float x, float y,
     write_bytes(p, hp);
     write_bytes(p, max_hp);
     p.push_back(alive ? 1 : 0);
-    return serialize_packet(NetPacket{NetPacket::entity_update, std::move(p)});
+    return p;
 }
 
 inline std::vector<uint8_t> make_combat_event(EntityId att_id, EntityId def_id,
@@ -299,20 +308,43 @@ inline std::vector<uint8_t> make_combat_event(EntityId att_id, EntityId def_id,
     write_bytes(p, def_id);
     write_bytes(p, dmg);
     p.push_back(killed ? 1 : 0);
-    return serialize_packet(NetPacket{NetPacket::combat_event, std::move(p)});
+    return p;
 }
 
 inline std::vector<uint8_t> make_chat(std::string const &msg)
 {
-    std::vector<uint8_t> p(msg.begin(), msg.end());
-    return serialize_packet(NetPacket{NetPacket::chat, std::move(p)});
+    return std::vector<uint8_t>(msg.begin(), msg.end());
 }
 
 inline std::vector<uint8_t> make_entity_removed(EntityId eid)
 {
     std::vector<uint8_t> p;
     write_bytes(p, eid);
-    return serialize_packet(NetPacket{NetPacket::entity_removed, std::move(p)});
+    return p;
+}
+
+inline std::vector<uint8_t> make_player_input(EntityId pid, float mx, float my)
+{
+    std::vector<uint8_t> p;
+    write_bytes(p, pid);
+    write_float(p, mx);
+    write_float(p, my);
+    return p;
+}
+
+inline std::vector<uint8_t> make_entity_id_payload(EntityId id)
+{
+    std::vector<uint8_t> p;
+    write_bytes(p, id);
+    return p;
+}
+
+inline std::vector<uint8_t> make_return_pid(EntityId eid, uint8_t team)
+{
+    std::vector<uint8_t> p;
+    write_bytes(p, eid);
+    write_bytes(p, team);
+    return p;
 }
 
 // --- Dialogue sync parsing ---

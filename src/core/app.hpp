@@ -87,6 +87,10 @@ class App {
     {
         return session_mode_;
     }
+    void set_session_mode(SessionMode mode)
+    {
+        session_mode_ = mode;
+    }
 
     void start_local_session();
     void start_host_session(int port);

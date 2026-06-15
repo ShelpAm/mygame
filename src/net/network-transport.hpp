@@ -7,16 +7,17 @@
 using tcp_socket = default_token::as_default_on_t<tcp::socket>;
 using tcp_acceptor = default_token::as_default_on_t<tcp::acceptor>;
 
-class NetworkTransport : public ITransport {
+class NetworkTransport : public ITransport,
+                         public std::enable_shared_from_this<NetworkTransport> {
   public:
-    class Acceptor {
+    class Acceptor : public std::enable_shared_from_this<Acceptor> {
       public:
         explicit Acceptor(std::uint16_t port);
         Acceptor(Acceptor &&) noexcept = default;
         Acceptor &operator=(Acceptor &&) noexcept = default;
         ~Acceptor() = default;
 
-        awaitable<std::unique_ptr<NetworkTransport>> accept();
+        awaitable<std::shared_ptr<NetworkTransport>> accept();
         void stop();
 
       private:
@@ -27,7 +28,7 @@ class NetworkTransport : public ITransport {
     explicit NetworkTransport(tcp::socket sock);
     ~NetworkTransport();
 
-    static awaitable<std::unique_ptr<NetworkTransport>>
+    static awaitable<std::shared_ptr<NetworkTransport>>
     connect(std::string const &ip, int port);
 
     awaitable<void> write(TransportMessage msg) override;

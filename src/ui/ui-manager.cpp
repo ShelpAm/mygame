@@ -141,7 +141,7 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
 
     static char const *seasonKeys[] = {"season.spring", "season.summer",
                                        "season.autumn", "season.winter"};
-    ImGui::Text("%s: %d | %s: %s | %s: %.1f", loc.get("hud.day").c_str(),
+    ImGui::Text("%s: %d | %s: %s | %s: %.0f", loc.get("hud.day").c_str(),
                 world_state.day(), loc.get("hud.season").c_str(),
                 loc.get(seasonKeys[world_state.season()]).c_str(),
                 loc.get("hud.time").c_str(), world_state.time_of_day());
@@ -422,7 +422,8 @@ void UIManager::render_hosting(App &app)
 
     if (ImGui::Button(loc.get("mp.stop_hosting").c_str())) {
         app.game_mode().stop_host();
-        app.start_local_session();
+        // app.start_local_session();
+        app.set_session_mode(SessionMode::local);
     }
 
     render_client_list(app);
@@ -454,6 +455,8 @@ void UIManager::render_local(App &app)
     ImGui::InputInt("##port", &host_port_);
     host_port_ = std::clamp(host_port_, 1, 65535);
     if (ImGui::Button(loc.get("mp.connect").c_str())) {
+        spdlog::debug("Clicked button, Connecting to {}:{}", host_ip_,
+                      host_port_);
         app.start_client_session(host_ip_, host_port_);
         auto entry = host_ip_ + ":" + std::to_string(host_port_);
         if (!std::ranges::contains(server_list_, entry)) {
@@ -551,7 +554,7 @@ void UIManager::render_client_list(App &app)
 
                 // Address
                 ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%p", tg.get());
+                ImGui::Text("%p", tg.get().get());
 
                 // Status
                 ImGui::TableSetColumnIndex(2);
@@ -566,7 +569,7 @@ void UIManager::render_client_list(App &app)
 
                 // Kick
                 ImGui::TableSetColumnIndex(3);
-                ImGui::PushID(tg.get());
+                ImGui::PushID(tg.get().get());
                 if (ImGui::SmallButton("X"))
                     server->kick(tg.get(), "kicked by host");
                 ImGui::PopID();

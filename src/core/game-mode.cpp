@@ -15,6 +15,7 @@
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "knowledge/rumor-propagator.hpp"
+#include "net/local-transport.hpp"
 #include "net/server.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/collision-system.hpp"
@@ -236,11 +237,11 @@ void GameMode::init_world()
                         });
 
     soldier_ai_sys_ =
-        world_.system<SoldierAI, Position, CombatStats>("SoldierAI")
+        world_.system<SoldierAI, Position, Movement, CombatStats>("SoldierAI")
             .kind(flecs::PreUpdate)
             .each([this](flecs::entity e, SoldierAI &ai, Position &pos,
-                         CombatStats &cs) {
-                run_soldier_ai(world_, e, ai, pos, cs,
+                         Movement &mov, CombatStats &cs) {
+                run_soldier_ai(world_, e, ai, pos, mov, cs,
                                [this](EntityId eid) { mark_dirty(eid); });
             });
     soldier_ai_sys_.depends_on(survival_sys_);
@@ -268,7 +269,8 @@ void GameMode::init_world()
                         p.world_pos = dest;
                     p.tile_pos = {static_cast<int>(p.world_pos.x / 64.f),
                                   static_cast<int>(p.world_pos.y / 64.f)};
-                    if (m.moving) {
+                    bool is_moving = m.velocity.x != 0.f || m.velocity.y != 0.f;
+                    if (is_moving) {
                         float len = std::hypot(m.velocity.x, m.velocity.y);
                         if (len > 0.001f)
                             m.facing = {m.velocity.x / len, m.velocity.y / len};
@@ -349,6 +351,13 @@ void GameMode::start_host(int port)
 void GameMode::stop_host()
 {
     server_->stop_listen();
+    // Keeps current local client
+    // Don't server_->clear_transports();
+    for (auto const &tg : server_->transports_guards()) {
+        if (typeid(tg.get().get()) == typeid(LocalTransportEndpoint *)) {
+            server_->kick(tg.get(), "Host stopped the session");
+        }
+    }
 }
 
 EntityId GameMode::spawn_npc(std::string const &id, std::string const &name,
@@ -392,12 +401,9 @@ EntityId GameMode::spawn_soldier(EntityId leader, int index,
 {
     Vec2f off = calc_formation_offset(index, facing) + extra_offset;
 
-    auto const *lp = world_.entity(leader).try_get<Position>();
-    assert(lp);
-    Vec2f start = lp->world_pos;
+    Vec2f start = world_.entity(leader).get<Position>().world_pos;
 
     auto e = world_.entity();
-    auto eid = e.id();
 
     auto leader_team = world_.entity(leader).get<CombatStats>().team;
 
@@ -406,21 +412,15 @@ EntityId GameMode::spawn_soldier(EntityId leader, int index,
         Sprite{"", {}, {12, 12}, {0.3f, 0.5f, 0.9f, 1.f}, 0.8f, true});
     e.set<CombatStats>(CombatStats{leader_team, 12, 12, 3, 2, 80.f});
     e.set<Collider>(Collider{11.f});
+    e.set<Movement>(Movement{});
     e.set<SoldierAI>(SoldierAI{leader, off, 32.f, 200.f});
-    mark_dirty(eid);
-    return eid;
+    mark_dirty(e.id());
+    return e.id();
 }
 
 EntityId GameMode::spawn_recruit(EntityId leader)
 {
-    Vec2f facing{0, -1};
-    if (auto const *mov = world_.entity(leader).try_get<Movement>()) {
-        facing = mov->facing;
-        float len = std::hypot(mov->velocity.x, mov->velocity.y);
-        if (len > 0.001f) {
-            facing = {mov->velocity.x / len, mov->velocity.y / len};
-        }
-    }
+    auto facing = world_.entity(leader).get<Movement>().facing;
     return spawn_soldier(leader, soldier_idx_++, facing, {32.f, 32.f});
 }
 
@@ -439,6 +439,7 @@ void GameMode::spawn_guards(EntityId captain_eid, int count, Team team)
         e.set<Sprite>(Sprite{"", {}, {10, 10}, col, 0.7f, true});
         e.set<CombatStats>(CombatStats{team, 10, 10, 3, 2, 70.f});
         e.set<Collider>(Collider{10.f});
+        e.set<Movement>(Movement{});
         e.set<SoldierAI>(SoldierAI{
             captain_eid, {gp.x - center.x, gp.y - center.y}, 32.f, 180.f});
         mark_dirty(e.id());
@@ -763,8 +764,11 @@ void GameMode::check_event_spawns()
             return;
         auto &latest = events_->triggered_events().back();
         if (latest.type == GameEvent::Type::battle ||
-            latest.type == GameEvent::Type::refugee_wave)
-            spawn_enemy_wave(2 + rand() % 4, pp.world_pos, 400.f, Team::enemy);
+            latest.type == GameEvent::Type::refugee_wave) {
+            spdlog::critical("Wave");
+            spawn_enemy_wave(25 + rand() % 50, pp.world_pos, 400.f,
+                             Team::enemy);
+        }
     });
 }
 
@@ -773,7 +777,7 @@ void GameMode::update(float dt)
     while (server_->messages().try_receive([this](boost::system::error_code,
                                                   std::shared_ptr<ITransport> t,
                                                   TransportMessage msg) {
-        server_->handle_message(*t, std::move(msg));
+        server_->handle_message(std::move(t), std::move(msg));
     })) {
     }
 
@@ -845,8 +849,7 @@ void GameMode::apply_player_input(EntityId entity, Vec2f dir)
                   dir.x, dir.y);
     auto &mov = world_.entity(entity).get_mut<Movement>();
     mov.velocity = {dir.x * mov.speed, dir.y * mov.speed};
-    mov.moving = (dir.x != 0.f || dir.y != 0.f);
-    if (mov.moving) {
+    if (dir.x != 0.f || dir.y != 0.f) {
         float len = std::hypot(dir.x, dir.y);
         if (len > 0.001f)
             mov.facing = {dir.x / len, dir.y / len};

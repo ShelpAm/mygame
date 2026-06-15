@@ -162,7 +162,7 @@ class ResourceManager {
 
     PhysicalCamera &camera()
     {
-        return camera_;
+        return *camera_;
     }
 
     void clear();
@@ -170,5 +170,5 @@ class ResourceManager {
   private:
     std::unordered_map<std::string, SDL_Texture *> textures_;
     // std::unordered_map<std::string, TTF_Font *> fonts_;
-    PhysicalCamera camera_;
+    std::unique_ptr<PhysicalCamera> camera_;
 };

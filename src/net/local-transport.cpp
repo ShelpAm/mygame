@@ -46,17 +46,17 @@ void LocalTransportEndpoint::close()
     channel_.close(); // cancel our pending reads
 }
 
-std::pair<std::unique_ptr<LocalTransportEndpoint>,
-          std::unique_ptr<LocalTransportEndpoint>>
+std::pair<std::shared_ptr<LocalTransportEndpoint>,
+          std::shared_ptr<LocalTransportEndpoint>>
 create_transport_pair()
 {
-    auto a = std::make_unique<LocalTransportEndpoint>();
-    auto b = std::make_unique<LocalTransportEndpoint>();
+    auto a = std::make_shared<LocalTransportEndpoint>();
+    auto b = std::make_shared<LocalTransportEndpoint>();
     a->set_peer(b.get());
     b->set_peer(a.get());
     return {std::move(a), std::move(b)};
 }
 std::string LocalTransportEndpoint::remote_info() const
 {
-    return "local";
+    return "local (" + std::format("{}", static_cast<void const *>(this)) + ")";
 }

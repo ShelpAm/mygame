@@ -40,11 +40,9 @@ void App::init()
     SDL_SetRenderVSync(renderer_, 1);
 
     resources_ = std::make_unique<ResourceManager>();
-    resources_->load_texture(
-        renderer_, "entity",
-        "/home/shelpam/Documents/xwechat_files/wxid_61hxqg13pdyk22_bde8/"
-        "msg/file/2026-06/CHIBI KNIGHT-PNG/CHIBI "
-        "KNIGHT-PNG/01-Idle_/2D_KNIGHT__Idle_000.png");
+    resources_->load_texture(renderer_, "entity",
+                             "assets/textures/CHIBI KNIGHT-PNG/CHIBI "
+                             "KNIGHT-PNG/01-Idle_/2D_KNIGHT__Idle_000.png");
 
     render_system_ =
         std::make_unique<RenderSystem>(renderer_, *resources_, camera_system_);
@@ -102,13 +100,15 @@ void App::start_local_session()
     client_->detach_transport();
     auto [srv, cli] = create_transport_pair();
     spdlog::info("App: spawned two transports: srv = {}, cli = {}",
-                 (void *)srv.get(), (void *)cli.get());
-    game_mode_->server()->attach_transport(std::move(srv));
-    client_->attach_transport(std::move(cli));
+                 srv->remote_info(), cli->remote_info());
 
-    client_->send_join_request();
-
-    session_mode_ = SessionMode::local;
+    auto do_attach = [](App *app, auto srv, auto cli) -> awaitable<void> {
+        co_await (app->game_mode_->server()->attach_transport(std::move(srv)) &&
+                  app->client_->attach_transport(std::move(cli)));
+        app->client_->send_join_request();
+        app->session_mode_ = SessionMode::local;
+    };
+    ITransport::spawn(do_attach(this, srv, cli));
 }
 
 void App::start_client_session(std::string const &host, int port)
@@ -138,18 +138,15 @@ void App::start_client_session(std::string const &host, int port)
     }
 
     try {
-        ITransport::spawn([](App *self, std::string resolved_ip,
-                             auto port) -> awaitable<void> {
-            auto peer = co_await NetworkTransport::connect(resolved_ip, port);
-            if (!co_await self->client_->authenticate_transport(peer.get())) {
-                throw std::runtime_error(
-                    "Server verification failed: unexpected response");
-            }
-            self->client_->attach_transport(std::move(peer));
+        auto attach = [](App *self, std::string resolved_ip,
+                         auto port) -> awaitable<void> {
+            auto t = co_await NetworkTransport::connect(resolved_ip, port);
+            co_await self->client_->attach_transport(std::move(t));
 
             self->client_->send_join_request();
             self->session_mode_ = SessionMode::client;
-        }(this, resolved_ip, port));
+        };
+        ITransport::spawn(attach(this, resolved_ip, port));
     }
     catch (std::exception &e) {
         spdlog::error("Connect failed: {}, aborting", e.what());

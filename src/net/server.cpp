@@ -3,7 +3,6 @@
 #include "net/net-packet.hpp"
 #include <cassert>
 #include <cstring>
-#include <ranges>
 #include <spdlog/spdlog.h>
 
 Server::Server()
@@ -25,22 +24,13 @@ void Server::set_game_mode(GameMode *gm)
 
 awaitable<void> Server::listen(std::uint16_t port)
 {
-    acceptor_ = std::make_unique<NetworkTransport::Acceptor>(port);
+    acceptor_ = std::make_shared<NetworkTransport::Acceptor>(port);
     spdlog::info("Waiting for incoming connections on port {}...", port);
     try {
         while (acceptor_) {
             auto t = co_await acceptor_->accept();
-
-            if (!co_await authenticate_transport(t.get())) {
-                spdlog::warn("Received non-verification packet from new "
-                             "connection, closing connection");
-                t->close();
-                continue;
-            }
-
-            spdlog::info("Accepted new connection from {}",
-                         t->socket().remote_endpoint().address().to_string());
-            attach_transport(std::move(t));
+            spdlog::info("Accepted new connection from {}", t->remote_info());
+            co_await attach_transport(std::move(t));
         }
     }
     catch (boost::system::system_error const &e) {
@@ -53,13 +43,21 @@ awaitable<void> Server::listen(std::uint16_t port)
     }
 }
 
-void Server::attach_transport(std::unique_ptr<ITransport> uniq_t)
+awaitable<void> Server::attach_transport(std::shared_ptr<ITransport> t)
 {
-    auto t = std::shared_ptr(std::move(uniq_t));
+    spdlog::debug("Server: attaching transport {}", t->remote_info());
+
+    if (!co_await authenticate_transport(t))
+        throw std::runtime_error(
+            "Server: new connection authentication failed, closing "
+            "connection");
+
+    spdlog::debug("Server: auth successful ({})", t->remote_info());
+
     transport_guards_.push_back(TransportGuard{t});
-    spdlog::info("Server: Transport ({}) attached",
-                 static_cast<void *>(t.get()));
-    // Note to ensure that `t` and `s` should outlive this coro.
+    spdlog::info("Server: transport {} attached", t->remote_info());
+
+    // Note to ensure that `s` should outlive this coro.
     auto read_loop = [](Server *s,
                         std::shared_ptr<ITransport> t) -> awaitable<void> {
         try {
@@ -80,16 +78,17 @@ void Server::attach_transport(std::unique_ptr<ITransport> uniq_t)
             }
         }
         catch (boost::system::system_error const &e) {
+            s->detach_transport(t.get());
             if (e.code() == asio::error::operation_aborted ||
                 e.code() == asio::error::eof ||
                 e.code() == asio::experimental::error::channel_closed ||
                 e.code() == asio::experimental::error::channel_cancelled) {
-                s->detach_transport(t.get());
-                co_return;
+                co_return; // Normal exits
             }
             throw;
         }
     };
+
     ITransport::spawn(read_loop(this, t));
 }
 
@@ -97,34 +96,36 @@ void Server::detach_transport(ITransport *t)
 {
     player_transport_.erase(t);
     std::erase_if(transport_guards_,
-                  [t](auto const &e) { return e.get() == t; });
+                  [t](auto const &e) { return e.get().get() == t; });
     spdlog::info("Server: transport {} detached", t->remote_info());
 }
 
-void Server::kick(ITransport *t, std::string const &reason)
+void Server::kick(std::shared_ptr<ITransport> t, std::string const &reason)
 {
-    spdlog::info("Server: kicking transport {}", static_cast<void *>(t));
+    spdlog::info("Server: kicking transport {}", static_cast<void *>(t.get()));
     // Clean up player entity in ECS and notify remaining clients
-    auto node = player_transport_.extract(t);
+    auto node = player_transport_.extract(t.get());
     if (node.empty())
         throw std::runtime_error(
             "Server::kick: transport not found in player_transport_");
 
     auto eid = node.mapped();
     game_mode_->remove_player(eid);
-    // // Broadcast to all transports EXCEPT the one being kicked
-    std::vector<uint8_t> payload;
-    write_bytes(payload, eid);
+    // Broadcast to all transports EXCEPT the one being kicked
+    auto payload = make_entity_removed(eid);
     for (auto &tg : transport_guards_)
         if (tg.get() != t)
-            ITransport::spawn(
-                tg.get()->write({NetPacket::entity_removed, payload}));
+            ITransport::spawn([](std::shared_ptr<ITransport> t,
+                                 auto payload) -> awaitable<void> {
+                co_await t->write({NetPacket::entity_removed, payload});
+            }(tg.get(), std::move(payload)));
     // Send kicked packet then disconnect (sequential, on io_context)
     std::vector<uint8_t> reason_payload(reason.begin(), reason.end());
-    ITransport::spawn([](ITransport *t, auto payload) -> awaitable<void> {
-        co_await t->write({NetPacket::kicked, std::move(payload)});
-        t->close();
-    }(t, std::move(reason_payload)));
+    ITransport::spawn(
+        [](std::shared_ptr<ITransport> t, auto payload) -> awaitable<void> {
+            co_await t->write({NetPacket::kicked, std::move(payload)});
+            t->close();
+        }(t, std::move(reason_payload)));
 }
 
 void Server::clear_transports()
@@ -132,7 +133,8 @@ void Server::clear_transports()
     transport_guards_.clear();
 }
 
-void Server::handle_message(ITransport &from, TransportMessage msg)
+void Server::handle_message(std::shared_ptr<ITransport> from,
+                            TransportMessage msg)
 {
     spdlog::debug("Server: handling message '{}'", msg.type);
     if (msg.type == NetPacket::join) {
@@ -140,12 +142,12 @@ void Server::handle_message(ITransport &from, TransportMessage msg)
         Team team = static_cast<Team>(next_team_++);
         auto eid = game_mode_->spawn_player({0, 0}, team);
         game_mode_->register_player(eid);
-        player_transport_[&from] = eid;
-        std::vector<uint8_t> payload;
-        write_bytes(payload, eid);
-        write_bytes(payload, static_cast<std::uint8_t>(team));
+        player_transport_[from.get()] = eid;
+        auto payload = make_return_pid(eid, static_cast<std::uint8_t>(team));
         ITransport::spawn(
-            from.write({NetPacket::return_pid, std::move(payload)}));
+            [](std::shared_ptr<ITransport> t, auto payload) -> awaitable<void> {
+                co_await t->write({NetPacket::return_pid, std::move(payload)});
+            }(from, std::move(payload)));
         spdlog::info("Server: new player joined with ID: {} team: {}", eid,
                      static_cast<std::uint8_t>(team));
     }
@@ -156,7 +158,7 @@ void Server::handle_message(ITransport &from, TransportMessage msg)
                                       u.alive);
         if (!sent_initial_sync_.contains(u.id) || !sent_initial_sync_[u.id]) {
             sent_initial_sync_[u.id] = true;
-            mark_needs_full_sync();
+            mark_needs_full_sync("entity_update");
         }
     }
     else if (msg.type == NetPacket::recruit_soldier) {
@@ -176,14 +178,14 @@ void Server::handle_message(ITransport &from, TransportMessage msg)
         game_mode_->apply_player_input(in.pid, {in.mx, in.my});
     }
     else if (msg.type == NetPacket::interact) {
-        auto it = player_transport_.find(&from);
+        auto it = player_transport_.find(from.get());
         if (it == player_transport_.end())
             return;
         game_mode_->handle_interaction(it->second);
         send_dialogue_to(from, it->second);
     }
     else if (msg.type == NetPacket::dialogue_action) {
-        auto it = player_transport_.find(&from);
+        auto it = player_transport_.find(from.get());
         if (it != player_transport_.end()) {
             std::string action(msg.payload.begin(), msg.payload.end());
             game_mode_->do_dialogue_action(it->second, action);
@@ -195,7 +197,7 @@ void Server::handle_message(ITransport &from, TransportMessage msg)
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
         game_mode_->heal_entity(pid, 5);
-        mark_needs_full_sync();
+        mark_needs_full_sync("player rest");
     }
     else if (msg.type == NetPacket::combat_event) {
         auto ev = parse_combat_event(msg.payload);
@@ -203,24 +205,32 @@ void Server::handle_message(ITransport &from, TransportMessage msg)
     }
     else if (msg.type == NetPacket::chat) {
         std::string chat_msg(msg.payload.begin(), msg.payload.end());
-        spdlog::info("Chat message from {}: {}", from.remote_info(), chat_msg);
+        spdlog::info("Chat message from {}: {}", from->remote_info(), chat_msg);
         auto payload = make_chat(chat_msg);
         for (auto &tg : transport_guards_)
-            ITransport::spawn(tg.get()->write({NetPacket::chat, payload}));
+            ITransport::spawn([](std::shared_ptr<ITransport> t,
+                                 auto payload) -> awaitable<void> {
+                co_await t->write({NetPacket::chat, payload});
+            }(tg.get(), payload));
     }
 }
 
 void Server::broadcast_sync()
 {
-    static int frame_counter = 0;
+    // static int frame_counter = 0;
+    // if (++frame_counter >= 300)
+    //     mark_needs_full_sync("periodic full sync (frame_count >= 300)");
+
     bool needs_full = check_needs_full_sync();
 
     NetPacket::Type pkt_type;
     std::vector<uint8_t> payload;
-    if (needs_full || ++frame_counter >= 300) {
+    if (needs_full) {
+        // reason
+        spdlog::info("Server: full sync reason: {}", needs_full_sync_.second);
         payload = game_mode_->build_full_payload();
         pkt_type = NetPacket::state_full;
-        frame_counter = 0;
+        // frame_counter = 0;
     }
     else if (game_mode_->has_dirty_entities()) {
         payload = game_mode_->build_dirty_payload();
@@ -235,35 +245,47 @@ void Server::broadcast_sync()
     if (payload.empty())
         return;
     for (auto &tg : transport_guards_) {
-        ITransport::spawn(tg.get()->write({pkt_type, payload}));
+        ITransport::spawn([](std::shared_ptr<ITransport> t,
+                             NetPacket::Type pkt_type,
+                             std::vector<uint8_t> payload) -> awaitable<void> {
+            co_await t->write({pkt_type, payload});
+        }(tg.get(), pkt_type, payload));
     }
 }
 
 void Server::broadcast_entity_removed(EntityId eid)
 {
-    std::vector<uint8_t> payload;
-    write_bytes(payload, eid);
+    auto payload = make_entity_removed(eid);
     for (auto &tg : transport_guards_)
         ITransport::spawn(
-            tg.get()->write({NetPacket::entity_removed, payload}));
+            [](std::shared_ptr<ITransport> t, auto payload) -> awaitable<void> {
+                co_await t->write({NetPacket::entity_removed, payload});
+            }(tg.get(), payload));
 }
 
-void Server::send_dialogue_to(ITransport &to, EntityId pid)
+void Server::send_dialogue_to(std::shared_ptr<ITransport> to, EntityId pid)
 {
     std::vector<uint8_t> payload;
     serialize_dialogue_sync(payload, game_mode_->dialogue(pid));
-    ITransport::spawn(to.write({NetPacket::dialogue_sync, std::move(payload)}));
+    ITransport::spawn(
+        [](std::shared_ptr<ITransport> t, auto payload) -> awaitable<void> {
+            co_await t->write({NetPacket::dialogue_sync, std::move(payload)});
+        }(to, std::move(payload)));
 }
 
-awaitable<bool> Server::authenticate_transport(ITransport *t)
+awaitable<bool> Server::authenticate_transport(std::shared_ptr<ITransport> t)
 {
-    auto req = co_await t->read();
-    if (req.type != NetPacket::auth ||
-        (req.payload | std::ranges::to<std::string>()) != "thesunstraits") {
+    try {
+        auto req = co_await t->read();
+        spdlog::debug("Server: received auth: type: {}, payload: {}", req.type,
+                      req.payload);
+        if (req.type != NetPacket::auth || req.payload != auth_payload())
+            co_return false;
+
+        co_await t->write({NetPacket::auth, auth_payload()});
+        co_return true;
+    }
+    catch (...) {
         co_return false;
     }
-    co_await t->write(
-        {NetPacket::auth,
-         "thesunstraits" | std::ranges::to<std::vector<std::uint8_t>>()});
-    co_return true;
 }

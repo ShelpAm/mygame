@@ -1,4 +1,5 @@
 #include "entities/components/combat-stats.hpp"
+#include "entities/components/movement.hpp"
 #include "entities/components/position.hpp"
 #include "entities/components/soldier-ai.hpp"
 #include "systems/combat-system.hpp"
@@ -86,6 +87,7 @@ BOOST_AUTO_TEST_CASE(soldier_ai_moves_toward_leader)
     soldier.set<Position>(Position{{0, 0}, {0, 0}});
     soldier.set<CombatStats>(
         CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
+    soldier.set<Movement>(Movement{});
     soldier.set<SoldierAI>(SoldierAI{.follow_target = leader.id(),
                                      .formation_offset = {0, 0},
                                      .follow_distance = 16.f});
@@ -93,12 +95,12 @@ BOOST_AUTO_TEST_CASE(soldier_ai_moves_toward_leader)
     auto noop = [](EntityId) {};
     auto *ai = soldier.try_get_mut<SoldierAI>();
     auto *pos = soldier.try_get_mut<Position>();
+    auto *mov = soldier.try_get_mut<Movement>();
     auto *cs = soldier.try_get_mut<CombatStats>();
-    BOOST_REQUIRE(ai && pos && cs);
+    BOOST_REQUIRE(ai && pos && mov && cs);
 
-    float orig_x = pos->world_pos.x;
-    run_soldier_ai(world, soldier, *ai, *pos, *cs, noop);
-    BOOST_TEST(pos->world_pos.x > orig_x);
+    run_soldier_ai(world, soldier, *ai, *pos, *mov, *cs, noop);
+    BOOST_TEST(mov->velocity.x > 0.f);
 }
 
 BOOST_AUTO_TEST_CASE(spawn_enemy_wave)

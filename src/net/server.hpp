@@ -26,22 +26,22 @@ class Server {
         }
     }
 
-    awaitable<bool> authenticate_transport(ITransport *t);
+    awaitable<bool> authenticate_transport(std::shared_ptr<ITransport> t);
 
-    void attach_transport(std::unique_ptr<ITransport> uniq_t);
+    awaitable<void> attach_transport(std::shared_ptr<ITransport> t);
     void detach_transport(ITransport *t);
     void clear_transports();
+    void kick(std::shared_ptr<ITransport> t, std::string const &reason);
 
-    void kick(ITransport *t, std::string const &reason);
-
-    void mark_needs_full_sync()
+    void mark_needs_full_sync(std::string reason)
     {
-        needs_full_sync_ = true;
+        needs_full_sync_ = {true, reason};
+        spdlog::info("reason! {}", reason);
     }
     bool check_needs_full_sync()
     {
-        bool v = needs_full_sync_;
-        needs_full_sync_ = false;
+        bool v = needs_full_sync_.first;
+        needs_full_sync_.first = false;
         return v;
     }
 
@@ -57,7 +57,7 @@ class Server {
 
   private:
     std::unordered_map<EntityId, bool> sent_initial_sync_;
-    bool needs_full_sync_ = false;
+    std::pair<bool, std::string> needs_full_sync_{false, ""};
     GameMode *game_mode_ = nullptr;
 
     deferred_concurrent_channel<void(boost::system::error_code,
@@ -67,12 +67,12 @@ class Server {
 
     std::unordered_map<ITransport *, EntityId> player_transport_;
     std::uint8_t next_team_;
-    std::unique_ptr<NetworkTransport::Acceptor> acceptor_;
+    std::shared_ptr<NetworkTransport::Acceptor> acceptor_;
     std::vector<TransportGuard>
         transport_guards_; // Ensures lifetime of transports.
 
     void broadcast_sync();
     void broadcast_entity_removed(EntityId eid);
-    void handle_message(ITransport &from, TransportMessage msg);
-    void send_dialogue_to(ITransport &to, EntityId pid);
+    void handle_message(std::shared_ptr<ITransport> from, TransportMessage msg);
+    void send_dialogue_to(std::shared_ptr<ITransport> to, EntityId pid);
 };

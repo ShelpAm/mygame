@@ -30,7 +30,6 @@ struct RemoteEntity {
 
     // Movement (optional, set when synced)
     Vec2f velocity{0, 0};
-    bool moving = false;
     Vec2f facing{0, -1};
 
     // Interactable
@@ -60,7 +59,8 @@ class Client {
         return player_team_;
     }
 
-    awaitable<bool> authenticate_transport(ITransport *t);
+    // Verifies authority of server
+    awaitable<bool> authenticate_transport(std::shared_ptr<ITransport> t);
 
     void send_join_request();
     void send_player_direction(Vec2f dir);
@@ -75,11 +75,11 @@ class Client {
     bool is_player_dead();
     CombatStats const *player_stats();
 
-    void attach_transport(std::unique_ptr<ITransport> uniq_t);
+    awaitable<void> attach_transport(std::shared_ptr<ITransport> t);
     void detach_transport();
-    ITransport *transport() const
+    TransportGuard const &transport_guard() const
     {
-        return transport_guard_->get();
+        return *transport_guard_;
     }
 
     void interpolate_entities(float dt);
@@ -147,7 +147,6 @@ class Client {
     Team player_team_ = Team::invalid_team;
     Vec2f player_pos_, player_target_pos_;
     Vec2f player_velocity_{0, 0};
-    bool player_moving_ = false;
     Vec2f player_facing_{0, -1};
     int player_hp_ = 20, player_max_hp_ = 20;
     int player_attack_ = 4, player_defense_ = 3;

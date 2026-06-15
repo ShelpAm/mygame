@@ -19,6 +19,7 @@ class TransportGuard {
         if (transport_) {
             // 这里恢复了 RAII 的灵魂：对象销毁 = 资源(连接)断开
             transport_->close();
+            transport_.reset(); // Maybe not needed
         }
     }
 
@@ -29,9 +30,9 @@ class TransportGuard {
     TransportGuard &operator=(TransportGuard &&) = default;
 
     // 提供一个获取底层指针的方法，方便拿去发消息
-    ITransport *get() const
+    std::shared_ptr<ITransport> get() const
     {
-        return transport_.get();
+        return transport_;
     }
 
   private:

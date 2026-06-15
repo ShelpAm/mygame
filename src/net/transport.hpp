@@ -3,9 +3,9 @@
 #include "net/net-packet.hpp"
 
 #include <boost/asio.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/experimental/concurrent_channel.hpp>
 #include <cstdint>
-#include <memory>
 #include <spdlog/spdlog.h>
 #include <vector>
 
@@ -18,6 +18,8 @@ using asio::deferred;
 using asio::detached;
 using asio::use_awaitable;
 using asio::ip::tcp;
+
+using namespace asio::experimental::awaitable_operators;
 
 // using default_token = asio::use_awaitable_t<>;
 using default_token = asio::deferred_t;
@@ -38,7 +40,7 @@ struct TransportMessage {
 // or across the network (NetworkTransport wrapping sockets).
 //
 // ITrasnsport implements a custom protocol design for the game.
-class ITransport : std::enable_shared_from_this<ITransport> {
+class ITransport {
   public:
     static void set_io(asio::io_context *io)
     {

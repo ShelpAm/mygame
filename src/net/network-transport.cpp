@@ -23,11 +23,12 @@ NetworkTransport::Acceptor::Acceptor(std::uint16_t port)
 {
 }
 
-awaitable<std::unique_ptr<NetworkTransport>>
+awaitable<std::shared_ptr<NetworkTransport>>
 NetworkTransport::Acceptor::accept()
 {
+    auto self = shared_from_this(); // Keeps lifespan of itself
     auto sock = co_await impl_->async_accept();
-    co_return std::make_unique<NetworkTransport>(std::move(sock));
+    co_return std::make_shared<NetworkTransport>(std::move(sock));
 }
 
 void NetworkTransport::Acceptor::stop()
@@ -36,11 +37,11 @@ void NetworkTransport::Acceptor::stop()
         impl_->close();
 }
 
-awaitable<std::unique_ptr<NetworkTransport>>
+awaitable<std::shared_ptr<NetworkTransport>>
 NetworkTransport::connect(std::string const &ip, int port)
 {
     spdlog::info("NetworkTransport: initiating connection to {}:{}", ip, port);
-    auto t = std::make_unique<NetworkTransport>();
+    auto t = std::make_shared<NetworkTransport>();
     auto ep = tcp::endpoint(asio::ip::make_address(ip), port);
 
     asio::steady_timer timer(io(), std::chrono::seconds(5));
@@ -88,6 +89,7 @@ awaitable<void> NetworkTransport::write(TransportMessage msg)
 
 awaitable<TransportMessage> NetworkTransport::read()
 {
+    // Deserialize the packet
     auto [ec_head, _] = co_await asio::async_read(
         socket_, asio::buffer(&read_head_buffer_, sizeof(read_head_buffer_)),
         as_tuple(use_awaitable));
@@ -116,7 +118,6 @@ bool NetworkTransport::is_open() const
 
 void NetworkTransport::close()
 {
-    cached_socket_info_ += " (closed)";
     socket_.close();
 }
 

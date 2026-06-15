@@ -4,6 +4,7 @@
 #include "core/math.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/position.hpp"
+#include "entities/components/movement.hpp"
 #include "entities/components/soldier-ai.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/combat-system.hpp"
@@ -68,39 +69,41 @@ inline void decay_survival(SurvivalState &s, float dt)
     s.energy = std::clamp(s.energy, 0.f, 100.f);
 }
 
-// Shared soldier AI — used by SoldierAI system + testable standalone.
+// Shared soldier AI — sets velocity on Movement component; the Movement
+// system applies position += velocity * dt each frame.
 template <typename DirtyFn>
 inline void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai,
-                           Position &pos, CombatStats &cs, DirtyFn &&mark_dirty)
+                           Position &pos, Movement &mov, CombatStats &cs,
+                           DirtyFn &&mark_dirty)
 {
-    if (!cs.alive)
+    if (!cs.alive) {
+        mov.velocity = {0, 0};
         return;
+    }
     float const SOLDIER_SPEED = 120.f;
     bool changed = false;
 
     auto enemyId = find_nearest_enemy(world, e.id(), cs.team, {});
     if (enemyId != 0) {
-        auto const *enemyPos = world.entity(enemyId).try_get<Position>();
-        if (enemyPos) {
-            Vec2f diff = enemyPos->world_pos - pos.world_pos;
-            float dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
-            if (dist <= ai.engage_range) {
-                if (dist > cs.attack_range) {
-                    Vec2f dir = {diff.x / dist, diff.y / dist};
-                    pos.world_pos.x += dir.x * SOLDIER_SPEED * 1.2f / 60.f;
-                    pos.world_pos.y += dir.y * SOLDIER_SPEED * 1.2f / 60.f;
-                    changed = true;
-                }
-                if (!ai.in_combat) {
-                    ai.in_combat = true;
-                    changed = true;
-                }
-                pos.tile_pos = {(int)(pos.world_pos.x / 64.f),
-                                (int)(pos.world_pos.y / 64.f)};
-                if (changed)
-                    mark_dirty(e.id());
-                return;
+        auto const enemyPos = world.entity(enemyId).get<Position>();
+        Vec2f diff = enemyPos.world_pos - pos.world_pos;
+        float dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
+        if (dist <= ai.engage_range) {
+            if (dist > cs.attack_range) {
+                Vec2f dir = {diff.x / dist, diff.y / dist};
+                mov.velocity = dir * SOLDIER_SPEED * 1.2f;
+                changed = true;
             }
+            else {
+                mov.velocity = {0, 0};
+            }
+            if (!ai.in_combat) {
+                ai.in_combat = true;
+                changed = true;
+            }
+            if (changed)
+                mark_dirty(e.id());
+            return;
         }
     }
 
@@ -111,6 +114,7 @@ inline void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai,
 
     auto const *leaderPos = world.entity(ai.follow_target).try_get<Position>();
     if (!leaderPos) {
+        mov.velocity = {0, 0};
         if (changed)
             mark_dirty(e.id());
         return;
@@ -124,12 +128,12 @@ inline void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai,
         Vec2f dir = diff.x == 0 && diff.y == 0
                         ? Vec2f{1.f, 0.f}
                         : Vec2f{diff.x / dist, diff.y / dist};
-        pos.world_pos.x += dir.x * SOLDIER_SPEED / 60.f;
-        pos.world_pos.y += dir.y * SOLDIER_SPEED / 60.f;
+        mov.velocity = dir * SOLDIER_SPEED;
         changed = true;
     }
-    pos.tile_pos = {(int)(pos.world_pos.x / 64.f),
-                    (int)(pos.world_pos.y / 64.f)};
+    else {
+        mov.velocity = {0, 0};
+    }
     if (changed)
         mark_dirty(e.id());
 }

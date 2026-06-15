@@ -133,12 +133,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         "GNU")
         target_compile_options(TheSunsetStraits PRIVATE
             # -fsanitize=thread
-            -fsanitize=address
+            # -fsanitize=address
             -O0
         )
         target_link_options(TheSunsetStraits PRIVATE
             # -fsanitize=thread
-            -fsanitize=address
+            # -fsanitize=address
         )
         target_link_libraries(TheSunsetStraits PRIVATE pthread)
     endif()

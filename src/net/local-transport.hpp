@@ -5,7 +5,9 @@
 #include <memory>
 #include <utility>
 
-class LocalTransportEndpoint : public ITransport {
+class LocalTransportEndpoint
+    : public ITransport,
+      public std::enable_shared_from_this<LocalTransportEndpoint> {
   public:
     LocalTransportEndpoint();
     ~LocalTransportEndpoint();
@@ -22,9 +24,9 @@ class LocalTransportEndpoint : public ITransport {
     LocalTransportEndpoint *peer_ = nullptr;
     deferred_concurrent_channel<void(boost::system::error_code,
                                      TransportMessage)>
-        channel_;
+        channel_; // Read channel
 };
 
-std::pair<std::unique_ptr<LocalTransportEndpoint>,
-          std::unique_ptr<LocalTransportEndpoint>>
+std::pair<std::shared_ptr<LocalTransportEndpoint>,
+          std::shared_ptr<LocalTransportEndpoint>>
 create_transport_pair();

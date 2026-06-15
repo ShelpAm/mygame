@@ -2,6 +2,7 @@
 #include "net/net-packet.hpp"
 #include "net/network-transport.hpp"
 #include <boost/asio.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/test/unit_test.hpp>
 #include <chrono>
 #include <future>
@@ -86,12 +87,7 @@ BOOST_AUTO_TEST_CASE(serialize_packet_roundtrip)
 
 BOOST_AUTO_TEST_CASE(make_and_parse_entity_update)
 {
-    auto data = make_entity_update(7, 1.5f, -2.0f, 10, 20, true);
-    auto header_type = read_bytes<uint32_t>(data, 0);
-    auto header_size = read_bytes<uint32_t>(data, 4);
-    BOOST_TEST(header_type == static_cast<uint32_t>(NetPacket::entity_update));
-
-    std::vector<uint8_t> payload(data.begin() + 8, data.end());
+    auto payload = make_entity_update(7, 1.5f, -2.0f, 10, 20, true);
     auto u = parse_entity_update(payload);
     BOOST_TEST(u.id == 7);
     BOOST_TEST(u.x == 1.5f);
@@ -103,8 +99,7 @@ BOOST_AUTO_TEST_CASE(make_and_parse_entity_update)
 
 BOOST_AUTO_TEST_CASE(make_and_parse_combat_event)
 {
-    auto data = make_combat_event(1, 3, 25, true);
-    std::vector<uint8_t> payload(data.begin() + 8, data.end());
+    auto payload = make_combat_event(1, 3, 25, true);
     auto ev = parse_combat_event(payload);
     BOOST_TEST(ev.attacker_id == 1);
     BOOST_TEST(ev.defender_id == 3);
@@ -114,8 +109,7 @@ BOOST_AUTO_TEST_CASE(make_and_parse_combat_event)
 
 BOOST_AUTO_TEST_CASE(make_chat_preserves_text)
 {
-    auto data = make_chat("hello world");
-    std::vector<uint8_t> payload(data.begin() + 8, data.end());
+    auto payload = make_chat("hello world");
     std::string text(payload.begin(), payload.end());
     BOOST_TEST(text == "hello world");
 }
@@ -173,13 +167,13 @@ BOOST_AUTO_TEST_CASE(local_transport_is_connected)
 // -- NetworkTransport lifecycle --
 BOOST_AUTO_TEST_CASE(network_transport_not_connected_initially)
 {
-    auto peer = std::make_unique<NetworkTransport>();
+    auto peer = std::make_shared<NetworkTransport>();
     BOOST_TEST(!peer->is_open());
 }
 
 BOOST_AUTO_TEST_CASE(network_transport_has_socket)
 {
-    auto peer = std::make_unique<NetworkTransport>();
+    auto peer = std::make_shared<NetworkTransport>();
     auto &sock = peer->socket();
     BOOST_TEST(!sock.is_open());
 }
@@ -242,14 +236,13 @@ BOOST_AUTO_TEST_CASE(local_transport_threaded_send)
 BOOST_AUTO_TEST_CASE(disconnect_during_read)
 {
     run_sync([]() -> asio::awaitable<void> {
-        NetworkTransport::Acceptor acceptor{58888};
-        std::unique_ptr<NetworkTransport> r, w;
+        auto acceptor = std::make_shared<NetworkTransport::Acceptor>(58888);
+        std::shared_ptr<NetworkTransport> r, w;
         std::atomic<bool> connected{false};
 
         // Spawn accept, then connect — must run concurrently
         auto accept_coro = [&]() -> asio::awaitable<void> {
-            auto t = co_await acceptor.accept();
-            r.reset(dynamic_cast<NetworkTransport *>(t.release()));
+            r = co_await acceptor->accept();
             connected = true;
         };
         co_spawn(ITransport::io(), accept_coro(), asio::detached);
@@ -259,6 +252,9 @@ BOOST_AUTO_TEST_CASE(disconnect_during_read)
                                     std::chrono::milliseconds(10))
             .async_wait(asio::use_awaitable);
         w = co_await NetworkTransport::connect("127.0.0.1", 58888);
+        // Yield to let the accept coroutine post its completion
+        co_await asio::steady_timer(ITransport::io(), std::chrono::milliseconds(1))
+            .async_wait(asio::use_awaitable);
         BOOST_TEST(connected);
 
         // Now test: spawn reader, wait, close writer
@@ -291,14 +287,13 @@ BOOST_AUTO_TEST_CASE(disconnect_during_read)
 
 BOOST_AUTO_TEST_CASE(close_wakes_read_loop)
 {
-    NetworkFixture fx;
     auto [a, b] = create_transport_pair();
     std::atomic<bool> read_closed{false};
     std::atomic<int> msg_count{0};
 
     co_spawn(
         ITransport::io(),
-        [&](std::unique_ptr<ITransport> t) -> asio::awaitable<void> {
+        [&](std::shared_ptr<ITransport> t) -> asio::awaitable<void> {
             try {
                 while (true) {
                     co_await t->read();
@@ -318,7 +313,7 @@ BOOST_AUTO_TEST_CASE(close_wakes_read_loop)
 
     // Give the read loop time to process
     while (msg_count == 0)
-        fx.io.poll_one();
+        ITransport::io().poll_one();
 
     // Close the transport — should wake the read loop
     b->close();
@@ -326,10 +321,160 @@ BOOST_AUTO_TEST_CASE(close_wakes_read_loop)
 
     // Drain io until the read coroutine exits
     while (!read_closed)
-        fx.io.poll_one();
+        ITransport::io().poll_one();
 
     BOOST_TEST(msg_count == 1);
     BOOST_TEST(read_closed);
+}
+
+// -- Auth handshake over local transport --
+
+BOOST_AUTO_TEST_CASE(auth_handshake_success_over_local)
+{
+    auto [ca, cb] = create_transport_pair();
+
+    bool server_ok = false, client_ok = false;
+    run_sync([&]() -> asio::awaitable<void> {
+        auto server_auth = [&]() -> asio::awaitable<void> {
+            auto msg = co_await cb->read();
+            if (msg.type == NetPacket::auth && msg.payload == auth_payload()) {
+                co_await cb->write({NetPacket::auth, auth_payload()});
+                server_ok = true;
+            }
+        };
+        co_spawn(ITransport::io(), server_auth(), asio::detached);
+        co_await asio::steady_timer(ITransport::io(), std::chrono::milliseconds(1))
+            .async_wait(asio::use_awaitable);
+        co_await ca->write({NetPacket::auth, auth_payload()});
+        auto res = co_await ca->read();
+        client_ok = (res.type == NetPacket::auth && res.payload == auth_payload());
+        co_await asio::steady_timer(ITransport::io(), std::chrono::milliseconds(10))
+            .async_wait(asio::use_awaitable);
+    }());
+    BOOST_TEST(client_ok);
+    BOOST_TEST(server_ok);
+}
+
+// -- Packet make+parse roundtrips --
+
+BOOST_AUTO_TEST_CASE(make_and_parse_player_input)
+{
+    auto payload = make_player_input(42, 1.5f, -3.0f);
+    auto in = parse_player_input(payload);
+    BOOST_TEST(in.pid == 42);
+    BOOST_TEST(in.mx == 1.5f);
+    BOOST_TEST(in.my == -3.0f);
+}
+
+BOOST_AUTO_TEST_CASE(make_and_parse_entity_removed)
+{
+    auto payload = make_entity_removed(0xDEADBEEF);
+    BOOST_TEST(payload.size() == 8);
+    EntityId eid;
+    memcpy(&eid, payload.data(), 8);
+    BOOST_TEST(eid == 0xDEADBEEF);
+}
+
+BOOST_AUTO_TEST_CASE(make_return_pid_roundtrip)
+{
+    auto payload = make_return_pid(99, 3);
+    BOOST_TEST(payload.size() == 9);
+    EntityId eid;
+    memcpy(&eid, payload.data(), 8);
+    BOOST_TEST(eid == 99);
+    BOOST_TEST(payload[8] == 3);
+}
+
+BOOST_AUTO_TEST_CASE(make_entity_id_payload_roundtrip)
+{
+    auto payload = make_entity_id_payload(0xABCD);
+    BOOST_TEST(payload.size() == 8);
+    EntityId eid;
+    memcpy(&eid, payload.data(), 8);
+    BOOST_TEST(eid == 0xABCD);
+}
+
+// -- Full auth → join → return_pid over local transport --
+
+BOOST_AUTO_TEST_CASE(full_auth_and_join_local)
+{
+    auto [ca, cb] = create_transport_pair();
+
+    EntityId returned_pid = invalid_entity;
+    bool join_received = false;
+
+    run_sync([&]() -> asio::awaitable<void> {
+        auto server_task = [&]() -> asio::awaitable<void> {
+            // Auth
+            auto req = co_await cb->read();
+            BOOST_TEST(req.type == NetPacket::auth);
+            co_await cb->write({NetPacket::auth, auth_payload()});
+            // Read join
+            auto join = co_await cb->read();
+            BOOST_TEST(join.type == NetPacket::join);
+            join_received = true;
+            // Send return_pid
+            co_await cb->write({NetPacket::return_pid, make_return_pid(123, 2)});
+        };
+        co_spawn(ITransport::io(), server_task(), asio::detached);
+        co_await asio::steady_timer(ITransport::io(), std::chrono::milliseconds(1))
+            .async_wait(asio::use_awaitable);
+
+        // Client: auth → send join → read return_pid
+        co_await ca->write({NetPacket::auth, auth_payload()});
+        auto auth_res = co_await ca->read();
+        BOOST_TEST(auth_res.type == NetPacket::auth);
+        co_await ca->write({NetPacket::join, {}});
+        auto pid_res = co_await ca->read();
+        BOOST_TEST(pid_res.type == NetPacket::return_pid);
+        BOOST_TEST(pid_res.payload.size() >= 9);
+        memcpy(&returned_pid, pid_res.payload.data(), 8);
+
+        co_await asio::steady_timer(ITransport::io(), std::chrono::milliseconds(10))
+            .async_wait(asio::use_awaitable);
+    }());
+    BOOST_TEST(join_received);
+    BOOST_TEST(returned_pid == 123);
+}
+
+// -- Full TCP auth → join → return_pid --
+
+BOOST_AUTO_TEST_CASE(network_transport_auth_and_join)
+{
+    static constexpr uint16_t kPort = 58889;
+
+    run_sync([]() -> asio::awaitable<void> {
+        auto acceptor = std::make_shared<NetworkTransport::Acceptor>(kPort);
+
+        EntityId returned_pid = invalid_entity;
+
+        // Server side
+        auto server_task = [&]() -> asio::awaitable<void> {
+            auto t = co_await acceptor->accept();
+            auto req = co_await t->read();
+            BOOST_TEST(req.type == NetPacket::auth);
+            co_await t->write({NetPacket::auth, auth_payload()});
+            auto join = co_await t->read();
+            BOOST_TEST(join.type == NetPacket::join);
+            co_await t->write({NetPacket::return_pid, make_return_pid(456, 1)});
+        };
+        co_spawn(ITransport::io(), server_task(), asio::detached);
+
+        // Client side
+        auto peer = co_await NetworkTransport::connect("127.0.0.1", kPort);
+        co_await peer->write({NetPacket::auth, auth_payload()});
+        auto auth_res = co_await peer->read();
+        BOOST_TEST(auth_res.type == NetPacket::auth);
+        co_await peer->write({NetPacket::join, {}});
+        auto pid_res = co_await peer->read();
+        BOOST_TEST(pid_res.type == NetPacket::return_pid);
+        BOOST_TEST(pid_res.payload.size() >= 9);
+        memcpy(&returned_pid, pid_res.payload.data(), 8);
+        BOOST_TEST(returned_pid == 456);
+
+        co_await asio::steady_timer(ITransport::io(), std::chrono::milliseconds(10))
+            .async_wait(asio::use_awaitable);
+    }());
 }
 
 BOOST_AUTO_TEST_SUITE_END()

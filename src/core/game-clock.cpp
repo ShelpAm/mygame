@@ -15,10 +15,9 @@ void Stopwatch::restart()
 float Stopwatch::tick()
 {
     auto now = Clock::now();
-    auto elapsed = std::chrono::duration<float>(now - last_tick_).count();
+    delta_time_ = std::chrono::duration<float>(now - last_tick_).count();
     last_tick_ = now;
 
-    delta_time_ = std::min(elapsed, 0.1f);
     total_time_ += delta_time_;
     ++frame_count_;
 

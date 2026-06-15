@@ -4,7 +4,6 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
 class WorldState {
   public:
@@ -52,6 +51,10 @@ class WorldState {
     void set_season(int s)
     {
         season_ = s % 4;
+    }
+    void set_time_of_day(float t)
+    {
+        time_of_day_ = t;
     }
 
   private:
