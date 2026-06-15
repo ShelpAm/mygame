@@ -29,10 +29,6 @@ class App {
     void run();
     void shutdown();
 
-    auto const &game_clock() const
-    {
-        return game_clock_;
-    }
     LocaleManager const &locale() const
     {
         return locale_;
@@ -83,23 +79,23 @@ class App {
             throw std::runtime_error("Client not initialized");
         return *client_;
     }
-
-    void start_local_session();
-
+    Stopwatch const &stopwatch() const
+    {
+        return stopwatch_;
+    }
     SessionMode session_mode() const
     {
         return session_mode_;
     }
 
+    void start_local_session();
     void start_host_session(int port);
     void start_client_session(std::string const &ip, int port);
 
     void set_ui_language(int lang_index);
     DialogueState const &dialogue() const
     {
-        return session_mode_ == SessionMode::client
-                   ? client_->dialogue()
-                   : game_mode_->dialogue(client_->player_id());
+        return client_->dialogue();
     }
     void end_dialogue()
     {
@@ -127,7 +123,8 @@ class App {
 
   private:
     void process_events();
-    void update(float dt);
+    void update(
+        float dt); // Receives messages from server, and trigger related updates
     void render();
 
     void handle_resize(int new_width, int new_height);
@@ -139,8 +136,9 @@ class App {
     int window_height_ = 450;
     static constexpr char const *window_title = "The Sunset Straits";
 
+    Stopwatch stopwatch_;
+
     InputManager input_;
-    GameClock game_clock_;
     CameraSystem camera_system_;
     NavigationSystem navigation_system_;
     LocaleManager locale_;
@@ -153,7 +151,10 @@ class App {
         asio::make_work_guard(io_);
     std::jthread io_thread_;
 
+    // GameMode 本应运行在另一进程，和client互不影响的，现在只分离线程
     std::unique_ptr<GameMode> game_mode_;
+    std::jthread game_mode_thread_;
+
     std::unique_ptr<Client> client_;
 
     SessionMode session_mode_ = SessionMode::local;

@@ -17,8 +17,6 @@ struct CombatEvent {
 
 class CombatSystem {
   public:
-    void update(flecs::world &world, float dt);
-
     std::vector<CombatEvent> const &events() const
     {
         return events_;
@@ -43,11 +41,4 @@ class CombatSystem {
   private:
     std::vector<CombatEvent> events_;
     std::function<void(EntityId)> dirty_cb_;
-
-    void resolve_combat(flecs::world &world, float dt);
-    void process_soldier_ai(flecs::world &world);
-    EntityId find_nearest_enemy(
-        flecs::world &world, EntityId self, Team my_team,
-        std::unordered_map<EntityId, int> const &extra_damage = {}) const;
-    int calc_damage(int attack, int defense) const;
 };

@@ -4,6 +4,8 @@
 #include <format>
 #include <string_view>
 
+#include "net/sync-io.hpp"
+
 // using Team = uint8_t;
 enum class Team : uint8_t {
     invalid_team = 0,
@@ -51,4 +53,29 @@ struct CombatStats {
     float attack_cooldown = 1.f;
     float cooldown_remaining = 0.f;
     bool alive = true;
+
+    // hp(4) + max_hp(4) + alive(1) + team(1) + attack(4) + defense(4) +
+    // attack_range(4) = 22 bytes
+    static constexpr uint16_t kSyncWireSize = 22;
+
+    void write_sync(SyncWriter &w) const
+    {
+        w.write(hp);
+        w.write(max_hp);
+        w.write(alive);
+        w.write(static_cast<uint8_t>(team));
+        w.write(attack);
+        w.write(defense);
+        w.write(attack_range);
+    }
+    void read_sync(SyncReader &r)
+    {
+        hp = r.read<int>();
+        max_hp = r.read<int>();
+        alive = r.read<bool>();
+        team = static_cast<Team>(r.read<uint8_t>());
+        attack = r.read<int>();
+        defense = r.read<int>();
+        attack_range = r.read<float>();
+    }
 };

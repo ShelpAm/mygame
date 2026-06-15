@@ -71,11 +71,21 @@ void App::init()
     game_mode_->init_world();
     game_mode_->set_navigation(&navigation_system_);
 
+    game_mode_thread_ = std::jthread([this](std::stop_token st) {
+        Stopwatch sw;
+        while (!st.stop_requested()) {
+            auto dt = sw.tick();
+            // 当客户端模式时，节省计算资源
+            if (session_mode_ != SessionMode::client)
+                game_mode_->update(dt);
+        }
+    });
+
     client_ = std::make_unique<Client>(this);
 
     start_local_session();
 
-    game_clock_.restart();
+    stopwatch_.restart();
     running_ = true;
 
     spdlog::info("App: initialization complete");
@@ -103,6 +113,8 @@ void App::start_local_session()
 
 void App::start_client_session(std::string const &host, int port)
 {
+    // TODO: It seems that most of those should be removed to `Client`.
+
     // Resolve domain name if needed.
     std::string resolved_ip = host;
     try {
@@ -129,6 +141,10 @@ void App::start_client_session(std::string const &host, int port)
         ITransport::spawn([](App *self, std::string resolved_ip,
                              auto port) -> awaitable<void> {
             auto peer = co_await NetworkTransport::connect(resolved_ip, port);
+            if (!co_await self->client_->authenticate_transport(peer.get())) {
+                throw std::runtime_error(
+                    "Server verification failed: unexpected response");
+            }
             self->client_->attach_transport(std::move(peer));
 
             self->client_->send_join_request();
@@ -144,7 +160,7 @@ void App::run()
 {
     while (running_) {
         spdlog::trace("App: main loop tick");
-        float dt = game_clock_.tick();
+        auto dt = stopwatch_.tick();
         process_events();
         if (!running_)
             break;
@@ -160,10 +176,12 @@ void App::shutdown()
 
     spdlog::info("App: shutting down");
 
-    if (client_)
-        client_->detach_transport();
-    if (game_mode_)
-        game_mode_->server()->clear_transports();
+    // 似乎不需要了，因为生命周期都是对的了，只要保证 io 比 client，game_mode
+    // 先停。（因为 client，game_mode 没有用 shared_ptr...)
+    // if (client_)
+    //     client_->detach_transport();
+    // if (game_mode_)
+    //     game_mode_->server()->clear_transports();
 
     spdlog::info("App: stopping IO...");
     io_workguard_.reset();
@@ -174,8 +192,11 @@ void App::shutdown()
 
     // Reset after io thread stopped, otherwise coro in attach_transport will
     // use this after freed.
-    client_.reset();
-    game_mode_.reset();
+    // client_.reset();
+    game_mode_thread_.request_stop();
+    if (game_mode_thread_.joinable())
+        game_mode_thread_.join();
+    // game_mode_.reset();
 
     ui_manager_.reset();
     render_system_.reset();
@@ -220,8 +241,6 @@ void App::process_events()
 void App::update(float dt)
 {
     spdlog::trace("App::update dt={} mode={}", dt, (int)session_mode_);
-    if (session_mode_ != SessionMode::client)
-        game_mode_->update(dt);
 
     if (input_.just_pressed(InputManager::Action::help))
         show_help_ = !show_help_;
@@ -259,7 +278,7 @@ void App::update(float dt)
             client_->send_interact();
         if (input_.just_pressed(InputManager::Action::rest))
             client_->send_rest();
-        if (input_.just_pressed(InputManager::Action::recruit))
+        if (input_.is_pressed(InputManager::Action::recruit))
             client_->send_recruit();
         if (input_.just_pressed(InputManager::Action::quick_save))
             quick_save();

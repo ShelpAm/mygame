@@ -2,11 +2,13 @@
 
 #include <chrono>
 
-class GameClock {
+class Stopwatch {
   public:
-    GameClock();
+    Stopwatch();
 
     void restart();
+
+    /// @return Delta time since last tick.
     float tick();
 
     float delta_time() const

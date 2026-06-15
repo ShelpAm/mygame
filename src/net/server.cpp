@@ -1,9 +1,9 @@
 #include "net/server.hpp"
 #include "core/game-mode.hpp"
 #include "net/net-packet.hpp"
-#include "systems/combat-system.hpp"
 #include <cassert>
 #include <cstring>
+#include <ranges>
 #include <spdlog/spdlog.h>
 
 Server::Server()
@@ -18,11 +18,6 @@ Server::~Server()
     // Should wait until next iter of ioc, or triggers `read after free`
 }
 
-void Server::set_combat_system(CombatSystem *cs)
-{
-    cs_ = cs;
-}
-
 void Server::set_game_mode(GameMode *gm)
 {
     game_mode_ = gm;
@@ -35,6 +30,14 @@ awaitable<void> Server::listen(std::uint16_t port)
     try {
         while (acceptor_) {
             auto t = co_await acceptor_->accept();
+
+            if (!co_await authenticate_transport(t.get())) {
+                spdlog::warn("Received non-verification packet from new "
+                             "connection, closing connection");
+                t->close();
+                continue;
+            }
+
             spdlog::info("Accepted new connection from {}",
                          t->socket().remote_endpoint().address().to_string());
             attach_transport(std::move(t));
@@ -198,6 +201,13 @@ void Server::handle_message(ITransport &from, TransportMessage msg)
         auto ev = parse_combat_event(msg.payload);
         game_mode_->apply_damage(ev.defender_id, ev.damage, ev.killed);
     }
+    else if (msg.type == NetPacket::chat) {
+        std::string chat_msg(msg.payload.begin(), msg.payload.end());
+        spdlog::info("Chat message from {}: {}", from.remote_info(), chat_msg);
+        auto payload = make_chat(chat_msg);
+        for (auto &tg : transport_guards_)
+            ITransport::spawn(tg.get()->write({NetPacket::chat, payload}));
+    }
 }
 
 void Server::broadcast_sync()
@@ -243,4 +253,17 @@ void Server::send_dialogue_to(ITransport &to, EntityId pid)
     std::vector<uint8_t> payload;
     serialize_dialogue_sync(payload, game_mode_->dialogue(pid));
     ITransport::spawn(to.write({NetPacket::dialogue_sync, std::move(payload)}));
+}
+
+awaitable<bool> Server::authenticate_transport(ITransport *t)
+{
+    auto req = co_await t->read();
+    if (req.type != NetPacket::auth ||
+        (req.payload | std::ranges::to<std::string>()) != "thesunstraits") {
+        co_return false;
+    }
+    co_await t->write(
+        {NetPacket::auth,
+         "thesunstraits" | std::ranges::to<std::vector<std::uint8_t>>()});
+    co_return true;
 }

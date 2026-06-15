@@ -42,8 +42,8 @@ Vec2f CollisionSystem::resolve_tile_collisions(Vec2f pos, float radius)
                     float to_right = (tx + 1) * TILE - resolved.x;
                     float to_top = resolved.y - ty * TILE;
                     float to_bottom = (ty + 1) * TILE - resolved.y;
-                    float min_push = std::min(
-                        {to_left, to_right, to_top, to_bottom});
+                    float min_push =
+                        std::min({to_left, to_right, to_top, to_bottom});
                     if (min_push == to_left)
                         resolved.x = tx * TILE - radius;
                     else if (min_push == to_right)

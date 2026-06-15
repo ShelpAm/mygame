@@ -39,7 +39,7 @@ BOOST_AUTO_TEST_CASE(add_and_get_component)
 
     e.set<Position>(Position{{10.f, 20.f}, {1, 2}});
 
-    const auto *retrieved = e.try_get<Position>();
+    auto const *retrieved = e.try_get<Position>();
     BOOST_REQUIRE(retrieved != nullptr);
     BOOST_TEST(retrieved->world_pos.x == 10.f);
     BOOST_TEST(retrieved->world_pos.y == 20.f);

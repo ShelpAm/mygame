@@ -1,6 +1,7 @@
 #include "net/network-transport.hpp"
 #include "net/net-packet.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
+#include <ranges>
 #include <spdlog/spdlog.h>
 
 using namespace asio::experimental::awaitable_operators;

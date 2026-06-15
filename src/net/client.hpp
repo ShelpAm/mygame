@@ -31,6 +31,7 @@ struct RemoteEntity {
     // Movement (optional, set when synced)
     Vec2f velocity{0, 0};
     bool moving = false;
+    Vec2f facing{0, -1};
 
     // Interactable
     bool interactable = false;
@@ -58,6 +59,8 @@ class Client {
     {
         return player_team_;
     }
+
+    awaitable<bool> authenticate_transport(ITransport *t);
 
     void send_join_request();
     void send_player_direction(Vec2f dir);
@@ -145,6 +148,7 @@ class Client {
     Vec2f player_pos_, player_target_pos_;
     Vec2f player_velocity_{0, 0};
     bool player_moving_ = false;
+    Vec2f player_facing_{0, -1};
     int player_hp_ = 20, player_max_hp_ = 20;
     int player_attack_ = 4, player_defense_ = 3;
     float player_attack_range_ = 80.f;
@@ -162,7 +166,7 @@ class Client {
                                      TransportMessage)>
         messages_;
 
-    void handle_message(ITransport &from, TransportMessage const &msg);
+    void handle_message(ITransport &from, TransportMessage msg);
     void apply_sync_full(std::vector<uint8_t> const &data);
     void apply_sync_delta(std::vector<uint8_t> const &data);
     void handle_entity_update(NetPacket const &pkt);

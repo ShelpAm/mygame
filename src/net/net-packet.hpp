@@ -18,30 +18,12 @@ enum Mask : uint16_t {
     position = 1 << 1,    // PositionComp      (8 bytes)
     combat = 1 << 2,      // CombatComp        (22 bytes:
                           // hp,max_hp,alive,team,atk,def,range)
-    movement = 1 << 3,    // MovementComp      (9 bytes)
+    movement = 1 << 3,    // MovementComp      (17 bytes:
+                          // vx,vy,moving,fx,fy)
     soldier_ai = 1 << 4,  // SoldierAIComp     (17 bytes)
     interact = 1 << 5,    // InteractComp      (1 byte)
     survival = 1 << 6, // SurvivalComp      (16 bytes: food,water,health,energy)
 };
-constexpr uint16_t wire_size(uint16_t mask)
-{
-    uint16_t sz = 0;
-    if (mask & entity_kind)
-        sz += 1;
-    if (mask & position)
-        sz += 8;
-    if (mask & combat)
-        sz += 22;
-    if (mask & movement)
-        sz += 9;
-    if (mask & soldier_ai)
-        sz += 17;
-    if (mask & interact)
-        sz += 1;
-    if (mask & survival)
-        sz += 16;
-    return sz;
-}
 } // namespace SyncComponent
 
 // Entity kind values for SyncComponent::entity_kind
@@ -57,6 +39,7 @@ enum Value : uint8_t {
 
 struct NetPacket {
     enum Type : uint32_t {
+        auth = -1U,
         join = 0,
         state_full = 1,
         entity_update = 2,
@@ -136,6 +119,9 @@ struct std::formatter<NetPacket::Type> : std::formatter<std::string_view> {
             break;
         case kicked:
             name = "kicked";
+            break;
+        case auth:
+            name = "auth";
             break;
         }
         return std::formatter<std::string_view>::format(name, ctx);
@@ -425,7 +411,6 @@ inline void serialize_dialogue_sync(std::vector<uint8_t> &out,
         out.insert(out.end(), a.begin(), a.end());
     }
     // flags: bit0=can_gift, bit1=can_threaten
-    uint8_t flags =
-        (ds.can_gift ? 1 : 0) | (ds.can_threaten ? 2 : 0);
+    uint8_t flags = (ds.can_gift ? 1 : 0) | (ds.can_threaten ? 2 : 0);
     out.push_back(flags);
 }

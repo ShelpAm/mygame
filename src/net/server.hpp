@@ -6,7 +6,6 @@
 #include <memory>
 #include <unordered_map>
 
-class CombatSystem;
 class GameMode;
 
 class Server {
@@ -16,17 +15,18 @@ class Server {
     Server();
     ~Server();
 
-    void set_combat_system(CombatSystem *cs);
     void set_game_mode(GameMode *gm);
 
     awaitable<void> listen(std::uint16_t port);
     void stop_listen()
     {
         if (acceptor_) {
-            acceptor_->stop(); // No guard here because I'm lazy. :)
+            acceptor_->stop(); // No 'guard' class here because I'm lazy. :)
             acceptor_.reset();
         }
     }
+
+    awaitable<bool> authenticate_transport(ITransport *t);
 
     void attach_transport(std::unique_ptr<ITransport> uniq_t);
     void detach_transport(ITransport *t);
@@ -58,7 +58,6 @@ class Server {
   private:
     std::unordered_map<EntityId, bool> sent_initial_sync_;
     bool needs_full_sync_ = false;
-    CombatSystem *cs_ = nullptr;
     GameMode *game_mode_ = nullptr;
 
     deferred_concurrent_channel<void(boost::system::error_code,

@@ -1,10 +1,10 @@
 #include "core/game-clock.hpp"
-GameClock::GameClock()
+Stopwatch::Stopwatch()
 {
     last_tick_ = Clock::now();
 }
 
-void GameClock::restart()
+void Stopwatch::restart()
 {
     last_tick_ = Clock::now();
     delta_time_ = 0.f;
@@ -12,7 +12,7 @@ void GameClock::restart()
     frame_count_ = 0;
 }
 
-float GameClock::tick()
+float Stopwatch::tick()
 {
     auto now = Clock::now();
     auto elapsed = std::chrono::duration<float>(now - last_tick_).count();

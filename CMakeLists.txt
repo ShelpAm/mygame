@@ -87,10 +87,12 @@ set(HEADERS
     src/entities/components/npc-state.hpp
     src/entities/components/interactable.hpp
     src/entities/components/collider.hpp
+    src/entities/components/player.hpp
     src/systems/render-system.hpp
     src/systems/camera-system.hpp
     src/systems/navigation-system.hpp
     src/systems/collision-system.hpp
+    src/systems/combat-utils.hpp
     src/knowledge/knowledge-graph.hpp
     src/world/world-state.hpp
     src/world/map-data.hpp

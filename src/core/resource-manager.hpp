@@ -7,7 +7,7 @@
 #include <string>
 #include <unordered_map>
 
-class Camera {
+class PhysicalCamera {
   private:
     SDL_Camera *camera = nullptr;
     SDL_Texture *texture = nullptr;
@@ -16,7 +16,7 @@ class Camera {
 
   public:
     // 初始化：遍历所有设备，尝试所有支持的格式，打开第一个可用的
-    Camera()
+    PhysicalCamera()
     {
         spdlog::info("Initializing camera...");
         int devcount = 0;
@@ -82,7 +82,7 @@ class Camera {
     }
 
     // 析构函数：自动安全释放资源
-    ~Camera()
+    ~PhysicalCamera()
     {
         if (camera) {
             SDL_CloseCamera(camera);
@@ -93,8 +93,8 @@ class Camera {
     }
 
     // 禁用拷贝，防止硬件句柄被无意间复制导致多次析构
-    Camera(Camera const &) = delete;
-    Camera &operator=(Camera const &) = delete;
+    PhysicalCamera(PhysicalCamera const &) = delete;
+    PhysicalCamera &operator=(PhysicalCamera const &) = delete;
 
     // 每帧更新：负责从硬件抓取新画面并同步到 GPU 纹理
     void update(SDL_Renderer *renderer)
@@ -160,7 +160,7 @@ class ResourceManager {
                               std::string const &path);
     SDL_Texture *texture(std::string const &name);
 
-    Camera &camera()
+    PhysicalCamera &camera()
     {
         return camera_;
     }
@@ -170,5 +170,5 @@ class ResourceManager {
   private:
     std::unordered_map<std::string, SDL_Texture *> textures_;
     // std::unordered_map<std::string, TTF_Font *> fonts_;
-    Camera camera_;
+    PhysicalCamera camera_;
 };

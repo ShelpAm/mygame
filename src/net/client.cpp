@@ -1,10 +1,16 @@
 #include "net/client.hpp"
 #include "core/app.hpp"
 #include "entities/components/combat-stats.hpp"
+#include "entities/components/movement.hpp"
+#include "entities/components/position.hpp"
+#include "entities/components/soldier-ai.hpp"
 #include "net/net-packet.hpp"
+#include "net/sync-io.hpp"
+#include "survival/condition-tracker.hpp"
 #include <cassert>
 #include <cstring>
 #include <optional>
+#include <ranges>
 #include <spdlog/spdlog.h>
 
 Client::Client(App *app) : app_(app), messages_(ITransport::io(), 128)
@@ -138,7 +144,7 @@ void Client::send_dialogue_action(std::string const &action)
          std::vector<uint8_t>(action.begin(), action.end())}));
 }
 
-void Client::handle_message(ITransport &from, TransportMessage const &msg)
+void Client::handle_message(ITransport &from, TransportMessage msg)
 {
     // Quick handlers: tiny writes that don't touch remote_entities_
     if (msg.type == NetPacket::return_pid) {
@@ -224,7 +230,7 @@ void Client::update(float dt)
 {
     while (messages_.try_receive(
         [this](boost::system::error_code, std::shared_ptr<ITransport> t,
-               TransportMessage msg) { handle_message(*t, msg); })) {
+               TransportMessage msg) { handle_message(*t, std::move(msg)); })) {
     }
 
     if (player_id_ != invalid_entity) {
@@ -307,50 +313,6 @@ static void set_visual_from_kind(RemoteEntity &re)
 
 namespace {
 
-struct SyncParser {
-    uint8_t const *data;
-    size_t size;
-    size_t cursor = 0;
-
-    bool done() const
-    {
-        return cursor >= size;
-    }
-
-    uint64_t read_u64()
-    {
-        uint64_t v;
-        memcpy(&v, data + cursor, 8);
-        cursor += 8;
-        return v;
-    }
-    uint16_t read_u16()
-    {
-        uint16_t v;
-        memcpy(&v, data + cursor, 2);
-        cursor += 2;
-        return v;
-    }
-    float read_f32()
-    {
-        float v;
-        memcpy(&v, data + cursor, 4);
-        cursor += 4;
-        return v;
-    }
-    int32_t read_i32()
-    {
-        int32_t v;
-        memcpy(&v, data + cursor, 4);
-        cursor += 4;
-        return v;
-    }
-    uint8_t read_u8()
-    {
-        return data[cursor++];
-    }
-};
-
 // Per-entity parse result — RemoteEntity plus optional player-only data.
 struct ParsedEntity {
     RemoteEntity re;
@@ -362,48 +324,48 @@ struct ParsedEntity {
 };
 
 // Parse a single entity from the bitmask stream.
-std::optional<ParsedEntity> parse_one_entity(SyncParser &p)
+std::optional<ParsedEntity> parse_one_entity(SyncReader &r)
 {
-    if (p.cursor + 10 > p.size)
+    if (r.remaining() < 10) // id(8) + mask(2)
         return std::nullopt;
     ParsedEntity pe;
     auto &re = pe.re;
-    re.id = p.read_u64();
-    uint16_t mask = p.read_u16();
+    re.id = r.read<uint64_t>();
+    uint16_t mask = r.read<uint16_t>();
 
     if (mask & SyncComponent::entity_kind)
-        re.kind = p.read_u8();
+        re.kind = r.read<uint8_t>();
     if (mask & SyncComponent::position) {
-        re.target_pos.x = p.read_f32();
-        re.target_pos.y = p.read_f32();
+        Position pos;
+        pos.read_sync(r);
+        re.target_pos = pos.world_pos;
     }
     if (mask & SyncComponent::combat) {
-        re.hp = p.read_i32();
-        re.max_hp = p.read_i32();
-        re.alive = p.read_u8();
-        re.team = static_cast<Team>(p.read_u8());
-        pe.attack = p.read_i32();
-        pe.defense = p.read_i32();
-        pe.attack_range = p.read_f32();
+        CombatStats cs;
+        cs.read_sync(r);
+        re.hp = cs.hp;
+        re.max_hp = cs.max_hp;
+        re.alive = cs.alive;
+        re.team = cs.team;
+        pe.attack = cs.attack;
+        pe.defense = cs.defense;
+        pe.attack_range = cs.attack_range;
     }
     if (mask & SyncComponent::movement) {
-        re.velocity.x = p.read_f32();
-        re.velocity.y = p.read_f32();
-        re.moving = p.read_u8();
+        Movement mov;
+        mov.read_sync(r);
+        re.velocity = mov.velocity;
+        re.moving = mov.moving;
+        re.facing = mov.facing;
     }
     if (mask & SyncComponent::soldier_ai) {
-        p.read_u64();       // follow_target
-        p.read_f32();       // formation_offset.x
-        p.read_f32();       // formation_offset.y
-        p.read_u8();        // in_combat
+        SoldierAI ai;
+        ai.read_sync(r);
     }
     if (mask & SyncComponent::interact)
-        re.interactable = p.read_u8();
+        re.interactable = r.read<uint8_t>();
     if (mask & SyncComponent::survival) {
-        pe.survival.food = p.read_f32();
-        pe.survival.water = p.read_f32();
-        pe.survival.health = p.read_f32();
-        pe.survival.energy = p.read_f32();
+        pe.survival.read_sync(r);
         pe.has_survival = true;
     }
 
@@ -414,25 +376,24 @@ std::optional<ParsedEntity> parse_one_entity(SyncParser &p)
 } // namespace
 
 // Skip the 9-byte world-state header: day(4), season(1), time_of_day(4)
-static void parse_world_header(SyncParser &p, WorldState &ws)
+static void parse_world_header(SyncReader &r, WorldState &ws)
 {
-    if (p.cursor + 9 > p.size)
+    if (r.remaining() < 9)
         return;
-    ws.set_day(p.read_i32());
-    ws.set_season(p.read_u8());
-    // time_of_day: skip the float (we don't use it directly via WorldState API)
-    p.read_f32();
+    ws.set_day(r.read<int32_t>());
+    ws.set_season(r.read<uint8_t>());
+    r.read<float>(); // time_of_day: skip
 }
 
 void Client::apply_sync_full(std::vector<uint8_t> const &data)
 {
     std::unordered_set<EntityId> seen;
-    SyncParser p{data.data(), data.size()};
+    SyncReader r{data.data(), data.size()};
 
-    parse_world_header(p, world_state_);
+    parse_world_header(r, world_state_);
 
-    while (!p.done()) {
-        auto opt = parse_one_entity(p);
+    while (!r.done()) {
+        auto opt = parse_one_entity(r);
         if (!opt)
             break;
         auto &pe = *opt;
@@ -446,6 +407,7 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
             player_alive_ = re.alive;
             player_velocity_ = re.velocity;
             player_moving_ = re.moving;
+            player_facing_ = re.facing;
             player_team_ = re.team;
             player_attack_ = pe.attack;
             player_defense_ = pe.defense;
@@ -473,6 +435,7 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
             rp->team = re.team;
             rp->velocity = re.velocity;
             rp->moving = re.moving;
+            rp->facing = re.facing;
             rp->interactable = re.interactable;
             set_visual_from_kind(*rp);
         }
@@ -486,12 +449,12 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
 
 void Client::apply_sync_delta(std::vector<uint8_t> const &data)
 {
-    SyncParser p{data.data(), data.size()};
+    SyncReader r{data.data(), data.size()};
 
-    parse_world_header(p, world_state_);
+    parse_world_header(r, world_state_);
 
-    while (!p.done()) {
-        auto opt = parse_one_entity(p);
+    while (!r.done()) {
+        auto opt = parse_one_entity(r);
         if (!opt)
             break;
         auto &pe = *opt;
@@ -504,6 +467,7 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
             player_alive_ = re.alive;
             player_velocity_ = re.velocity;
             player_moving_ = re.moving;
+            player_facing_ = re.facing;
             player_team_ = re.team;
             player_attack_ = pe.attack;
             player_defense_ = pe.defense;
@@ -530,6 +494,7 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
             rp->team = re.team;
             rp->velocity = re.velocity;
             rp->moving = re.moving;
+            rp->facing = re.facing;
             rp->interactable = re.interactable;
             set_visual_from_kind(*rp);
         }
@@ -603,4 +568,17 @@ void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
     }
     dialogue_.available_topics = std::move(s.topics);
     dialogue_.available_actions = std::move(s.actions);
+}
+
+awaitable<bool> Client::authenticate_transport(ITransport *t)
+{
+    // Verifies authority of server
+    co_await t->write(
+        {.type = NetPacket::auth,
+         .payload = "thesunstraits" | std::ranges::to<std::vector<uint8_t>>()});
+    auto res = co_await t->read();
+    if (res.type != NetPacket::auth ||
+        (res.payload | std::ranges::to<std::string>()) != "thesunstraits")
+        co_return false;
+    co_return true;
 }

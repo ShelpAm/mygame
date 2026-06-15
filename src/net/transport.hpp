@@ -27,7 +27,8 @@ using deferred_concurrent_channel =
     default_token::as_default_on_t<asio::experimental::concurrent_channel<T>>;
 
 struct TransportMessage {
-    NetPacket::Type type;
+    using Type = NetPacket::Type;
+    Type type;
     std::vector<uint8_t> payload;
 };
 

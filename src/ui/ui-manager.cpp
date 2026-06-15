@@ -135,7 +135,7 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
                 loc.language_name().c_str());
 
     ImGui::SameLine();
-    ImGui::Text(" | %s: %.02f", "FPS", app.game_clock().fps());
+    ImGui::Text(" | %s: %.02f", "FPS", app.stopwatch().fps());
 
     ImGui::Separator();
 
