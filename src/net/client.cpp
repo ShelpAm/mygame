@@ -53,11 +53,16 @@ awaitable<void> Client::attach_transport(std::shared_ptr<ITransport> t)
             }
         }
         catch (boost::system::system_error const &e) {
-            c->detach_transport();
+            // If passive, notify. If active, transport_guard_ may be guarding
+            // others.
+            if (t == c->transport_guard_->get())
+                c->detach_transport();
             if (e.code() == asio::error::operation_aborted ||
                 e.code() == asio::error::eof ||
                 e.code() == asio::experimental::error::channel_closed ||
                 e.code() == asio::experimental::error::channel_cancelled) {
+                spdlog::debug("Client: transport {} closed because {}",
+                              t->remote_info(), e.what());
                 co_return; // Normal exits
             }
             throw;

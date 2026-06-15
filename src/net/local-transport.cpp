@@ -20,7 +20,8 @@ awaitable<void> LocalTransportEndpoint::write(TransportMessage msg)
 {
     if (!peer_)
         throw std::runtime_error(
-            "LocalTransportEndpoint: write to disconnected peer");
+            "LocalTransportEndpoint: write to disconnected peer " +
+            remote_info());
 
     co_await peer_->channel_.async_send(boost::system::error_code(),
                                         {msg.type, msg.payload});
@@ -39,11 +40,17 @@ bool LocalTransportEndpoint::is_open() const
 void LocalTransportEndpoint::close()
 {
     if (peer_) {
-        peer_->channel_.close(); // cancel peer's pending reads
+        if (peer_->channel_.is_open()) {
+            peer_->channel_.cancel();
+            peer_->channel_.close(); // cancel peer's pending reads
+        }
         peer_->peer_ = nullptr;
         peer_ = nullptr;
     }
-    channel_.close(); // cancel our pending reads
+    if (channel_.is_open()) {
+        channel_.cancel();
+        channel_.close(); // cancel our pending reads
+    }
 }
 
 std::pair<std::shared_ptr<LocalTransportEndpoint>,

@@ -504,8 +504,12 @@ void UIManager::render_local(App &app)
 void UIManager::render_client(App &app)
 {
     auto const &loc = app.locale();
-    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s",
-                       loc.get("mp.connected").c_str());
+    ImGui::TextColored(
+        ImVec4(0.3f, 1.f, 0.3f, 1.f),
+        "%s Host: %s", // FIXME: i18n
+                       // support
+        loc.get("mp.connected").c_str(),
+        app.client().transport_guard()->get()->remote_info().c_str());
     ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
                 app.client().remote_entities().size());
     ImGui::Separator();

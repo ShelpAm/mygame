@@ -83,6 +83,8 @@ awaitable<void> Server::attach_transport(std::shared_ptr<ITransport> t)
                 e.code() == asio::error::eof ||
                 e.code() == asio::experimental::error::channel_closed ||
                 e.code() == asio::experimental::error::channel_cancelled) {
+                spdlog::debug("Server: transport {} closed because {}",
+                              t->remote_info(), e.what());
                 co_return; // Normal exits
             }
             throw;
@@ -150,6 +152,7 @@ void Server::handle_message(std::shared_ptr<ITransport> from,
             }(from, std::move(payload)));
         spdlog::info("Server: new player joined with ID: {} team: {}", eid,
                      static_cast<std::uint8_t>(team));
+        mark_needs_full_sync("new player joined");
     }
     else if (msg.type == NetPacket::entity_update) {
         auto u = parse_entity_update(msg.payload);
@@ -227,12 +230,13 @@ void Server::broadcast_sync()
     std::vector<uint8_t> payload;
     if (needs_full) {
         // reason
-        spdlog::info("Server: full sync reason: {}", needs_full_sync_.second);
+        spdlog::debug("Server: full sync reason: {}", needs_full_sync_.second);
         payload = game_mode_->build_full_payload();
         pkt_type = NetPacket::state_full;
         // frame_counter = 0;
     }
     else if (game_mode_->has_dirty_entities()) {
+        spdlog::trace("Server: dirty update");
         payload = game_mode_->build_dirty_payload();
         pkt_type = NetPacket::state_delta;
     }

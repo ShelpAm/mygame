@@ -138,13 +138,12 @@ void App::start_client_session(std::string const &host, int port)
     }
 
     try {
-        auto attach = [](App *self, std::string resolved_ip,
+        auto attach = [](App *app, std::string resolved_ip,
                          auto port) -> awaitable<void> {
             auto t = co_await NetworkTransport::connect(resolved_ip, port);
-            co_await self->client_->attach_transport(std::move(t));
-
-            self->client_->send_join_request();
-            self->session_mode_ = SessionMode::client;
+            co_await app->client_->attach_transport(std::move(t));
+            app->client_->send_join_request();
+            app->session_mode_ = SessionMode::client;
         };
         ITransport::spawn(attach(this, resolved_ip, port));
     }

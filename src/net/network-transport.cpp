@@ -76,7 +76,9 @@ NetworkTransport::~NetworkTransport()
 awaitable<void> NetworkTransport::write(TransportMessage msg)
 {
     if (!socket_.is_open())
-        throw std::runtime_error("NetworkTransport::write: socket is not open");
+        throw std::runtime_error(
+            "NetworkTransport::write: socket is not open/closed " +
+            remote_info());
 
     spdlog::log(msg.type == NetPacket::state_delta ? spdlog::level::trace
                                                    : spdlog::level::debug,
@@ -118,7 +120,10 @@ bool NetworkTransport::is_open() const
 
 void NetworkTransport::close()
 {
-    socket_.close();
+    if (socket_.is_open()) {
+        socket_.cancel();
+        socket_.close();
+    }
 }
 
 tcp_socket &NetworkTransport::socket()

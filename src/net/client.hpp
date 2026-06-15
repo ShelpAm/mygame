@@ -77,9 +77,9 @@ class Client {
 
     awaitable<void> attach_transport(std::shared_ptr<ITransport> t);
     void detach_transport();
-    TransportGuard const &transport_guard() const
+    TransportGuard const *transport_guard() const
     {
-        return *transport_guard_;
+        return transport_guard_.get();
     }
 
     void interpolate_entities(float dt);

@@ -36,7 +36,6 @@ class Server {
     void mark_needs_full_sync(std::string reason)
     {
         needs_full_sync_ = {true, reason};
-        spdlog::info("reason! {}", reason);
     }
     bool check_needs_full_sync()
     {
