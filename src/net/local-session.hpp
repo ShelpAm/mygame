@@ -1,18 +1,17 @@
 #pragma once
 
-#include "net/transport.hpp"
+#include "net/session.hpp"
 #include <boost/asio/experimental/channel.hpp>
 #include <memory>
 #include <utility>
 
-class LocalTransportEndpoint
-    : public ITransport,
-      public std::enable_shared_from_this<LocalTransportEndpoint> {
+class LocalSession : public Session,
+                     public std::enable_shared_from_this<LocalSession> {
   public:
-    LocalTransportEndpoint();
-    ~LocalTransportEndpoint();
+    LocalSession();
+    ~LocalSession();
 
-    void set_peer(LocalTransportEndpoint *peer);
+    void set_peer(std::weak_ptr<LocalSession> peer);
 
     awaitable<void> write(TransportMessage msg) override;
     awaitable<TransportMessage> read() override;
@@ -21,12 +20,11 @@ class LocalTransportEndpoint
     std::string remote_info() const override;
 
   private:
-    LocalTransportEndpoint *peer_ = nullptr;
+    std::weak_ptr<LocalSession> peer_;
     deferred_concurrent_channel<void(boost::system::error_code,
                                      TransportMessage)>
         channel_; // Read channel
 };
 
-std::pair<std::shared_ptr<LocalTransportEndpoint>,
-          std::shared_ptr<LocalTransportEndpoint>>
-create_transport_pair();
+std::pair<std::shared_ptr<LocalSession>, std::shared_ptr<LocalSession>>
+create_local_transport_pair();

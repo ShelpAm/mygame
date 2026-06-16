@@ -15,7 +15,7 @@
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "knowledge/rumor-propagator.hpp"
-#include "net/local-transport.hpp"
+#include "net/local-session.hpp"
 #include "net/server.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/collision-system.hpp"
@@ -343,7 +343,7 @@ void GameMode::init_world()
 
 void GameMode::start_host(int port)
 {
-    ITransport::spawn([](GameMode *self, auto port) -> awaitable<void> {
+    Session::spawn([](GameMode *self, auto port) -> awaitable<void> {
         co_await self->server_->listen(port);
     }(this, port));
 }
@@ -353,9 +353,9 @@ void GameMode::stop_host()
     server_->stop_listen();
     // Keeps current local client
     // Don't server_->clear_transports();
-    for (auto const &tg : server_->transports_guards()) {
-        if (typeid(tg.get().get()) == typeid(LocalTransportEndpoint *)) {
-            server_->kick(tg.get(), "Host stopped the session");
+    for (auto const &s : server_->sessions()) {
+        if (typeid(s.get()) == typeid(LocalSession *)) {
+            server_->kick(s, "Host stopped the session");
         }
     }
 }
@@ -765,7 +765,6 @@ void GameMode::check_event_spawns()
         auto &latest = events_->triggered_events().back();
         if (latest.type == GameEvent::Type::battle ||
             latest.type == GameEvent::Type::refugee_wave) {
-            spdlog::critical("Wave");
             spawn_enemy_wave(25 + rand() % 50, pp.world_pos, 400.f,
                              Team::enemy);
         }
@@ -775,10 +774,17 @@ void GameMode::check_event_spawns()
 void GameMode::update(float dt)
 {
     while (server_->messages().try_receive([this](boost::system::error_code,
-                                                  std::shared_ptr<ITransport> t,
+                                                  std::shared_ptr<Session> t,
                                                   TransportMessage msg) {
         server_->handle_message(std::move(t), std::move(msg));
     })) {
+    }
+
+    while (server_->player_detachments().try_receive(
+        [this](boost::system::error_code, EntityId eid) {
+            remove_player(eid);
+            server_->broadcast_entity_removed(eid);
+        })) {
     }
 
     dt_ = std::chrono::duration<double>(dt);
@@ -797,8 +803,8 @@ void GameMode::update(float dt)
         push(ev.defender_id);
         push(ev.damage);
         p.push_back(ev.killed ? 1 : 0);
-        for (auto &tg : server_->transport_guards_)
-            ITransport::spawn(tg.get()->write({NetPacket::combat_event, p}));
+        for (auto &tg : server_->sessions_)
+            Session::spawn(tg.get()->write({NetPacket::combat_event, p}));
     }
     pending_combat_events_.clear();
 

@@ -1,4 +1,4 @@
-#include "net/network-transport.hpp"
+#include "net/network-session.hpp"
 #include "net/net-packet.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <ranges>
@@ -6,7 +6,7 @@
 
 using namespace asio::experimental::awaitable_operators;
 
-NetworkTransport::NetworkTransport(tcp::socket sock) : socket_(std::move(sock))
+NetworkSession::NetworkSession(tcp::socket sock) : socket_(std::move(sock))
 {
     if (!socket_.is_open())
         throw std::runtime_error("NetworkTransport: socket is not open (why do "
@@ -17,31 +17,30 @@ NetworkTransport::NetworkTransport(tcp::socket sock) : socket_(std::move(sock))
                     std::to_string(socket_.remote_endpoint().port()));
 }
 
-NetworkTransport::Acceptor::Acceptor(std::uint16_t port)
-    : impl_(std::make_shared<tcp_acceptor>(ITransport::io(),
+NetworkSession::Acceptor::Acceptor(std::uint16_t port)
+    : impl_(std::make_shared<tcp_acceptor>(Session::io(),
                                            tcp::endpoint(tcp::v4(), port)))
 {
 }
 
-awaitable<std::shared_ptr<NetworkTransport>>
-NetworkTransport::Acceptor::accept()
+awaitable<std::shared_ptr<NetworkSession>> NetworkSession::Acceptor::accept()
 {
     auto self = shared_from_this(); // Keeps lifespan of itself
     auto sock = co_await impl_->async_accept();
-    co_return std::make_shared<NetworkTransport>(std::move(sock));
+    co_return std::make_shared<NetworkSession>(std::move(sock));
 }
 
-void NetworkTransport::Acceptor::stop()
+void NetworkSession::Acceptor::stop()
 {
     if (impl_ && impl_->is_open())
         impl_->close();
 }
 
-awaitable<std::shared_ptr<NetworkTransport>>
-NetworkTransport::connect(std::string const &ip, int port)
+awaitable<std::shared_ptr<NetworkSession>>
+NetworkSession::connect(std::string const &ip, int port)
 {
     spdlog::info("NetworkTransport: initiating connection to {}:{}", ip, port);
-    auto t = std::make_shared<NetworkTransport>();
+    auto t = std::make_shared<NetworkSession>();
     auto ep = tcp::endpoint(asio::ip::make_address(ip), port);
 
     asio::steady_timer timer(io(), std::chrono::seconds(5));
@@ -68,12 +67,12 @@ NetworkTransport::connect(std::string const &ip, int port)
     co_return t;
 }
 
-NetworkTransport::~NetworkTransport()
+NetworkSession::~NetworkSession()
 {
     close();
 }
 
-awaitable<void> NetworkTransport::write(TransportMessage msg)
+awaitable<void> NetworkSession::write(TransportMessage msg)
 {
     if (!socket_.is_open())
         throw std::runtime_error(
@@ -89,7 +88,7 @@ awaitable<void> NetworkTransport::write(TransportMessage msg)
     co_await asio::async_write(socket_, asio::buffer(write_buffer_));
 }
 
-awaitable<TransportMessage> NetworkTransport::read()
+awaitable<TransportMessage> NetworkSession::read()
 {
     // Deserialize the packet
     auto [ec_head, _] = co_await asio::async_read(
@@ -113,12 +112,12 @@ awaitable<TransportMessage> NetworkTransport::read()
                                .payload = read_body_buffer_};
 }
 
-bool NetworkTransport::is_open() const
+bool NetworkSession::is_open() const
 {
     return socket_.is_open();
 }
 
-void NetworkTransport::close()
+void NetworkSession::close()
 {
     if (socket_.is_open()) {
         socket_.cancel();
@@ -126,11 +125,11 @@ void NetworkTransport::close()
     }
 }
 
-tcp_socket &NetworkTransport::socket()
+tcp_socket &NetworkSession::socket()
 {
     return socket_;
 }
-std::string NetworkTransport::remote_info() const
+std::string NetworkSession::remote_info() const
 {
     // if (!is_open())
     //     throw std::runtime_error(

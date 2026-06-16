@@ -3,8 +3,7 @@
 #include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "entities/components/combat-stats.hpp"
-#include "net/transport-guard.hpp"
-#include "net/transport.hpp"
+#include "net/session.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/quest-manager.hpp"
@@ -60,7 +59,7 @@ class Client {
     }
 
     // Verifies authority of server
-    awaitable<bool> authenticate_transport(std::shared_ptr<ITransport> t);
+    awaitable<bool> authenticate_transport(std::shared_ptr<Session> t);
 
     void send_join_request();
     void send_player_direction(Vec2f dir);
@@ -75,11 +74,20 @@ class Client {
     bool is_player_dead();
     CombatStats const *player_stats();
 
-    awaitable<void> attach_transport(std::shared_ptr<ITransport> t);
-    void detach_transport();
-    TransportGuard const *transport_guard() const
+    awaitable<void> attach_transport(std::shared_ptr<Session> t);
+
+    /// @brief Asynchronously disconnects from the current session, if exists.
+    void close_current_session()
     {
-        return transport_guard_.get();
+        if (session_) {
+            session_->close();
+            session_.reset();
+        }
+    }
+
+    Session *session() const
+    {
+        return session_.get();
     }
 
     void interpolate_entities(float dt);
@@ -138,6 +146,15 @@ class Client {
     }
 
   private:
+    // Only the read_loop in attach_transport may construct this token
+    struct detach_token {
+        explicit detach_token() = default;
+    };
+
+    // For developer of this class:
+    //   Don't call this directly, use kick() or close the connection instead.
+    void detach_transport(detach_token, Session *);
+
     App *app_;
     WorldState world_state_;
     SurvivalState player_survival_;
@@ -153,19 +170,21 @@ class Client {
     float player_attack_range_ = 80.f;
     bool player_alive_ = true;
 
-    std::unique_ptr<TransportGuard> transport_guard_;
+    // std::queue<TransportGuard> transport_guards_; // Because there could be
+    // some connections keeping unclosed, we set a queue here to wait them.
+
+    std::shared_ptr<Session> session_;
     std::vector<RemoteEntity> remote_entities_;
     std::vector<CombatEvent> combat_events_;
     std::vector<std::string> chat_history_;
     DialogueState dialogue_;
 
     // Deferred sync processing (io_context thread → main thread)
-    deferred_concurrent_channel<void(boost::system::error_code,
-                                     std::shared_ptr<ITransport>,
-                                     TransportMessage)>
+    deferred_concurrent_channel<void(
+        boost::system::error_code, std::shared_ptr<Session>, TransportMessage)>
         messages_;
 
-    void handle_message(ITransport &from, TransportMessage msg);
+    void handle_message(Session &from, TransportMessage msg);
     void apply_sync_full(std::vector<uint8_t> const &data);
     void apply_sync_delta(std::vector<uint8_t> const &data);
     void handle_entity_update(NetPacket const &pkt);

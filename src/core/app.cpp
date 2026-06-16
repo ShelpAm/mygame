@@ -3,9 +3,10 @@
 #include "core/game-mode.hpp"
 #include "core/resource-manager.hpp"
 #include "dialogue/dialogue-engine.hpp"
-#include "net/local-transport.hpp"
-#include "net/network-transport.hpp"
+#include "net/local-session.hpp"
+#include "net/network-session.hpp"
 #include "net/server.hpp"
+#include "net/session.hpp"
 #include "systems/render-system.hpp"
 #include "ui/ui-manager.hpp"
 #include <boost/asio.hpp>
@@ -63,7 +64,7 @@ void App::init()
             spdlog::error("IO thread error: {}", e.what());
         }
     });
-    ITransport::set_io(&io_);
+    Session::set_io(&io_);
 
     game_mode_ = std::make_unique<GameMode>();
     game_mode_->init_world();
@@ -97,8 +98,9 @@ void App::start_host_session(int port)
 
 void App::start_local_session()
 {
-    client_->detach_transport();
-    auto [srv, cli] = create_transport_pair();
+    client_->close_current_session();
+
+    auto [srv, cli] = create_local_transport_pair();
     spdlog::info("App: spawned two transports: srv = {}, cli = {}",
                  srv->remote_info(), cli->remote_info());
 
@@ -108,12 +110,12 @@ void App::start_local_session()
         app->client_->send_join_request();
         app->session_mode_ = SessionMode::local;
     };
-    ITransport::spawn(do_attach(this, srv, cli));
+    Session::spawn(do_attach(this, srv, cli));
 }
 
 void App::start_client_session(std::string const &host, int port)
 {
-    // TODO: It seems that most of those should be removed to `Client`.
+    client_->close_current_session();
 
     // Resolve domain name if needed.
     std::string resolved_ip = host;
@@ -140,12 +142,12 @@ void App::start_client_session(std::string const &host, int port)
     try {
         auto attach = [](App *app, std::string resolved_ip,
                          auto port) -> awaitable<void> {
-            auto t = co_await NetworkTransport::connect(resolved_ip, port);
+            auto t = co_await NetworkSession::connect(resolved_ip, port);
             co_await app->client_->attach_transport(std::move(t));
             app->client_->send_join_request();
             app->session_mode_ = SessionMode::client;
         };
-        ITransport::spawn(attach(this, resolved_ip, port));
+        Session::spawn(attach(this, resolved_ip, port));
     }
     catch (std::exception &e) {
         spdlog::error("Connect failed: {}, aborting", e.what());

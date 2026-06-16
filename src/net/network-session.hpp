@@ -1,14 +1,14 @@
 #pragma once
 
-#include "net/transport.hpp"
+#include "net/session.hpp"
 #include <memory>
 #include <vector>
 
 using tcp_socket = default_token::as_default_on_t<tcp::socket>;
 using tcp_acceptor = default_token::as_default_on_t<tcp::acceptor>;
 
-class NetworkTransport : public ITransport,
-                         public std::enable_shared_from_this<NetworkTransport> {
+class NetworkSession : public Session,
+                       public std::enable_shared_from_this<NetworkSession> {
   public:
     class Acceptor : public std::enable_shared_from_this<Acceptor> {
       public:
@@ -17,18 +17,18 @@ class NetworkTransport : public ITransport,
         Acceptor &operator=(Acceptor &&) noexcept = default;
         ~Acceptor() = default;
 
-        awaitable<std::shared_ptr<NetworkTransport>> accept();
+        awaitable<std::shared_ptr<NetworkSession>> accept();
         void stop();
 
       private:
         std::shared_ptr<tcp_acceptor> impl_{};
     };
 
-    NetworkTransport() = default;
-    explicit NetworkTransport(tcp::socket sock);
-    ~NetworkTransport();
+    NetworkSession() = default;
+    explicit NetworkSession(tcp::socket sock);
+    ~NetworkSession();
 
-    static awaitable<std::shared_ptr<NetworkTransport>>
+    static awaitable<std::shared_ptr<NetworkSession>>
     connect(std::string const &ip, int port);
 
     awaitable<void> write(TransportMessage msg) override;

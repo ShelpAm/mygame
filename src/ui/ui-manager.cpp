@@ -365,6 +365,7 @@ void UIManager::render_multiplayer_menu(App const &app)
         const_cast<App &>(app).set_show_multiplayer(false);
 
     auto &mutApp = const_cast<App &>(app);
+
     switch (app.session_mode()) {
     case SessionMode::local:
         render_local(mutApp);
@@ -504,12 +505,11 @@ void UIManager::render_local(App &app)
 void UIManager::render_client(App &app)
 {
     auto const &loc = app.locale();
-    ImGui::TextColored(
-        ImVec4(0.3f, 1.f, 0.3f, 1.f),
-        "%s Host: %s", // FIXME: i18n
-                       // support
-        loc.get("mp.connected").c_str(),
-        app.client().transport_guard()->get()->remote_info().c_str());
+    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f),
+                       "%s Host: %s", // FIXME: i18n
+                                      // support
+                       loc.get("mp.connected").c_str(),
+                       app.client().session()->remote_info().c_str());
     ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
                 app.client().remote_entities().size());
     ImGui::Separator();
@@ -525,7 +525,7 @@ void UIManager::render_client_list(App &app)
     auto const &loc = app.locale();
     auto *server = app.game_mode().server();
 
-    if (server->transports_guards().empty()) {
+    if (server->sessions().empty()) {
         ImGui::TextDisabled("%s", loc.get("mp.no_clients").c_str());
         return;
     }
@@ -549,7 +549,7 @@ void UIManager::render_client_list(App &app)
                                     50.0f);
             ImGui::TableHeadersRow();
 
-            for (auto const &tg : server->transports_guards()) {
+            for (auto const &tg : server->sessions()) {
                 ImGui::TableNextRow();
 
                 // ID
@@ -558,7 +558,7 @@ void UIManager::render_client_list(App &app)
 
                 // Address
                 ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%p", tg.get().get());
+                ImGui::Text("%p", tg.get());
 
                 // Status
                 ImGui::TableSetColumnIndex(2);
@@ -573,9 +573,9 @@ void UIManager::render_client_list(App &app)
 
                 // Kick
                 ImGui::TableSetColumnIndex(3);
-                ImGui::PushID(tg.get().get());
+                ImGui::PushID(tg.get());
                 if (ImGui::SmallButton("X"))
-                    server->kick(tg.get(), "kicked by host");
+                    server->kick(tg, "kicked by host");
                 ImGui::PopID();
             }
 

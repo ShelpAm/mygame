@@ -21,10 +21,10 @@ void EventSimulator::update(int current_day)
 {
     for (auto &event : events_) {
         if (!event.triggered && event.trigger_day <= current_day) {
-            spdlog::critical("applying event: {}, is refugee or battle = {}",
-                             event.description,
-                             event.type == GameEvent::Type::refugee_wave ||
-                                 event.type == GameEvent::Type::battle);
+            spdlog::debug("applying event: {}, is refugee or battle = {}",
+                          event.description,
+                          event.type == GameEvent::Type::refugee_wave ||
+                              event.type == GameEvent::Type::battle);
             apply_event(event, current_day);
         }
     }

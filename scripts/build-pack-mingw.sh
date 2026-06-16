@@ -8,3 +8,5 @@ conan install . -b missing -s build_type=Release -pr mingw64
 
 cmake --preset conan-release
 cmake --build --preset conan-release
+
+tar -czf ./build/Release/thesunsetstraits.tar.gz -C ./build/Release TheSunsetStraits.exe -C ./ assets

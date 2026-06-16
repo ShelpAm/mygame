@@ -40,7 +40,7 @@ struct TransportMessage {
 // or across the network (NetworkTransport wrapping sockets).
 //
 // ITrasnsport implements a custom protocol design for the game.
-class ITransport {
+class Session {
   public:
     static void set_io(asio::io_context *io)
     {
@@ -78,7 +78,7 @@ class ITransport {
     }
 
   public:
-    virtual ~ITransport() = default;
+    virtual ~Session() = default;
 
     // Push a message to the peer. Non-blocking.
     virtual awaitable<void> write(TransportMessage msg) = 0;

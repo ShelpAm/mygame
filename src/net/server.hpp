@@ -1,8 +1,7 @@
 #pragma once
 
-#include "net/network-transport.hpp"
-#include "net/transport-guard.hpp"
-#include "net/transport.hpp"
+#include "net/network-session.hpp"
+#include "net/session.hpp"
 #include <memory>
 #include <unordered_map>
 
@@ -26,12 +25,12 @@ class Server {
         }
     }
 
-    awaitable<bool> authenticate_transport(std::shared_ptr<ITransport> t);
+    awaitable<bool> authenticate_transport(std::shared_ptr<Session> t);
 
-    awaitable<void> attach_transport(std::shared_ptr<ITransport> t);
-    void detach_transport(ITransport *t);
+    awaitable<void> attach_transport(std::shared_ptr<Session> t);
+
     void clear_transports();
-    void kick(std::shared_ptr<ITransport> t, std::string const &reason);
+    void kick(std::shared_ptr<Session> t, std::string const &reason);
 
     void mark_needs_full_sync(std::string reason)
     {
@@ -44,9 +43,9 @@ class Server {
         return v;
     }
 
-    auto const &transports_guards() const
+    auto const &sessions() const
     {
-        return transport_guards_;
+        return sessions_;
     }
 
     auto &messages()
@@ -54,24 +53,38 @@ class Server {
         return messages_;
     }
 
+    auto &player_detachments()
+    {
+        return player_detachments_;
+    }
+
   private:
+    // Only the read_loop in attach_transport may construct this token
+    struct detach_token {
+        explicit detach_token() = default;
+    };
+
+    // For developer of this class:
+    //   Don't call this directly, use kick() or close the connection instead.
+    void detach_transport(detach_token, Session *t);
+
     std::unordered_map<EntityId, bool> sent_initial_sync_;
     std::pair<bool, std::string> needs_full_sync_{false, ""};
     GameMode *game_mode_ = nullptr;
 
-    deferred_concurrent_channel<void(boost::system::error_code,
-                                     std::shared_ptr<ITransport>,
-                                     TransportMessage)>
+    deferred_concurrent_channel<void(
+        boost::system::error_code, std::shared_ptr<Session>, TransportMessage)>
         messages_;
+    deferred_concurrent_channel<void(boost::system::error_code, EntityId)>
+        player_detachments_;
 
-    std::unordered_map<ITransport *, EntityId> player_transport_;
+    std::unordered_map<Session *, EntityId> player_eid_of_session_;
     std::uint8_t next_team_;
-    std::shared_ptr<NetworkTransport::Acceptor> acceptor_;
-    std::vector<TransportGuard>
-        transport_guards_; // Ensures lifetime of transports.
+    std::shared_ptr<NetworkSession::Acceptor> acceptor_;
+    std::vector<std::shared_ptr<Session>> sessions_;
 
     void broadcast_sync();
     void broadcast_entity_removed(EntityId eid);
-    void handle_message(std::shared_ptr<ITransport> from, TransportMessage msg);
-    void send_dialogue_to(std::shared_ptr<ITransport> to, EntityId pid);
+    void handle_message(std::shared_ptr<Session> from, TransportMessage msg);
+    void send_dialogue_to(std::shared_ptr<Session> to, EntityId pid);
 };

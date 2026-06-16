@@ -12,7 +12,7 @@
 #include <optional>
 #include <spdlog/spdlog.h>
 
-Client::Client(App *app) : app_(app), messages_(ITransport::io(), 128)
+Client::Client(App *app) : app_(app), messages_(Session::io(), 128)
 {
     spdlog::info("Client: initialized");
 }
@@ -22,7 +22,7 @@ Client::~Client()
     spdlog::info("Client: destructing this");
 }
 
-awaitable<void> Client::attach_transport(std::shared_ptr<ITransport> t)
+awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
 {
     spdlog::debug("Client: attaching transport {}", t->remote_info());
 
@@ -32,12 +32,12 @@ awaitable<void> Client::attach_transport(std::shared_ptr<ITransport> t)
 
     spdlog::info("Client: auth successful ({})", t->remote_info());
 
-    transport_guard_ = std::make_unique<TransportGuard>(t);
+    session_ = t;
     spdlog::info("Client: transport ({}) attached", t->remote_info());
 
     // Note to ensure that `c` should outlive this coro.
     auto reading_loop = [](Client *c,
-                           std::shared_ptr<ITransport> t) -> awaitable<void> {
+                           std::shared_ptr<Session> t) -> awaitable<void> {
         try {
             while (true) {
                 auto msg = co_await t->read();
@@ -55,8 +55,7 @@ awaitable<void> Client::attach_transport(std::shared_ptr<ITransport> t)
         catch (boost::system::system_error const &e) {
             // If passive, notify. If active, transport_guard_ may be guarding
             // others.
-            if (t == c->transport_guard_->get())
-                c->detach_transport();
+            c->detach_transport(detach_token{}, t.get());
             if (e.code() == asio::error::operation_aborted ||
                 e.code() == asio::error::eof ||
                 e.code() == asio::experimental::error::channel_closed ||
@@ -68,20 +67,14 @@ awaitable<void> Client::attach_transport(std::shared_ptr<ITransport> t)
             throw;
         }
     };
-    ITransport::spawn(reading_loop(this, t));
+    Session::spawn(reading_loop(this, t));
 }
 
-void Client::detach_transport()
+void Client::detach_transport(detach_token, Session *s)
 {
-    if (transport_guard_) {
-        spdlog::info("Client: transport {} detached",
-                     transport_guard_->get()->remote_info());
-        transport_guard_.reset(); // Guards transport to close.
-    }
-    else {
-        spdlog::info(
-            "Client: detach_transport called but no transport attached");
-    }
+    spdlog::info("Client: transport {} detached", s->remote_info());
+    // Don't reset here, because this maybe no longer that session.
+    // session_.reset();
 
     player_id_ = invalid_entity;
     remote_entities_.clear();
@@ -91,82 +84,85 @@ void Client::detach_transport()
 
 void Client::send_join_request()
 {
-    if (!transport_guard_ || !transport_guard_->get()->is_open())
+    if (!session_ || !session_->is_open())
         throw std::runtime_error(
             "send_join_request: transport not attached or closed");
-    ITransport::spawn([](std::shared_ptr<ITransport> t) -> awaitable<void> {
+    Session::spawn([](std::shared_ptr<Session> t) -> awaitable<void> {
         co_await t->write({NetPacket::join, std::vector<std::uint8_t>{}});
-    }(transport_guard_->get()));
+    }(session_));
 }
 
 void Client::send_player_direction(Vec2f dir)
 {
-    if (!transport_guard_ || !transport_guard_->get()->is_open()) {
+    if (!session_ || !session_->is_open()) {
         throw std::runtime_error(
             "send_player_direction: transport not attached or closed");
     }
     spdlog::debug("Client: sending move dir: {}, {}", dir.x, dir.y);
-    ITransport::spawn([](std::shared_ptr<ITransport> t,
-                         auto payload) -> awaitable<void> {
-        co_await t->write({NetPacket::player_input, payload});
-    }(transport_guard_->get(), make_player_input(player_id_, dir.x, dir.y)));
+    Session::spawn(
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
+            co_await t->write({NetPacket::player_input, payload});
+        }(session_, make_player_input(player_id_, dir.x, dir.y)));
 }
 
 void Client::send_recruit()
 {
-    assert(transport_guard_);
+    assert(session_);
     co_spawn(
-        ITransport::io(),
-        [](std::shared_ptr<ITransport> t, auto payload) -> awaitable<void> {
+        Session::io(),
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({NetPacket::recruit_soldier, payload});
-        }(transport_guard_->get(), make_entity_id_payload(player_id_)),
+            co_await t->write({NetPacket::recruit_soldier, payload});
+            co_await t->write({NetPacket::recruit_soldier, payload});
+            co_await t->write({NetPacket::recruit_soldier, payload});
+            co_await t->write({NetPacket::recruit_soldier, payload});
+        }(session_, make_entity_id_payload(player_id_)),
         detached);
 }
 
 void Client::send_interact()
 {
-    assert(transport_guard_);
+    assert(session_);
     co_spawn(
-        ITransport::io(),
-        [](std::shared_ptr<ITransport> t, auto payload) -> awaitable<void> {
+        Session::io(),
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({NetPacket::interact, payload});
-        }(transport_guard_->get(), make_entity_id_payload(player_id_)),
+        }(session_, make_entity_id_payload(player_id_)),
         detached);
 }
 
 void Client::send_rest()
 {
-    assert(transport_guard_);
+    assert(session_);
     co_spawn(
-        ITransport::io(),
-        [](std::shared_ptr<ITransport> t, auto payload) -> awaitable<void> {
+        Session::io(),
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({NetPacket::rest, payload});
-        }(transport_guard_->get(), make_entity_id_payload(player_id_)),
+        }(session_, make_entity_id_payload(player_id_)),
         detached);
 }
 
 void Client::send_chat(std::string const &msg)
 {
-    assert(transport_guard_);
+    assert(session_);
     chat_history_.push_back("You: " + msg);
     std::vector<uint8_t> p(msg.begin(), msg.end());
-    ITransport::spawn(
-        [](std::shared_ptr<ITransport> t, auto payload) -> awaitable<void> {
+    Session::spawn(
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({NetPacket::chat, std::move(payload)});
-        }(transport_guard_->get(), std::move(p)));
+        }(session_, std::move(p)));
 }
 
 void Client::send_dialogue_action(std::string const &action)
 {
-    assert(transport_guard_);
-    ITransport::spawn(
-        [](std::shared_ptr<ITransport> t, auto payload) -> awaitable<void> {
+    assert(session_);
+    Session::spawn(
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({NetPacket::dialogue_action, std::move(payload)});
-        }(transport_guard_->get(), std::vector<uint8_t>(action.begin(),
-                                                        action.end())));
+        }(session_, std::vector<uint8_t>(action.begin(), action.end())));
 }
 
-void Client::handle_message(ITransport &from, TransportMessage msg)
+void Client::handle_message(Session &from, TransportMessage msg)
 {
     // Quick handlers: tiny writes that don't touch remote_entities_
     if (msg.type == NetPacket::return_pid) {
@@ -206,7 +202,7 @@ void Client::handle_message(ITransport &from, TransportMessage msg)
     case NetPacket::kicked: {
         std::string reason(msg.payload.begin(), msg.payload.end());
         spdlog::info("Client: kicked by server: {}", reason);
-        detach_transport();
+        session_->close();
         app_->start_local_session();
         break;
     }
@@ -251,7 +247,7 @@ void Client::handle_entity_update(NetPacket const &pkt)
 void Client::update(float dt)
 {
     while (messages_.try_receive(
-        [this](boost::system::error_code, std::shared_ptr<ITransport> t,
+        [this](boost::system::error_code, std::shared_ptr<Session> t,
                TransportMessage msg) { handle_message(*t, std::move(msg)); })) {
     }
 
@@ -587,7 +583,7 @@ void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
     dialogue_.available_actions = std::move(s.actions);
 }
 
-awaitable<bool> Client::authenticate_transport(std::shared_ptr<ITransport> t)
+awaitable<bool> Client::authenticate_transport(std::shared_ptr<Session> t)
 {
     try {
         spdlog::debug("Client: sending auth: payload: {}", auth_payload());

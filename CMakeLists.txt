@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_NO_SYSTEM_FROM_IMPORTED OFF) # Turn off diagnostic on imported headers
 
 find_package(SDL3 REQUIRED)
 find_package(Boost REQUIRED)
@@ -68,9 +69,9 @@ set(SOURCES
     src/systems/quest-manager.cpp
     src/net/server.cpp
     src/net/client.cpp
-    src/net/transport.cpp
-    src/net/local-transport.cpp
-    src/net/network-transport.cpp
+    src/net/session.cpp
+    src/net/local-session.cpp
+    src/net/network-session.cpp
     src/core/locale-manager.cpp
     src/ui/ui-manager.cpp
 )
@@ -107,6 +108,7 @@ add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 target_compile_options(${PROJECT_NAME} PRIVATE
     -Wall
     # -Weverything
+    -Wno-deprecated-declarations # flecs keeps reporting this warning
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE src)
@@ -168,7 +170,9 @@ set(TEST_SOURCES
     tests/test_dialogue.cpp
     tests/test_factions.cpp
     tests/test_combat.cpp
-    tests/test_network.cpp
+    tests/test_session.cpp
+    tests/test_local_session.cpp
+    tests/test_network_session.cpp
     src/core/input-manager.cpp
     src/core/game-clock.cpp
     src/systems/navigation-system.cpp
@@ -183,9 +187,9 @@ set(TEST_SOURCES
     src/knowledge/rumor-propagator.cpp
     src/save/save-manager.cpp
     src/systems/combat-system.cpp
-    src/net/transport.cpp
-    src/net/local-transport.cpp
-    src/net/network-transport.cpp
+    src/net/session.cpp
+    src/net/local-session.cpp
+    src/net/network-session.cpp
 )
 
 add_executable(TheSunsetStraits_tests ${TEST_SOURCES})
