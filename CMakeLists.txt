@@ -74,6 +74,7 @@ set(SOURCES
     src/net/network-session.cpp
     src/core/locale-manager.cpp
     src/ui/ui-manager.cpp
+    src/animation/animation-data.cpp
 )
 
 set(HEADERS
@@ -101,6 +102,7 @@ set(HEADERS
     src/dialogue/topic-registry.hpp
     src/dialogue/relationship-table.hpp
     src/ui/ui-manager.hpp
+    src/animation/animation-data.hpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})

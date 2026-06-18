@@ -2,7 +2,6 @@
 #include "entities/components/collider.hpp"
 #include "entities/components/position.hpp"
 #include "entities/components/soldier-ai.hpp"
-#include "entities/components/sprite.hpp"
 #include "systems/combat-utils.hpp"
 #include <algorithm>
 #include <cmath>
@@ -35,12 +34,8 @@ void CombatSystem::spawn_enemy_wave(flecs::world &world, int count,
         float x = center.x + std::cos(ang) * dist;
         float y = center.y + std::sin(ang) * dist;
 
-        e.set<Position>(
-            Position{{x, y}, {(int)(x / 64.f), (int)(y / 64.f)}, 0.5f});
-        e.set<Sprite>(Sprite{.origin = {12.f, 12.f},
-                             .color = {0.9f, 0.2f, 0.1f, 1.f},
-                             .scale = 1.f,
-                             .visible = true});
+        e.set<Position>(Position{{x, y}});
+
         e.set<CombatStats>(CombatStats{team, 8, 8, 3, 1, 80.f});
         e.set<Collider>(Collider{14.f});
         if (out_ids)

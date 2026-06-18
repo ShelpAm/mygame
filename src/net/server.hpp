@@ -4,6 +4,7 @@
 #include "net/session.hpp"
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 class GameMode;
 
@@ -43,20 +44,11 @@ class Server {
         return v;
     }
 
-    auto const &sessions() const
-    {
-        return sessions_;
-    }
+    auto const &sessions() const { return sessions_; }
 
-    auto &messages()
-    {
-        return messages_;
-    }
+    auto &messages() { return messages_; }
 
-    auto &player_detachments()
-    {
-        return player_detachments_;
-    }
+    auto &player_detachments() { return player_detachments_; }
 
   private:
     // Only the read_loop in attach_transport may construct this token
@@ -79,7 +71,9 @@ class Server {
         player_detachments_;
 
     std::unordered_map<Session *, EntityId> player_eid_of_session_;
-    std::uint8_t next_team_;
+    std::unordered_map<Session *, std::unordered_set<EntityId>>
+        last_sent_entities_;
+    std::uint8_t next_player_team_;
     std::shared_ptr<NetworkSession::Acceptor> acceptor_;
     std::vector<std::shared_ptr<Session>> sessions_;
 

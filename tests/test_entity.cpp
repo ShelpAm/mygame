@@ -4,7 +4,10 @@
 #include "entities/components/sprite.hpp"
 #include <boost/test/unit_test.hpp>
 #include <flecs.h>
+
 BOOST_AUTO_TEST_SUITE(entity_tests)
+
+// NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers)
 
 BOOST_AUTO_TEST_CASE(create_entity)
 {
@@ -37,14 +40,12 @@ BOOST_AUTO_TEST_CASE(add_and_get_component)
     flecs::world world;
     auto e = world.entity();
 
-    e.set<Position>(Position{{10.f, 20.f}, {1, 2}});
+    e.set<Position>(Position{.world_pos = Vec2f(10.F, 20.F)});
 
     auto const *retrieved = e.try_get<Position>();
     BOOST_REQUIRE(retrieved != nullptr);
-    BOOST_TEST(retrieved->world_pos.x == 10.f);
-    BOOST_TEST(retrieved->world_pos.y == 20.f);
-    BOOST_TEST(retrieved->tile_pos.x == 1);
-    BOOST_TEST(retrieved->tile_pos.y == 2);
+    BOOST_TEST(retrieved->world_pos.x == 10.F);
+    BOOST_TEST(retrieved->world_pos.y == 20.F);
 }
 
 BOOST_AUTO_TEST_CASE(has_component)
@@ -74,17 +75,24 @@ BOOST_AUTO_TEST_CASE(multiple_component_types)
     flecs::world world;
     auto e = world.entity();
 
-    e.set<Position>(Position{{5.f, 5.f}, {2, 2}});
-    e.set<Sprite>(Sprite{"tex", {}, {8.f, 8.f}, {1, 0, 0, 1}, 1.f, true});
-    e.set<Movement>(Movement{{}, {}, 150.f, false});
+    e.set<Position>(Position{.world_pos = Vec2f(5.F, 5.F)});
+    e.set<Sprite>(Sprite{.texture_name = "tex",
+                         .origin = Vec2f(8.F, 8.F),
+                         .color = {.r = 1.F, .g = 1.F, .b = 1.F, .a = 1.F},
+                         .scale = 1.F,
+                         .visible = true});
+    e.set<Movement>(Movement{.velocity = {},
+                             .target_pos = {},
+                             .speed = 150.F,
+                             .facing = {}});
 
     BOOST_TEST(e.has<Position>());
     BOOST_TEST(e.has<Sprite>());
     BOOST_TEST(e.has<Movement>());
 
-    BOOST_TEST(e.try_get<Position>()->world_pos.x == 5.f);
+    BOOST_TEST(e.try_get<Position>()->world_pos.x == 5.F);
     BOOST_TEST(e.try_get<Sprite>()->texture_name == "tex");
-    BOOST_TEST(e.try_get<Movement>()->speed == 150.f);
+    BOOST_TEST(e.try_get<Movement>()->speed == 150.F);
 }
 
 BOOST_AUTO_TEST_CASE(entities_list)
@@ -109,11 +117,16 @@ BOOST_AUTO_TEST_CASE(type_erased_pools_dont_cross_contaminate)
     flecs::world world;
     auto e = world.entity();
 
-    e.set<Position>(Position{{0.f, 0.f}, {0, 0}});
-    e.set<Movement>(Movement{{}, {}, 200.f, false});
+    e.set<Position>(Position{.world_pos = Vec2f(0.F, 0.F)});
+    e.set<Movement>(Movement{.velocity = {},
+                             .target_pos = {},
+                             .speed = 200.F,
+                             .facing = {}});
 
-    BOOST_TEST(e.try_get<Movement>()->speed == 200.f);
-    BOOST_TEST(e.try_get<Position>()->world_pos.x == 0.f);
+    BOOST_TEST(e.try_get<Movement>()->speed == 200.F);
+    BOOST_TEST(e.try_get<Position>()->world_pos.x == 0.F);
 }
+
+// NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 
 BOOST_AUTO_TEST_SUITE_END()

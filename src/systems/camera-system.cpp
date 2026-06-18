@@ -47,6 +47,7 @@ Vec2f CameraSystem::screen_to_world(Vec2i screen_pos) const
             center_.y};
 }
 
+// View port of world pos
 SDL_FRect CameraSystem::viewport() const
 {
     float halfW = static_cast<float>(width_) / (2.f * zoom_);

@@ -6,7 +6,9 @@
 #include <fstream>
 #include <spdlog/spdlog.h>
 
-DialogueEngine::DialogueEngine() {}
+DialogueEngine::DialogueEngine()
+{
+}
 
 std::vector<DialogueTemplate> const &DialogueEngine::active_templates() const
 {

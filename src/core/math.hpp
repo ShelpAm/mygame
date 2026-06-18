@@ -4,21 +4,14 @@
 #include <ostream>
 
 struct Vec2f {
-    float x = 0.f;
-    float y = 0.f;
+    float x{};
+    float y{};
 
-    Vec2f operator+(Vec2f const &o) const
-    {
-        return {x + o.x, y + o.y};
-    }
-    Vec2f operator-(Vec2f const &o) const
-    {
-        return {x - o.x, y - o.y};
-    }
-    Vec2f operator*(float s) const
-    {
-        return {x * s, y * s};
-    }
+    constexpr Vec2f() = default;
+    constexpr Vec2f(float x, float y) : x(x), y(y) {}
+    Vec2f operator+(Vec2f const &o) const { return {x + o.x, y + o.y}; }
+    Vec2f operator-(Vec2f const &o) const { return {x - o.x, y - o.y}; }
+    Vec2f operator*(float s) const { return {x * s, y * s}; }
     Vec2f &operator+=(Vec2f const &o)
     {
         x += o.x;
@@ -31,15 +24,15 @@ struct Vec2f {
         y -= o.y;
         return *this;
     }
-    float length() const
-    {
-        return std::hypot(x, y);
-    }
+    float length() const { return std::hypot(x, y); }
 };
 
 struct Vec2i {
-    int x = 0;
-    int y = 0;
+    int x{};
+    int y{};
+
+    constexpr Vec2i() = default;
+    constexpr Vec2i(int x, int y) : x(x), y(y) {}
     auto operator<=>(Vec2i const &) const = default;
 };
 

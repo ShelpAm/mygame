@@ -21,12 +21,16 @@ class NetworkSession : public Session,
         void stop();
 
       private:
-        std::shared_ptr<tcp_acceptor> impl_{};
+        std::shared_ptr<tcp_acceptor> impl_;
     };
 
     NetworkSession() = default;
+    NetworkSession(NetworkSession const &) = delete;
+    NetworkSession(NetworkSession &&) = delete;
+    NetworkSession &operator=(NetworkSession const &) = delete;
+    NetworkSession &operator=(NetworkSession &&) = delete;
     explicit NetworkSession(tcp::socket sock);
-    ~NetworkSession();
+    ~NetworkSession() override;
 
     static awaitable<std::shared_ptr<NetworkSession>>
     connect(std::string const &ip, int port);

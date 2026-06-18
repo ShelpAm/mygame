@@ -6,9 +6,8 @@
 #include <spdlog/spdlog.h>
 
 Server::Server()
-    : messages_(Session::io(), 128),
-      player_detachments_(Session::io(), 128),
-      next_team_{static_cast<std::uint8_t>(Team::player_begin)}
+    : messages_(Session::io(), 128), player_detachments_(Session::io(), 128),
+      next_player_team_{static_cast<std::uint8_t>(Team::player_begin)}
 {
 }
 Server::~Server()
@@ -100,7 +99,8 @@ void Server::detach_transport(detach_token, Session *t)
 {
     // Defer game-level cleanup to the GameMode thread via channel.
     if (auto node = player_eid_of_session_.extract(t); !node.empty())
-        player_detachments_.try_send(boost::system::error_code{}, node.mapped());
+        player_detachments_.try_send(boost::system::error_code{},
+                                     node.mapped());
 
     auto it = std::ranges::find_if(sessions_,
                                    [t](auto const &e) { return e.get() == t; });
@@ -115,6 +115,7 @@ void Server::detach_transport(detach_token, Session *t)
 
 void Server::kick(std::shared_ptr<Session> t, std::string const &reason)
 {
+    (void)this;
     spdlog::info("Server: kicking transport {}", static_cast<void *>(t.get()));
     std::vector<uint8_t> reason_payload(reason.begin(), reason.end());
     Session::spawn(
@@ -138,7 +139,7 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
     spdlog::debug("Server: handling message '{}'", msg.type);
     if (msg.type == NetPacket::join) {
         assert(msg.payload.empty());
-        Team team = static_cast<Team>(next_team_++);
+        Team team = static_cast<Team>(next_player_team_++);
         auto eid = game_mode_->spawn_player({0, 0}, team);
         game_mode_->register_player(eid);
         player_eid_of_session_[from.get()] = eid;
@@ -147,7 +148,7 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
             [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
                 co_await t->write({NetPacket::return_pid, std::move(payload)});
             }(from, std::move(payload)));
-        spdlog::info("Server: new player joined with ID: {} team: {}", eid,
+        spdlog::info("Server: new player joined (ID: {}, team: {})", eid,
                      static_cast<std::uint8_t>(team));
         mark_needs_full_sync("new player joined");
     }
@@ -168,10 +169,30 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
         assert(pid != invalid_entity);
         game_mode_->spawn_recruit(pid);
     }
-    else if (msg.type == NetPacket::spawn_enemy_wave) {
-        auto w = parse_enemy_wave(msg.payload);
-        game_mode_->spawn_enemy_wave(w.count, {w.cx, w.cy}, 400.f,
-                                     static_cast<Team>(w.team));
+    else if (msg.type == NetPacket::recruit_ranged) {
+        assert(msg.payload.size() >= 8);
+        EntityId pid;
+        memcpy(&pid, msg.payload.data(), 8);
+        game_mode_->spawn_recruit_ranged(pid);
+    }
+    else if (msg.type == NetPacket::soldier_command) {
+        assert(msg.payload.size() >= 8);
+        EntityId pid;
+        memcpy(&pid, msg.payload.data(), 8);
+        game_mode_->cycle_stance(pid);
+    }
+    else if (msg.type == NetPacket::respawn) {
+        assert(msg.payload.size() >= 8);
+        EntityId pid;
+        memcpy(&pid, msg.payload.data(), 8);
+        game_mode_->respawn_player(pid);
+    }
+    else if (msg.type == NetPacket::formation) {
+        assert(msg.payload.size() >= 9);
+        EntityId pid;
+        memcpy(&pid, msg.payload.data(), 8);
+        uint8_t mask = msg.payload[8];
+        game_mode_->cycle_formation(pid, mask);
     }
     else if (msg.type == NetPacket::player_input) {
         auto in = parse_player_input(msg.payload);
@@ -217,40 +238,44 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
 
 void Server::broadcast_sync()
 {
-    // static int frame_counter = 0;
-    // if (++frame_counter >= 300)
-    //     mark_needs_full_sync("periodic full sync (frame_count >= 300)");
-
     bool needs_full = check_needs_full_sync();
+    if (!needs_full && !game_mode_->has_dirty_entities())
+        return;
 
-    NetPacket::Type pkt_type;
-    std::vector<uint8_t> payload;
-    if (needs_full) {
-        // reason
+    if (needs_full)
         spdlog::debug("Server: full sync reason: {}", needs_full_sync_.second);
-        payload = game_mode_->build_full_payload();
-        pkt_type = NetPacket::state_full;
-        // frame_counter = 0;
-    }
-    else if (game_mode_->has_dirty_entities()) {
-        spdlog::trace("Server: dirty update");
-        payload = game_mode_->build_dirty_payload();
-        pkt_type = NetPacket::state_delta;
-    }
-    else {
-        return;
-    }
 
-    game_mode_->mark_frame_clean();
-
-    if (payload.empty())
-        return;
     for (auto &s : sessions_) {
+        auto player_it = player_eid_of_session_.find(s.get());
+        if (player_it == player_eid_of_session_.end())
+            continue;
+        EntityId player_eid = player_it->second;
+
+        NetPacket::Type pkt_type;
+        GameMode::PlayerSyncPayload result;
+
+        if (needs_full) {
+            result = game_mode_->build_full_payload(player_eid);
+            pkt_type = NetPacket::state_full;
+        }
+        else {
+            result = game_mode_->build_dirty_payload(
+                player_eid, last_sent_entities_[s.get()]);
+            pkt_type = NetPacket::state_delta;
+        }
+
+        if (result.bytes.empty())
+            continue;
+
+        last_sent_entities_[s.get()] = result.entity_ids;
+
         Session::spawn([](std::shared_ptr<Session> t, NetPacket::Type pkt_type,
                           std::vector<uint8_t> payload) -> awaitable<void> {
             co_await t->write({pkt_type, payload});
-        }(s, pkt_type, payload));
+        }(s, pkt_type, std::move(result.bytes)));
     }
+
+    game_mode_->mark_frame_clean();
 }
 
 void Server::broadcast_entity_removed(EntityId eid)

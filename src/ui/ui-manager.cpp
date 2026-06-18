@@ -3,7 +3,9 @@
 #include "core/game-mode.hpp"
 #include "core/locale-manager.hpp"
 #include "entities/components/combat-stats.hpp"
+#include "entities/components/soldier-ai.hpp"
 #include "net/server.hpp"
+#include "systems/formation.hpp"
 #include "world/world-state.hpp"
 #include <algorithm>
 #include <cstring>
@@ -80,7 +82,9 @@ bool UIManager::process_event(SDL_Event const &event)
     return ImGui_ImplSDL3_ProcessEvent(&event);
 }
 
-void UIManager::update(float /*dt*/) {}
+void UIManager::update(float /*dt*/)
+{
+}
 
 void UIManager::render(WorldState *world_state, App &app)
 {
@@ -156,10 +160,46 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
                 loc.get("hud.food").c_str(), sv.food,
                 loc.get("hud.water").c_str(), sv.water,
                 loc.get("hud.energy").c_str(), sv.energy);
+
+    // Soldier info (only player's own team)
+    auto my_team = app.client().player_team();
+    int soldier_count = 0;
+    int follow_count = 0, guard_count = 0, patrol_count = 0;
+    int melee_count = 0, ranged_count = 0;
+    for (auto &re : app.client().remote_entities()) {
+        if (re.kind == EntityKind::soldier && re.alive && re.team == my_team) {
+            ++soldier_count;
+            if (re.soldier_stance == SoldierStance::follow)
+                ++follow_count;
+            else if (re.soldier_stance == SoldierStance::guard)
+                ++guard_count;
+            else if (re.soldier_stance == SoldierStance::patrol)
+                ++patrol_count;
+            if (re.soldier_role == SoldierRole::melee)
+                ++melee_count;
+            else if (re.soldier_role == SoldierRole::ranged)
+                ++ranged_count;
+        }
+    }
+    if (soldier_count > 0) {
+        auto &cli2 = app.client();
+        auto sel = cli2.selected_roles();
+        int n = (int)formation_registry().size();
+        auto &fm_reg = formation_registry();
+        ImGui::Text("Soldiers: %d | [G] %dF/%dG/%dP", soldier_count,
+                    follow_count, guard_count, patrol_count);
+        ImGui::Text("[1] Melee:%d %s [2] Ranged:%d %s | [F4] Formation: %s",
+                    melee_count, (sel & 1) ? "*" : " ", ranged_count,
+                    (sel & 2) ? "*" : " ",
+                    fm_reg[cli2.formation_idx() % n].first);
+    }
+    else {
+        ImGui::TextDisabled("[F2] Melee [F3] Ranged — recruit soldiers");
+    }
     ImGui::End();
 
-    // Language switcher
-    ImGui::SetNextWindowPos(ImVec2(10, 110));
+    // Language switcher (top-right, out of HUD way)
+    ImGui::SetNextWindowPos(ImVec2(600, 10), ImGuiCond_Always);
     ImGui::Begin("Lang", nullptr,
                  ImGuiWindowFlags_NoDecoration |
                      ImGuiWindowFlags_AlwaysAutoResize);
@@ -312,17 +352,23 @@ void UIManager::render_inventory(App const &app)
 void UIManager::render_help_panel(App const &app)
 {
     auto const &loc = app.locale();
-    ImGui::SetNextWindowSize(ImVec2(300, 280), ImGuiCond_Appearing);
-    ImGui::SetNextWindowPos(ImVec2(300, 100), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(320, 380), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(300, 80), ImGuiCond_Appearing);
     ImGui::Begin(loc.get("help.title").c_str());
     ImGui::Text("%s", loc.get("help.wasd").c_str());
     ImGui::Text("%s", loc.get("help.e").c_str());
     ImGui::Text("%s", loc.get("help.r").c_str());
+    ImGui::Text("%s", loc.get("help.g").c_str());
+    ImGui::Separator();
     ImGui::Text("%s", loc.get("help.f1").c_str());
     ImGui::Text("%s", loc.get("help.f2").c_str());
+    ImGui::Text("%s", loc.get("help.f3").c_str());
+    ImGui::Text("%s", loc.get("help.f4").c_str());
+    ImGui::Text("%s", loc.get("help.f8").c_str());
     ImGui::Text("%s", loc.get("help.f5").c_str());
     ImGui::Text("%s", loc.get("help.f9").c_str());
     ImGui::Text("%s", loc.get("help.f10").c_str());
+    ImGui::Text("%s", loc.get("help.f12").c_str());
     ImGui::Separator();
     ImGui::TextDisabled("%s", loc.get("help.close").c_str());
     ImGui::End();

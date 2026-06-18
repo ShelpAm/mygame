@@ -19,7 +19,7 @@ class RenderSystem;
 class UIManager;
 struct CombatStats;
 
-enum class SessionMode { local, host, client };
+enum class SessionMode : std::uint8_t { local, host, client };
 
 class App {
   public:
@@ -29,38 +29,14 @@ class App {
     void run();
     void shutdown();
 
-    LocaleManager const &locale() const
-    {
-        return locale_;
-    }
-    bool show_load_menu() const
-    {
-        return show_load_menu_;
-    }
-    void set_show_load_menu(bool v)
-    {
-        show_load_menu_ = v;
-    }
-    bool show_help() const
-    {
-        return show_help_;
-    }
-    void set_show_help(bool v)
-    {
-        show_help_ = v;
-    }
-    bool show_multiplayer() const
-    {
-        return show_multiplayer_;
-    }
-    void set_show_multiplayer(bool v)
-    {
-        show_multiplayer_ = v;
-    }
-    asio::io_context &io()
-    {
-        return io_;
-    }
+    LocaleManager const &locale() const { return locale_; }
+    bool show_load_menu() const { return show_load_menu_; }
+    void set_show_load_menu(bool v) { show_load_menu_ = v; }
+    bool show_help() const { return show_help_; }
+    void set_show_help(bool v) { show_help_ = v; }
+    bool show_multiplayer() const { return show_multiplayer_; }
+    void set_show_multiplayer(bool v) { show_multiplayer_ = v; }
+    asio::io_context &io() { return io_; }
     GameMode &game_mode()
     {
         if (!game_mode_)
@@ -79,28 +55,16 @@ class App {
             throw std::runtime_error("Client not initialized");
         return *client_;
     }
-    Stopwatch const &stopwatch() const
-    {
-        return stopwatch_;
-    }
-    SessionMode session_mode() const
-    {
-        return session_mode_;
-    }
-    void set_session_mode(SessionMode mode)
-    {
-        session_mode_ = mode;
-    }
+    Stopwatch const &stopwatch() const { return stopwatch_; }
+    SessionMode session_mode() const { return session_mode_; }
+    void set_session_mode(SessionMode mode) { session_mode_ = mode; }
 
     void start_local_session();
     void start_host_session(int port);
-    void start_client_session(std::string const &ip, int port);
+    void start_client_session(std::string const &host, int port);
 
     void set_ui_language(int lang_index);
-    DialogueState const &dialogue() const
-    {
-        return client_->dialogue();
-    }
+    DialogueState const &dialogue() const { return client_->dialogue(); }
     void end_dialogue()
     {
         if (session_mode_ == SessionMode::client)
@@ -108,10 +72,7 @@ class App {
         else
             game_mode_->end_dialogue(client_->player_id());
     }
-    void ask_topic(std::string const &t)
-    {
-        do_dialogue_action(t);
-    }
+    void ask_topic(std::string const &t) { do_dialogue_action(t); }
     void do_dialogue_action(std::string const &a)
     {
         if (session_mode_ == SessionMode::client)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/game-types.hpp"
 #include "core/math.hpp"
 #include <array>
 #include <string>
@@ -31,7 +32,7 @@ class SaveManager {
         int player_hp = 20;
         int player_max_hp = 20;
         std::vector<std::string> known_topics;
-        std::vector<Vec2i> seen_tiles;
+        std::unordered_map<EntityId, std::vector<Vec2i>> player_explored_tiles;
         std::vector<std::pair<std::string, std::array<int, 3>>> relations;
         std::vector<NPCData> npcs;
     };

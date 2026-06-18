@@ -1,12 +1,16 @@
 #include "net/client.hpp"
+#include "animation/animation-data.hpp"
 #include "core/app.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/movement.hpp"
 #include "entities/components/position.hpp"
 #include "entities/components/soldier-ai.hpp"
+#include "entities/components/vision.hpp"
 #include "net/net-packet.hpp"
 #include "net/sync-io.hpp"
 #include "survival/condition-tracker.hpp"
+#include "systems/formation.hpp"
+#include "world/map-data.hpp"
 #include <cassert>
 #include <cstring>
 #include <optional>
@@ -112,11 +116,53 @@ void Client::send_recruit()
         Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({NetPacket::recruit_soldier, payload});
-            co_await t->write({NetPacket::recruit_soldier, payload});
-            co_await t->write({NetPacket::recruit_soldier, payload});
-            co_await t->write({NetPacket::recruit_soldier, payload});
-            co_await t->write({NetPacket::recruit_soldier, payload});
         }(session_, make_entity_id_payload(player_id_)),
+        detached);
+}
+
+void Client::send_recruit_ranged()
+{
+    assert(session_);
+    co_spawn(
+        Session::io(),
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
+            co_await t->write({NetPacket::recruit_ranged, payload});
+        }(session_, make_entity_id_payload(player_id_)),
+        detached);
+}
+
+void Client::send_soldier_command()
+{
+    assert(session_);
+    co_spawn(
+        Session::io(),
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
+            co_await t->write({NetPacket::soldier_command, payload});
+        }(session_, make_entity_id_payload(player_id_)),
+        detached);
+}
+
+void Client::send_respawn()
+{
+    assert(session_);
+    co_spawn(
+        Session::io(),
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
+            co_await t->write({NetPacket::respawn, payload});
+        }(session_, make_entity_id_payload(player_id_)),
+        detached);
+}
+
+void Client::send_cycle_formation()
+{
+    assert(session_);
+    int n = (int)formation_registry().size();
+    formation_idx_ = (formation_idx_ + 1) % n;
+    co_spawn(
+        Session::io(),
+        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
+            co_await t->write({NetPacket::formation, payload});
+        }(session_, make_formation_payload(player_id_, selected_roles_)),
         detached);
 }
 
@@ -215,6 +261,22 @@ void Client::handle_message(Session &from, TransportMessage msg)
                             ev.killed);
         break;
     }
+    case NetPacket::projectile_fired: {
+        if (msg.payload.size() >= 16) {
+            ProjectileVisual pv;
+            memcpy(&pv.pos.x, msg.payload.data(), 4);
+            memcpy(&pv.pos.y, msg.payload.data() + 4, 4);
+            memcpy(&pv.dst.x, msg.payload.data() + 8, 4);
+            memcpy(&pv.dst.y, msg.payload.data() + 12, 4);
+            Vec2f d = pv.dst - pv.pos;
+            pv.total_dist = std::sqrt(d.x * d.x + d.y * d.y);
+            pv.dir = pv.total_dist > 0.f
+                         ? Vec2f{d.x / pv.total_dist, d.y / pv.total_dist}
+                         : Vec2f{1.f, 0.f};
+            projectile_visuals_.push_back(pv);
+        }
+        break;
+    }
     default:
         break;
     }
@@ -253,6 +315,36 @@ void Client::update(float dt)
 
     if (player_id_ != invalid_entity) {
         interpolate_entities(dt);
+        player_visibility_.set_visible_arc(world_to_tile(player_pos_),
+                                             player_vision_range_, player_facing_,
+                                             player_vision_arc_);
+
+        // Mark entities outside visible tiles as snapshots
+        auto const &visible = player_visibility_.visible;
+        for (auto &re : remote_entities_) {
+            if (!visible.contains(world_to_tile(re.position)))
+                re.snapshot = true;
+        }
+
+        for (auto &re : remote_entities_) {
+            auto &clips = animation_clips_for_kind(re.kind, (uint8_t)re.team);
+            auto *clip =
+                determine_clip(clips, re.anim_state, re.velocity, re.alive, dt);
+            switch_clip(re.anim_state, clip);
+            tick_animation(re.anim_state, re.velocity, dt);
+        }
+    }
+
+    // Tick projectile visuals
+    for (auto it = projectile_visuals_.begin();
+         it != projectile_visuals_.end();) {
+        float step = it->speed * dt;
+        it->pos = it->pos + it->dir * step;
+        it->traveled += step;
+        if (it->traveled >= it->total_dist)
+            it = projectile_visuals_.erase(it);
+        else
+            ++it;
     }
 }
 
@@ -303,27 +395,34 @@ static void set_visual_from_kind(RemoteEntity &re)
     case EntityKind::player:
         re.color = {0.3f, 0.8f, 0.3f, 1.f};
         re.scale = 1.f;
+        std::strncpy(re.texture_name, "player", 31);
         break;
     case EntityKind::soldier:
         re.color = re.team == Team::enemy ? SDL_FColor{0.8f, 0.3f, 0.1f, 1.f}
                                           : SDL_FColor{0.3f, 0.5f, 0.9f, 1.f};
         re.scale = 0.8f;
+        std::strncpy(re.texture_name,
+                     re.team == Team::enemy ? "enemy_soldier" : "soldier", 31);
         break;
     case EntityKind::npc:
         re.color = {0.8f, 0.6f, 0.2f, 1.f};
         re.scale = 1.f;
+        std::strncpy(re.texture_name, "npc", 31);
         break;
     case EntityKind::enemy:
         re.color = {0.9f, 0.2f, 0.1f, 1.f};
         re.scale = 1.f;
+        std::strncpy(re.texture_name, "enemy", 31);
         break;
     case EntityKind::structure:
         re.color = {0.5f, 0.5f, 0.5f, 1.f};
         re.scale = 1.2f;
+        std::strncpy(re.texture_name, "structure", 31);
         break;
     default:
         re.color = {0.3f, 0.5f, 0.9f, 1.f};
         re.scale = 0.8f;
+        std::strncpy(re.texture_name, "entity", 31);
         break;
     }
     re.color.a = 1.f;
@@ -378,12 +477,20 @@ std::optional<ParsedEntity> parse_one_entity(SyncReader &r)
     if (mask & SyncComponent::soldier_ai) {
         SoldierAI ai;
         ai.read_sync(r);
+        re.soldier_stance = ai.stance;
+        re.soldier_role = ai.role;
     }
     if (mask & SyncComponent::interact)
         re.interactable = r.read<uint8_t>();
     if (mask & SyncComponent::survival) {
         pe.survival.read_sync(r);
         pe.has_survival = true;
+    }
+    if (mask & SyncComponent::vision) {
+        Vision v;
+        v.read_sync(r);
+        re.vision_range = v.range;
+        re.vision_arc = v.arc;
     }
 
     set_visual_from_kind(re);
@@ -404,7 +511,6 @@ static void parse_world_header(SyncReader &r, WorldState &ws)
 
 void Client::apply_sync_full(std::vector<uint8_t> const &data)
 {
-    std::unordered_set<EntityId> seen;
     SyncReader r{data.data(), data.size()};
 
     parse_world_header(r, world_state_);
@@ -415,7 +521,6 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
             break;
         auto &pe = *opt;
         auto &re = pe.re;
-        seen.insert(re.id);
 
         if (re.id == player_id_) {
             player_target_pos_ = re.target_pos;
@@ -428,15 +533,14 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
             player_attack_ = pe.attack;
             player_defense_ = pe.defense;
             player_attack_range_ = pe.attack_range;
+            player_vision_range_ = re.vision_range;
+            player_vision_arc_ = re.vision_arc;
             if (pe.has_survival)
                 player_survival_ = pe.survival;
-            world_state_.reveal_radius(
-                {static_cast<int>(re.target_pos.x / 64.f),
-                 static_cast<int>(re.target_pos.y / 64.f)},
-                8);
+            player_visibility_.explore_radius(re.position, re.vision_range);
         }
 
-        // Always upsert into remote_entities (including player for rendering)
+        // Upsert into remote_entities
         auto *rp = find_entity(re.id);
         if (!rp) {
             re.position = re.target_pos;
@@ -452,14 +556,12 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
             rp->velocity = re.velocity;
             rp->facing = re.facing;
             rp->interactable = re.interactable;
+            rp->snapshot = false;
             set_visual_from_kind(*rp);
         }
     }
-
-    // Mark-and-sweep: remove entities not in this full sync
-    std::erase_if(remote_entities_, [&](RemoteEntity const &re) {
-        return !seen.contains(re.id);
-    });
+    // Entities not in this sync stay — they become snapshots via per-frame
+    // check
 }
 
 void Client::apply_sync_delta(std::vector<uint8_t> const &data)
@@ -486,12 +588,11 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
             player_attack_ = pe.attack;
             player_defense_ = pe.defense;
             player_attack_range_ = pe.attack_range;
+            player_vision_range_ = re.vision_range;
+            player_vision_arc_ = re.vision_arc;
             if (pe.has_survival)
                 player_survival_ = pe.survival;
-            world_state_.reveal_radius(
-                {static_cast<int>(re.target_pos.x / 64.f),
-                 static_cast<int>(re.target_pos.y / 64.f)},
-                8);
+            player_visibility_.explore_radius(re.position, re.vision_range);
         }
 
         auto *rp = find_entity(re.id);
@@ -509,6 +610,7 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
             rp->velocity = re.velocity;
             rp->facing = re.facing;
             rp->interactable = re.interactable;
+            rp->snapshot = false;
             set_visual_from_kind(*rp);
         }
     }
@@ -517,7 +619,6 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
 void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id,
                                  int damage, bool killed)
 {
-    (void)attacker_id;
     EntityId target = (defender_id == 0) ? player_id_ : defender_id;
     if (target == invalid_entity) {
         spdlog::warn("handle_combat_event: target entity is invalid");
@@ -538,6 +639,14 @@ void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id,
         rp->hp -= damage;
         if (killed)
             rp->alive = false;
+        rp->anim_state.hurt_timer = 0.3f;
+    }
+
+    // Trigger attack animation on attacker
+    if (attacker_id != 0) {
+        auto *atk = find_entity(attacker_id);
+        if (atk)
+            atk->anim_state.attack_timer = 0.3f;
     }
 
     combat_events_.push_back({attacker_id, defender_id, damage, killed});

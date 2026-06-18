@@ -1,8 +1,10 @@
 #include "systems/render-system.hpp"
+#include "animation/animation-data.hpp"
 #include "core/resource-manager.hpp"
 #include "net/client.hpp"
 #include "systems/camera-system.hpp"
 #include "systems/navigation-system.hpp"
+#include "world/map-data.hpp"
 #include "world/world-state.hpp"
 #include <cmath>
 #include <string>
@@ -15,40 +17,52 @@ RenderSystem::RenderSystem(SDL_Renderer *renderer, ResourceManager &resources,
 
 void RenderSystem::render(Client &client, NavigationSystem const &nav)
 {
-    render_tile_map(client.world_state(), nav);
+    render_tile_map(client.player_visibility(), nav);
     render_entities(client, client.player_position(), client.local_player());
+    render_projectiles(client);
     render_health_bars(client);
     render_damage_numbers(client, client.combat_events());
 }
 
-void RenderSystem::render_tile_map(WorldState const &world_state,
+void RenderSystem::render_tile_map(PlayerVisibility const &vis,
                                    NavigationSystem const &nav)
 {
     auto vp = camera_.viewport();
-    int startX = static_cast<int>(vp.x / 64.f) - 1;
-    int startY = static_cast<int>(vp.y / 64.f) - 1;
-    int endX = startX + static_cast<int>(vp.w / 64.f) + 2;
-    int endY = startY + static_cast<int>(vp.h / 64.f) + 2;
-
-    for (int y = startY; y < endY; ++y) {
-        for (int x = startX; x < endX; ++x) {
-            Vec2i tile{x, y};
-            bool seen = world_state.is_tile_seen(tile);
-            Vec2f screen = camera_.world_to_screen({x * 64.f, y * 64.f});
-            SDL_FRect rect{screen.x, screen.y, 66.f, 66.f};
+    auto left_up = world_to_tile(Vec2f(vp.x, vp.y));
+    auto right_down = world_to_tile(Vec2f(vp.x + vp.w, vp.y + vp.h));
+    // Render all tiles in viewport range
+    for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
+        for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
+            Vec2i tile(x, y);
+            Vec2f screen = camera_.world_to_screen(Vec2f(x, y) * tile_size);
+            constexpr auto padding = 2.F;
+            SDL_FRect rect{.x = screen.x,
+                           .y = screen.y,
+                           .w = tile_size + padding,
+                           .h = tile_size + padding};
 
             bool blocked = !nav.is_walkable(tile);
-            if (!seen)
-                SDL_SetRenderDrawColor(renderer_, 5, 5, 10, 255);
-            else if (blocked)
-                SDL_SetRenderDrawColor(renderer_, 60, 50, 40, 255);
-            else
-                SDL_SetRenderDrawColor(renderer_, 40, 40, 50, 255);
-            SDL_RenderFillRect(renderer_, &rect);
-
-            if (seen) {
+            switch (vis.query(tile)) {
+            case TileVisibility::Unexplored:
+                SDL_SetRenderDrawColor(renderer_, 8, 8, 14, 255);
+                SDL_RenderFillRect(renderer_, &rect);
+                break;
+            case TileVisibility::Explored:
+                if (blocked)
+                    SDL_SetRenderDrawColor(renderer_, 60, 50, 40, 255);
+                else
+                    SDL_SetRenderDrawColor(renderer_, 40, 40, 50, 255);
+                SDL_RenderFillRect(renderer_, &rect);
+                break;
+            case TileVisibility::Visible:
+                if (blocked)
+                    SDL_SetRenderDrawColor(renderer_, 60, 50, 40, 255);
+                else
+                    SDL_SetRenderDrawColor(renderer_, 40, 40, 50, 255);
+                SDL_RenderFillRect(renderer_, &rect);
                 SDL_SetRenderDrawColor(renderer_, 50, 50, 60, 255);
                 SDL_RenderRect(renderer_, &rect);
+                break;
             }
         }
     }
@@ -58,35 +72,43 @@ void RenderSystem::render_entities(Client &client, Vec2f player_pos,
                                    EntityId player_id)
 {
     for (auto &re : client.remote_entities()) {
-        if (!re.alive)
+        if (!re.alive || !re.visible)
             continue;
 
         Vec2f screen = camera_.world_to_screen(re.position);
         float size = 24.f * re.scale;
 
         SDL_FRect rect{screen.x - size, screen.y - size, size * 2, size * 2};
-        // Main rect
-        // SDL_FColor color =
-        //     re.hit_flash ? SDL_FColor{1.f, 1.f, 1.f, 1.f} : re.color;
-        // SDL_SetRenderDrawColor(renderer_, color.r * 255, color.g * 255,
-        //                        color.b * 255, color.a * 255);
-        // SDL_RenderFillRect(renderer_, &rect);
 
-        /* Display the image */
         SDL_FRect dst = rect;
-        auto texture = resources_.texture("entity");
+        char const *frame_name =
+            re.anim_state.clip
+                ? re.anim_state.clip->frame_names[re.anim_state.frame_index]
+                      .c_str()
+                : re.texture_name;
+        auto texture = resources_.texture(frame_name);
         SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_PIXELART);
-        SDL_RenderTexture(renderer_, texture, NULL, &dst);
 
-        // resources_.camera().update(renderer_);
-        // resources_.camera().render(renderer_, &dst);
+        if (re.snapshot) {
+            SDL_SetTextureColorMod(texture, 60, 60, 70);
+            SDL_SetTextureAlphaMod(texture, 120);
+        }
+
+        SDL_RenderTextureRotated(renderer_, texture, NULL, &dst, 0.0, NULL,
+                                 re.anim_state.flip ? SDL_FLIP_HORIZONTAL
+                                                    : SDL_FLIP_NONE);
+
+        if (re.snapshot) {
+            SDL_SetTextureColorMod(texture, 255, 255, 255);
+            SDL_SetTextureAlphaMod(texture, 255);
+        }
 
         // '!' mark
-        if (re.id != player_id && re.interactable) {
+        if (!re.snapshot && re.id != player_id && re.interactable) {
             float dist = std::hypot(re.position.x - player_pos.x,
                                     re.position.y - player_pos.y);
-            if (dist < 64.f) {
-                SDL_FRect hint{screen.x - 4, screen.y - size - 14, 10, 14};
+            if (dist < tile_size) {
+                SDL_FRect hint{screen.x - 4, screen.y - size - 12, 4, 14};
                 SDL_SetRenderDrawColor(renderer_, 255, 255, 100, 220);
                 SDL_RenderFillRect(renderer_, &hint);
             }
@@ -94,10 +116,21 @@ void RenderSystem::render_entities(Client &client, Vec2f player_pos,
     }
 }
 
+void RenderSystem::render_projectiles(Client &client)
+{
+    for (auto &pv : client.projectile_visuals()) {
+        Vec2f screen = camera_.world_to_screen(pv.pos);
+        float size = 6.f;
+        SDL_FRect rect{screen.x - size, screen.y - size, size * 2, size * 2};
+        SDL_SetRenderDrawColor(renderer_, 200, 180, 100, 255);
+        SDL_RenderFillRect(renderer_, &rect);
+    }
+}
+
 void RenderSystem::render_health_bars(Client &client)
 {
     for (auto &re : client.remote_entities()) {
-        if (!re.alive)
+        if (!re.alive || re.snapshot)
             continue;
 
         Vec2f screen = camera_.world_to_screen(re.position);

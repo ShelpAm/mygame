@@ -4,7 +4,9 @@
 #include <queue>
 #include <unordered_map>
 
-void NavigationSystem::update(float /*dt*/) {}
+void NavigationSystem::update(float /*dt*/)
+{
+}
 
 bool NavigationSystem::is_walkable(Vec2i tile) const
 {

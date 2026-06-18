@@ -7,6 +7,7 @@
 #include <vector>
 class ResourceManager;
 class CameraSystem;
+class PlayerVisibility;
 class Client;
 class WorldState;
 class NavigationSystem;
@@ -25,9 +26,10 @@ class RenderSystem {
     ResourceManager &resources_;
     CameraSystem &camera_;
 
-    void render_tile_map(WorldState const &world_state,
+    void render_tile_map(PlayerVisibility const &vis,
                          NavigationSystem const &nav);
     void render_entities(Client &client, Vec2f player_pos, EntityId player_id);
+    void render_projectiles(Client &client);
     void render_health_bars(Client &client);
     void render_damage_numbers(Client &client,
                                std::vector<CombatEvent> const &events);

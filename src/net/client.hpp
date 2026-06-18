@@ -1,8 +1,10 @@
 #pragma once
 
+#include "animation/animation-data.hpp"
 #include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "entities/components/combat-stats.hpp"
+#include "entities/components/soldier-ai.hpp"
 #include "net/session.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/combat-system.hpp"
@@ -14,6 +16,15 @@
 #include <vector>
 
 class App;
+
+struct ProjectileVisual {
+    Vec2f pos;
+    Vec2f dst;
+    Vec2f dir;
+    float speed = 400.f;
+    float total_dist = 0.f;
+    float traveled = 0.f;
+};
 
 struct RemoteEntity {
     EntityId id = 0;
@@ -34,10 +45,20 @@ struct RemoteEntity {
     // Interactable
     bool interactable = false;
 
-    // Visual (derived from kind + team)
+    // Soldier state (synced from SoldierAI component)
+    SoldierStance soldier_stance = SoldierStance::follow;
+    SoldierRole soldier_role = SoldierRole::melee;
+    int vision_range = 6;
+    float vision_arc = 180.f;
+
+    // Visual (derived from kind + team, overridden by synced Sprite)
     SDL_FColor color{0.3f, 0.5f, 0.9f, 1.f};
     float scale = 1.f;
+    char texture_name[32] = "entity";
+    bool visible = true;
+    bool snapshot = false;
     bool hit_flash = false;
+    AnimationState anim_state;
 };
 
 class Client {
@@ -49,14 +70,8 @@ class Client {
     void handle_combat_event(EntityId attacker_id, EntityId defender_id,
                              int damage, bool killed);
 
-    EntityId player_id() const
-    {
-        return player_id_;
-    }
-    Team player_team() const
-    {
-        return player_team_;
-    }
+    EntityId player_id() const { return player_id_; }
+    Team player_team() const { return player_team_; }
 
     // Verifies authority of server
     awaitable<bool> authenticate_transport(std::shared_ptr<Session> t);
@@ -66,6 +81,10 @@ class Client {
     void send_interact();
     void send_rest();
     void send_recruit();
+    void send_recruit_ranged();
+    void send_soldier_command();
+    void send_respawn();
+    void send_cycle_formation();
     void send_chat(std::string const &msg);
     void send_dialogue_action(std::string const &action);
 
@@ -85,49 +104,27 @@ class Client {
         }
     }
 
-    Session *session() const
-    {
-        return session_.get();
-    }
+    Session *session() const { return session_.get(); }
 
     void interpolate_entities(float dt);
-    std::vector<RemoteEntity> &remote_entities()
-    {
-        return remote_entities_;
-    }
+    std::vector<RemoteEntity> &remote_entities() { return remote_entities_; }
     std::vector<RemoteEntity> const &remote_entities() const
     {
         return remote_entities_;
     }
-    WorldState &world_state()
+    WorldState &world_state() { return world_state_; }
+    WorldState const &world_state() const { return world_state_; }
+
+    PlayerVisibility &player_visibility() { return player_visibility_; }
+    PlayerVisibility const &player_visibility() const
     {
-        return world_state_;
-    }
-    WorldState const &world_state() const
-    {
-        return world_state_;
-    }
-    void reveal_tile(Vec2i tile)
-    {
-        world_state_.reveal_tile(tile);
+        return player_visibility_;
     }
 
-    SurvivalState const &survival() const
-    {
-        return player_survival_;
-    }
-    void set_quests(QuestManager const *q)
-    {
-        quests_ = q;
-    }
-    QuestManager const &quests() const
-    {
-        return *quests_;
-    }
-    std::vector<CombatEvent> &combat_events()
-    {
-        return combat_events_;
-    }
+    SurvivalState const &survival() const { return player_survival_; }
+    void set_quests(QuestManager const *q) { quests_ = q; }
+    QuestManager const &quests() const { return *quests_; }
+    std::vector<CombatEvent> &combat_events() { return combat_events_; }
     std::vector<CombatEvent> const &combat_events() const
     {
         return combat_events_;
@@ -136,14 +133,20 @@ class Client {
     {
         return chat_history_;
     }
-    DialogueState const &dialogue() const
+    std::vector<ProjectileVisual> &projectile_visuals()
     {
-        return dialogue_;
+        return projectile_visuals_;
     }
-    DialogueState &dialogue()
+    std::vector<ProjectileVisual> const &projectile_visuals() const
     {
-        return dialogue_;
+        return projectile_visuals_;
     }
+    uint8_t selected_roles() const { return selected_roles_; }
+    void toggle_selected_role(uint8_t role) { selected_roles_ ^= (1 << role); }
+    int formation_idx() const { return formation_idx_; }
+    void set_formation_idx(int idx) { formation_idx_ = idx; }
+    DialogueState const &dialogue() const { return dialogue_; }
+    DialogueState &dialogue() { return dialogue_; }
 
   private:
     // Only the read_loop in attach_transport may construct this token
@@ -157,6 +160,7 @@ class Client {
 
     App *app_;
     WorldState world_state_;
+    PlayerVisibility player_visibility_;
     SurvivalState player_survival_;
     QuestManager const *quests_ = nullptr;
 
@@ -168,6 +172,8 @@ class Client {
     int player_hp_ = 20, player_max_hp_ = 20;
     int player_attack_ = 4, player_defense_ = 3;
     float player_attack_range_ = 80.f;
+    int player_vision_range_ = 6;
+    float player_vision_arc_ = 180.f;
     bool player_alive_ = true;
 
     // std::queue<TransportGuard> transport_guards_; // Because there could be
@@ -176,7 +182,10 @@ class Client {
     std::shared_ptr<Session> session_;
     std::vector<RemoteEntity> remote_entities_;
     std::vector<CombatEvent> combat_events_;
+    std::vector<ProjectileVisual> projectile_visuals_;
     std::vector<std::string> chat_history_;
+    uint8_t selected_roles_ = 0xFF; // all selected by default
+    int formation_idx_ = 0;
     DialogueState dialogue_;
 
     // Deferred sync processing (io_context thread → main thread)

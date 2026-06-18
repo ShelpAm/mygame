@@ -6,7 +6,7 @@
 struct Movement {
     Vec2f velocity;
     Vec2f target_pos;
-    float speed = 200.f;
+    float speed{};
     Vec2f facing;
 
     // velocity(8) + facing(8) = 16 bytes

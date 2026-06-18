@@ -107,8 +107,9 @@ bool SaveManager::load(std::string const &path, SaveData &out)
 
         if (root.contains("seen_tiles"))
             for (auto const &t : root.at("seen_tiles").as_array())
-                out.seen_tiles.emplace_back((int)t.as_array()[0].as_int64(),
-                                            (int)t.as_array()[1].as_int64());
+                // TODO: player_explored_tiles per-player when load_world is
+                // implemented
+                (void)t;
 
         if (root.contains("relationships"))
             for (auto const &r : root.at("relationships").as_array())

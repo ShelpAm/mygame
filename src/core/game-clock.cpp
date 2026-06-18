@@ -7,8 +7,8 @@ Stopwatch::Stopwatch()
 void Stopwatch::restart()
 {
     last_tick_ = Clock::now();
-    delta_time_ = 0.f;
-    total_time_ = 0.f;
+    delta_time_ = 0.F;
+    total_time_ = 0.F;
     frame_count_ = 0;
 }
 
@@ -25,7 +25,7 @@ float Stopwatch::tick()
     ++fps_frames_;
     if (fps_accumulator_ >= fps_update_interval) {
         fps_ = static_cast<float>(fps_frames_) / fps_accumulator_;
-        fps_accumulator_ = 0.f;
+        fps_accumulator_ = 0.F;
         fps_frames_ = 0;
     }
 

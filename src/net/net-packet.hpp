@@ -22,6 +22,7 @@ enum Mask : uint16_t {
     soldier_ai = 1 << 4,  // SoldierAIComp     (17 bytes)
     interact = 1 << 5,    // InteractComp      (1 byte)
     survival = 1 << 6, // SurvivalComp      (16 bytes: food,water,health,energy)
+    vision = 1 << 7,   // VisionComp        (4 bytes: range)
 };
 } // namespace SyncComponent
 
@@ -54,7 +55,6 @@ struct NetPacket {
         disconnect = 4,
         combat_event = 5,
         recruit_soldier = 6,
-        spawn_enemy_wave = 7,
         player_input = 8,
         interact = 9,
         rest = 10,
@@ -64,6 +64,11 @@ struct NetPacket {
         entity_removed,
         state_delta,
         kicked,
+        soldier_command,
+        recruit_ranged,
+        projectile_fired,
+        respawn,
+        formation,
     };
     Type type;
     std::vector<uint8_t> payload;
@@ -97,9 +102,6 @@ struct std::formatter<NetPacket::Type> : std::formatter<std::string_view> {
         case recruit_soldier:
             name = "recruit_soldier";
             break;
-        case spawn_enemy_wave:
-            name = "spawn_enemy_wave";
-            break;
         case player_input:
             name = "player_input";
             break;
@@ -126,6 +128,21 @@ struct std::formatter<NetPacket::Type> : std::formatter<std::string_view> {
             break;
         case kicked:
             name = "kicked";
+            break;
+        case soldier_command:
+            name = "soldier_command";
+            break;
+        case recruit_ranged:
+            name = "recruit_ranged";
+            break;
+        case projectile_fired:
+            name = "projectile_fired";
+            break;
+        case respawn:
+            name = "respawn";
+            break;
+        case formation:
+            name = "formation";
             break;
         case auth:
             name = "auth";
@@ -336,6 +353,27 @@ inline std::vector<uint8_t> make_entity_id_payload(EntityId id)
 {
     std::vector<uint8_t> p;
     write_bytes(p, id);
+    return p;
+}
+
+// pid(8) + role_mask(1)
+inline std::vector<uint8_t> make_formation_payload(EntityId id,
+                                                   uint8_t role_mask)
+{
+    std::vector<uint8_t> p;
+    write_bytes(p, id);
+    p.push_back(role_mask);
+    return p;
+}
+
+inline std::vector<uint8_t> make_projectile_fired(float sx, float sy, float tx,
+                                                  float ty)
+{
+    std::vector<uint8_t> p;
+    write_float(p, sx);
+    write_float(p, sy);
+    write_float(p, tx);
+    write_float(p, ty);
     return p;
 }
 

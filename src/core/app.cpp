@@ -14,7 +14,9 @@
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 
-App::App() : camera_system_(window_width_, window_height_) {}
+App::App() : camera_system_(window_width_, window_height_)
+{
+}
 App::~App()
 {
     shutdown();
@@ -41,9 +43,30 @@ void App::init()
     SDL_SetRenderVSync(renderer_, 1);
 
     resources_ = std::make_unique<ResourceManager>();
-    resources_->load_texture(renderer_, "entity",
-                             "assets/textures/CHIBI KNIGHT-PNG/CHIBI "
-                             "KNIGHT-PNG/01-Idle_/2D_KNIGHT__Idle_000.png");
+
+    // Load all knight animation frames
+    char const *base = "assets/textures/CHIBI KNIGHT-PNG/CHIBI KNIGHT-PNG";
+    struct {
+        char const *dir;
+        char const *anim;
+        char const *prefix;
+        int count;
+    } anims[] = {
+        {"01-Idle_", "Idle", "knight_idle", 8},
+        {"02-Run_", "Run", "knight_run", 8},
+        {"03-Attack_", "Attack", "knight_attack", 8},
+        {"05-Hurt_", "Hurt", "knight_hurt", 8},
+        {"06-Die_", "Die", "knight_die", 8},
+    };
+    for (auto &a : anims) {
+        for (int i = 0; i < a.count; ++i) {
+            char name[64], path[256];
+            snprintf(name, sizeof(name), "%s_%d", a.prefix, i);
+            snprintf(path, sizeof(path), "%s/%s/2D_KNIGHT__%s_%03d.png", base,
+                     a.dir, a.anim, i);
+            resources_->load_texture(renderer_, name, path);
+        }
+    }
 
     render_system_ =
         std::make_unique<RenderSystem>(renderer_, *resources_, camera_system_);
@@ -169,7 +192,8 @@ void App::run()
 
 void App::shutdown()
 {
-    if (!window_) // Shutdown already called or init failed, nothing to do
+    // Shutdown already called or init failed, nothing to do
+    if (window_ == nullptr)
         return;
 
     spdlog::info("App: shutting down");
@@ -200,11 +224,11 @@ void App::shutdown()
     render_system_.reset();
     resources_.reset();
 
-    if (renderer_) {
+    if (renderer_ == nullptr) {
         SDL_DestroyRenderer(renderer_);
         renderer_ = nullptr;
     }
-    if (window_) {
+    if (window_ == nullptr) {
         SDL_DestroyWindow(window_);
         window_ = nullptr;
     }
@@ -238,7 +262,8 @@ void App::process_events()
 
 void App::update(float dt)
 {
-    spdlog::trace("App::update dt={} mode={}", dt, (int)session_mode_);
+    spdlog::trace("App::update dt={} mode={}", dt,
+                  static_cast<int>(session_mode_));
 
     if (input_.just_pressed(InputManager::Action::help))
         show_help_ = !show_help_;
@@ -276,8 +301,27 @@ void App::update(float dt)
             client_->send_interact();
         if (input_.just_pressed(InputManager::Action::rest))
             client_->send_rest();
-        if (input_.is_pressed(InputManager::Action::recruit))
+        if (input_.just_pressed(InputManager::Action::recruit))
             client_->send_recruit();
+        if (input_.just_pressed(InputManager::Action::recruit_ranged))
+            client_->send_recruit_ranged();
+        if (input_.just_pressed(InputManager::Action::guard))
+            client_->send_soldier_command();
+        if (input_.just_pressed(InputManager::Action::respawn))
+            client_->send_respawn();
+        if (input_.just_pressed(InputManager::Action::cycle_formation))
+            client_->send_cycle_formation();
+        if (input_.just_pressed(InputManager::Action::select_melee))
+            client_->toggle_selected_role(0);
+        if (input_.just_pressed(InputManager::Action::select_ranged))
+            client_->toggle_selected_role(1);
+        if (input_.just_pressed(InputManager::Action::debug_toggle)) {
+            static bool trace_on = false;
+            trace_on = !trace_on;
+            spdlog::set_level(trace_on ? spdlog::level::trace
+                                       : spdlog::level::debug);
+            spdlog::info("Log level: {}", trace_on ? "trace" : "debug");
+        }
         if (input_.just_pressed(InputManager::Action::quick_save))
             quick_save();
         if (input_.just_pressed(InputManager::Action::load_menu))

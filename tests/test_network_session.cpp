@@ -237,21 +237,20 @@ BOOST_AUTO_TEST_CASE(network_transport_write_after_close_throws)
         auto peer = co_await NetworkSession::connect("127.0.0.1", kPort);
         co_await peer->read();
         peer->close();
-        BOOST_CHECK_THROW(
-            co_await peer->write({NetPacket::chat, {}}), std::runtime_error);
+        BOOST_CHECK_THROW(co_await peer->write({NetPacket::chat, {}}),
+                          std::runtime_error);
         acceptor->stop();
     }());
 }
 
 BOOST_AUTO_TEST_CASE(network_transport_read_after_close_throws)
 {
-    BOOST_CHECK_THROW(
-        (void)run_sync([]() -> asio::awaitable<void> {
-            auto peer = std::make_shared<NetworkSession>();
-            peer->close();
-            co_await peer->read();
-        }()),
-        boost::system::system_error);
+    BOOST_CHECK_THROW((void)run_sync([]() -> asio::awaitable<void> {
+                          auto peer = std::make_shared<NetworkSession>();
+                          peer->close();
+                          co_await peer->read();
+                      }()),
+                      boost::system::system_error);
 }
 
 BOOST_AUTO_TEST_CASE(network_transport_connection_timeout)
@@ -296,8 +295,7 @@ BOOST_AUTO_TEST_CASE(disconnect_during_read)
                                     std::chrono::milliseconds(10))
             .async_wait(asio::use_awaitable);
         w = co_await NetworkSession::connect("127.0.0.1", 58888);
-        co_await asio::steady_timer(Session::io(),
-                                    std::chrono::milliseconds(1))
+        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(1))
             .async_wait(asio::use_awaitable);
         BOOST_TEST(connected);
 

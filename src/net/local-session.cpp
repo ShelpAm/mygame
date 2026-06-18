@@ -1,7 +1,9 @@
 #include "net/local-session.hpp"
 #include <spdlog/spdlog.h>
 
-LocalSession::LocalSession() : channel_(Session::io(), 128) {}
+LocalSession::LocalSession() : channel_(Session::io(), 128)
+{
+}
 
 LocalSession::~LocalSession()
 {

@@ -15,6 +15,8 @@ class InputManager {
         interact,
         rest,
         recruit,
+        recruit_ranged,
+        guard,
         quick_save,
         load_menu,
         help,
@@ -25,7 +27,12 @@ class InputManager {
         pause,
         escape,
         confirm,
-        cancel
+        cancel,
+        debug_toggle,
+        respawn,
+        cycle_formation,
+        select_melee,
+        select_ranged
     };
 
     InputManager();
