@@ -8,9 +8,7 @@ ResourceManager::~ResourceManager()
     clear();
 }
 
-SDL_Texture *ResourceManager::load_texture(SDL_Renderer *renderer,
-                                           std::string const &name,
-                                           std::string const &path)
+SDL_Texture *ResourceManager::load_texture(SDL_Renderer *renderer, std::string const &name, std::string const &path)
 {
     if (textures_.contains(name)) {
         spdlog::warn("ResourceManager: texture {} already loaded, returning "
@@ -21,15 +19,13 @@ SDL_Texture *ResourceManager::load_texture(SDL_Renderer *renderer,
 
     SDL_Surface *surface = IMG_Load(path.c_str());
     if (!surface) {
-        spdlog::error("ResourceManager: failed to load texture {}: {}", path,
-                      SDL_GetError());
+        spdlog::error("ResourceManager: failed to load texture {}: {}", path, SDL_GetError());
         return nullptr;
     }
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
     SDL_DestroySurface(surface);
     if (!texture) {
-        spdlog::error("ResourceManager: failed to create texture from {}: {}",
-                      path, SDL_GetError());
+        spdlog::error("ResourceManager: failed to create texture from {}: {}", path, SDL_GetError());
         return nullptr;
     }
     textures_[name] = texture;

@@ -23,19 +23,15 @@ bool QuestManager::load_from_json(std::string const &json_path)
                 qo.type = std::string(o.as_object().at("type").as_string());
                 qo.target = std::string(o.as_object().at("target").as_string());
                 if (o.as_object().contains("count"))
-                    qo.count =
-                        static_cast<int>(o.as_object().at("count").as_int64());
+                    qo.count = static_cast<int>(o.as_object().at("count").as_int64());
                 if (o.as_object().contains("text_key"))
-                    qo.text =
-                        std::string(o.as_object().at("text_key").as_string());
+                    qo.text = std::string(o.as_object().at("text_key").as_string());
                 else if (o.as_object().contains("text"))
                     qo.text = std::string(o.as_object().at("text").as_string());
                 q.objectives.push_back(qo);
             }
-            q.reward_trust = static_cast<int>(
-                obj.at("rewards").as_object().at("trust").as_int64());
-            q.reward_gold = static_cast<int>(
-                obj.at("rewards").as_object().at("gold").as_int64());
+            q.reward_trust = static_cast<int>(obj.at("rewards").as_object().at("trust").as_int64());
+            q.reward_gold = static_cast<int>(obj.at("rewards").as_object().at("gold").as_int64());
             quests_.push_back(std::move(q));
         }
         return true;

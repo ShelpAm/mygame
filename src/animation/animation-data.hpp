@@ -41,4 +41,4 @@ void switch_clip(AnimationState &state, AnimationClip const *clip);
 
 // Advance frame timer, return current frame texture name.
 // Also updates flip based on horizontal velocity.
-char const *tick_animation(AnimationState &state, Vec2f velocity, float dt);
+const char *tick_animation(AnimationState &state, Vec2f velocity, float dt);

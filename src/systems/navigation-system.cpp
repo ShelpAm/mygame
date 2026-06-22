@@ -23,15 +23,40 @@ void NavigationSystem::set_walkable(Vec2i tile, bool walkable)
     }
 }
 
+bool NavigationSystem::walkable_line(Vec2i a, Vec2i b) const
+{
+    int dx = std::abs(b.x - a.x);
+    int dy = std::abs(b.y - a.y);
+    int sx = a.x < b.x ? 1 : -1;
+    int sy = a.y < b.y ? 1 : -1;
+    int err = dx - dy;
+
+    int x = a.x, y = a.y;
+    while (true) {
+        if (!is_walkable({x, y}))
+            return false;
+        if (x == b.x && y == b.y)
+            break;
+        int e2 = 2 * err;
+        if (e2 > -dy) {
+            err -= dy;
+            x += sx;
+        }
+        if (e2 < dx) {
+            err += dx;
+            y += sy;
+        }
+    }
+    return true;
+}
+
 std::vector<Vec2i> NavigationSystem::find_path(Vec2i start, Vec2i goal) const
 {
     if (!is_walkable(goal))
         return {};
 
     using Node = std::pair<int, Vec2i>;
-    auto heuristic = [](Vec2i a, Vec2i b) -> int {
-        return std::abs(a.x - b.x) + std::abs(a.y - b.y);
-    };
+    auto heuristic = [](Vec2i a, Vec2i b) -> int { return std::abs(a.x - b.x) + std::abs(a.y - b.y); };
 
     std::priority_queue<Node, std::vector<Node>, std::greater<>> openSet;
     std::unordered_map<Vec2i, Vec2i, std::hash<Vec2i>> cameFrom;

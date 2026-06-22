@@ -7,7 +7,6 @@
 class WorldState;
 class App;
 class LocaleManager;
-class GameMode;
 
 class UIManager {
   public:
@@ -19,12 +18,22 @@ class UIManager {
     void update(float dt);
     void render(WorldState *world_state, App &app);
 
+    bool show_help() const { return show_help_; }
+    void toggle_help() { show_help_ = !show_help_; }
+    bool show_load_menu() const { return show_load_menu_; }
+    void toggle_load_menu() { show_load_menu_ = !show_load_menu_; }
+    bool show_multiplayer() const { return show_multiplayer_; }
+    void toggle_multiplayer() { show_multiplayer_ = !show_multiplayer_; }
+
   private:
     [[maybe_unused]] SDL_Window *window_;
     SDL_Renderer *renderer_;
     bool show_journal_ = false;
     bool show_inventory_ = false;
     bool show_map_ = false;
+    bool show_load_menu_ = false;
+    bool show_help_ = false;
+    bool show_multiplayer_ = false;
 
     void render_hud(WorldState const &world_state, App &app);
     void render_journal(App const &app);

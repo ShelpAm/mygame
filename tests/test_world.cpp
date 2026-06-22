@@ -61,51 +61,60 @@ BOOST_AUTO_TEST_CASE(season_cycles_to_spring)
     BOOST_TEST(ws.season() == 0);
 }
 
-BOOST_AUTO_TEST_CASE(tile_visibility_default_unseen)
+BOOST_AUTO_TEST_CASE(player_visibility_default_empty)
 {
-    WorldState ws;
+    PlayerVisibility vis;
+    BOOST_TEST(!vis.is_explored(Vec2i(0, 0)));
+    BOOST_TEST(vis.query(Vec2i(0, 0)) == TileVisibility::Unexplored);
+}
+
+BOOST_AUTO_TEST_CASE(player_visibility_explore_single)
+{
+    PlayerVisibility vis;
     // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers)
-    BOOST_TEST(!ws.is_tile_explored(Vec2i(0, 0)));
-    BOOST_TEST(!ws.is_tile_explored(Vec2i(10, 10)));
+    vis.explore_single(Vec2i(5, 5));
+    BOOST_TEST(vis.is_explored(Vec2i(5, 5)));
+    BOOST_TEST(!vis.is_explored(Vec2i(5, 6)));
+    BOOST_TEST(vis.query(Vec2i(5, 5)) == TileVisibility::Explored);
     // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 }
 
-BOOST_AUTO_TEST_CASE(reveal_single_tile)
+BOOST_AUTO_TEST_CASE(player_visibility_explore_radius)
 {
-    WorldState ws;
+    PlayerVisibility vis;
     // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers)
-    ws.reveal_tile(Vec2i(5, 5));
-    BOOST_TEST(ws.is_tile_explored(Vec2i(5, 5)));
-    BOOST_TEST(!ws.is_tile_explored(Vec2i(5, 6)));
-    // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
-}
-
-BOOST_AUTO_TEST_CASE(reveal_radius)
-{
-    WorldState ws;
-    // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers)
-    // explore_radius uses world-space coords with circular distance
     constexpr auto kRadius = 3.F;
-    ws.explore_radius(center_of_tile(Vec2i(10, 10)), kRadius * tile_size);
-    BOOST_TEST(ws.is_tile_explored(Vec2i(10, 10)));
-    BOOST_TEST(ws.is_tile_explored(Vec2i(10, 13)));
-    BOOST_TEST(ws.is_tile_explored(Vec2i(10, 7)));
-    BOOST_TEST(ws.is_tile_explored(Vec2i(13, 10)));
-    BOOST_TEST(ws.is_tile_explored(Vec2i(7, 10)));
-    // Corner at Euclidean distance sqrt(3²+3²) tile_units ≈ 4.24 > 3 — not explored
-    BOOST_TEST(!ws.is_tile_explored(Vec2i(13, 13)));
-    // Outside radius
-    BOOST_TEST(!ws.is_tile_explored(Vec2i(14, 14)));
+    vis.explore_radius(center_of_tile(Vec2i(10, 10)), kRadius * tile_size);
+    BOOST_TEST(vis.is_explored(Vec2i(10, 10)));
+    BOOST_TEST(vis.is_explored(Vec2i(10, 13)));
+    BOOST_TEST(vis.is_explored(Vec2i(10, 7)));
+    BOOST_TEST(vis.is_explored(Vec2i(13, 10)));
+    BOOST_TEST(vis.is_explored(Vec2i(7, 10)));
+    // Corner at Euclidean distance sqrt(3²+3²) > 3 — not explored
+    BOOST_TEST(!vis.is_explored(Vec2i(13, 13)));
+    BOOST_TEST(!vis.is_explored(Vec2i(14, 14)));
     // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 }
 
-BOOST_AUTO_TEST_CASE(repeat_reveal_is_safe)
+BOOST_AUTO_TEST_CASE(player_visibility_double_explore_is_safe)
 {
-    WorldState ws;
+    PlayerVisibility vis;
     // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers)
-    ws.reveal_tile(Vec2i(0, 0));
-    ws.reveal_tile(Vec2i(0, 0)); // Should not crash or change state
-    BOOST_TEST(ws.is_tile_explored(Vec2i(0, 0)));
+    vis.explore_single(Vec2i(0, 0));
+    vis.explore_single(Vec2i(0, 0)); // Should not crash or change state
+    BOOST_TEST(vis.is_explored(Vec2i(0, 0)));
+    // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
+}
+
+BOOST_AUTO_TEST_CASE(player_visibility_visible_overrides_explored)
+{
+    PlayerVisibility vis;
+    // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers)
+    vis.explore_single(Vec2i(0, 0));
+    BOOST_TEST(vis.query(Vec2i(0, 0)) == TileVisibility::Explored);
+    vis.set_visible_from_center(Vec2i(0, 0), 1);
+    BOOST_TEST(vis.query(Vec2i(0, 0)) == TileVisibility::Visible);
+    BOOST_TEST(vis.is_visible(Vec2i(0, 0)));
     // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 }
 
@@ -145,8 +154,7 @@ BOOST_AUTO_TEST_CASE(time_of_day_wraps)
     WorldState ws;
     ws.update(k18Hours); // Start at ~6:00, add 18 hours -> ~0:00 next day
     float tod = ws.time_of_day();
-    bool nearMidnight = (tod < kMidnightThreshold) ||
-                        (tod >= kAlmostMidnightLow && tod <= kAlmostMidnightHigh);
+    bool nearMidnight = (tod < kMidnightThreshold) || (tod >= kAlmostMidnightLow && tod <= kAlmostMidnightHigh);
     BOOST_TEST(nearMidnight, "time should be around midnight, got: " << tod);
 }
 

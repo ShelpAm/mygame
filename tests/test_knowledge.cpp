@@ -24,20 +24,17 @@ BOOST_AUTO_TEST_CASE(merging_origins_upgrades_certainty)
 
     Fact f1;
     f1.id = "event";
-    f1.origins.push_back(
-        {Fact::Origin::Source::npc_testimony, "npc_1", "city_a", 1, 70});
+    f1.origins.push_back({Fact::Origin::Source::npc_testimony, "npc_1", "city_a", 1, 70});
     kg.add_or_update_fact(f1);
 
     Fact f2;
     f2.id = "event";
-    f2.origins.push_back(
-        {Fact::Origin::Source::npc_testimony, "npc_2", "city_b", 2, 60});
+    f2.origins.push_back({Fact::Origin::Source::npc_testimony, "npc_2", "city_b", 2, 60});
     kg.add_or_update_fact(f2);
 
     Fact f3;
     f3.id = "event";
-    f3.origins.push_back(
-        {Fact::Origin::Source::artifact_read, "", "city_c", 3, 80});
+    f3.origins.push_back({Fact::Origin::Source::artifact_read, "", "city_c", 3, 80});
     kg.add_or_update_fact(f3);
 
     Fact const *f = kg.fact("event");
@@ -51,8 +48,7 @@ BOOST_AUTO_TEST_CASE(player_witness_fact)
     KnowledgeGraph kg;
     Fact f;
     f.id = "witnessed";
-    f.origins.push_back(
-        {Fact::Origin::Source::player_witness, "", "here", 10, 100});
+    f.origins.push_back({Fact::Origin::Source::player_witness, "", "here", 10, 100});
     kg.add_or_update_fact(f);
 
     auto witnessed = kg.facts_witnessed();
@@ -67,8 +63,7 @@ BOOST_AUTO_TEST_CASE(heard_only_fact)
     KnowledgeGraph kg;
     Fact f;
     f.id = "heard";
-    f.origins.push_back(
-        {Fact::Origin::Source::npc_testimony, "merchant", "port", 5, 40});
+    f.origins.push_back({Fact::Origin::Source::npc_testimony, "merchant", "port", 5, 40});
     kg.add_or_update_fact(f);
 
     auto witnessed = kg.facts_witnessed();

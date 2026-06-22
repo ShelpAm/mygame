@@ -27,23 +27,22 @@
 #include "world/world-state.hpp"
 #include <boost/json.hpp>
 #include <cmath>
-#include <cstring>
 #include <fstream>
 #include <imgui.h>
+#include <random>
 #include <spdlog/spdlog.h>
+#include <string_view>
 
 static std::string readFile(std::string const &path)
 {
     std::ifstream f(path);
-    return {std::istreambuf_iterator<char>(f),
-            std::istreambuf_iterator<char>()};
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
 GameMode::GameMode() = default;
 GameMode::~GameMode()
 {
-    spdlog::info("GameMode: destructor called, shutting down server");
-    server_.reset();
+    spdlog::info("GameMode: destructor called");
 }
 
 void GameMode::init_world()
@@ -69,23 +68,16 @@ void GameMode::init_world()
     // PostUpdate. Within PreUpdate, depends_on ensures:
     //   SurvivalDecay → SoldierAI → CombatResolution
 
-    server_ = std::make_unique<Server>();
-    server_->set_game_mode(this);
-
     combat_.set_dirty_callback([this](EntityId eid) { mark_dirty(eid); });
 }
 
 void GameMode::load_topics()
 {
     // Topics
-    topic_registry_.register_topic("ugarit_sack", "the Sack of Ugarit",
-                                   "events");
-    topic_registry_.register_topic("sea_peoples", "the Sea Peoples",
-                                   "factions");
-    topic_registry_.register_topic("byblos_king", "the King of Byblos",
-                                   "people");
-    topic_registry_.register_topic("copper_trade", "the Copper Trade",
-                                   "resources");
+    topic_registry_.register_topic("ugarit_sack", "the Sack of Ugarit", "events");
+    topic_registry_.register_topic("sea_peoples", "the Sea Peoples", "factions");
+    topic_registry_.register_topic("byblos_king", "the King of Byblos", "people");
+    topic_registry_.register_topic("copper_trade", "the Copper Trade", "resources");
     knowledge_.mark_topic_known("ugarit_sack");
     knowledge_.mark_topic_known("sea_peoples");
     knowledge_.mark_topic_known("byblos_king");
@@ -105,8 +97,7 @@ void GameMode::load_factions()
             f.wealth = static_cast<int>(obj.at("wealth").as_int64());
             if (obj.contains("relations"))
                 for (auto const &[k, v] : obj.at("relations").as_object())
-                    f.relations[std::string(k)] =
-                        static_cast<int>(v.as_int64());
+                    f.relations[std::string(k)] = static_cast<int>(v.as_int64());
             factions_.add_faction(std::move(f));
         }
     }
@@ -118,8 +109,7 @@ void GameMode::load_factions()
 
 void GameMode::load_events()
 {
-    events_ =
-        std::make_unique<EventSimulator>(factions_, knowledge_, world_state_);
+    events_ = std::make_unique<EventSimulator>(factions_, knowledge_, world_state_);
     // Load events
     try {
         auto json = boost::json::parse(readFile("assets/data/events.json"));
@@ -132,20 +122,15 @@ void GameMode::load_events()
             if (obj.contains("location_id"))
                 ev.location_id = std::string(obj.at("location_id").as_string());
             if (obj.contains("source_faction_id"))
-                ev.source_faction_id =
-                    std::string(obj.at("source_faction_id").as_string());
+                ev.source_faction_id = std::string(obj.at("source_faction_id").as_string());
             if (obj.contains("target_faction_id"))
-                ev.target_faction_id =
-                    std::string(obj.at("target_faction_id").as_string());
+                ev.target_faction_id = std::string(obj.at("target_faction_id").as_string());
             if (obj.contains("power_shift"))
-                ev.power_shift =
-                    static_cast<int>(obj.at("power_shift").as_int64());
+                ev.power_shift = static_cast<int>(obj.at("power_shift").as_int64());
             if (obj.contains("wealth_shift"))
-                ev.wealth_shift =
-                    static_cast<int>(obj.at("wealth_shift").as_int64());
+                ev.wealth_shift = static_cast<int>(obj.at("wealth_shift").as_int64());
             if (obj.contains("cohesion_shift"))
-                ev.cohesion_shift =
-                    static_cast<int>(obj.at("cohesion_shift").as_int64());
+                ev.cohesion_shift = static_cast<int>(obj.at("cohesion_shift").as_int64());
             auto ts = std::string(obj.at("type").as_string());
             if (ts == "Battle")
                 ev.type = GameEvent::Type::battle;
@@ -194,8 +179,7 @@ void GameMode::load_npcs()
                     e.fact_id = std::string(ko.at("fact_id").as_string());
                     e.version = std::string(ko.at("version").as_string());
                     if (ko.contains("confidence"))
-                        e.confidence =
-                            static_cast<int>(ko.at("confidence").as_int64());
+                        e.confidence = static_cast<int>(ko.at("confidence").as_int64());
                     if (ko.contains("witnessed"))
                         e.witnessed = ko.at("witnessed").as_bool();
                     if (ko.contains("source"))
@@ -204,12 +188,10 @@ void GameMode::load_npcs()
                 }
             auto npc_eid = spawn_npc(id, name, x, y, pers, facts);
             if (obj.contains("captain") && obj.at("captain").as_bool()) {
-                int gc = obj.contains("guards")
-                             ? static_cast<int>(obj.at("guards").as_int64())
-                             : 3;
-                Team t = pers == "hostile" ? Team::enemy : Team::neutral;
-                spawn_guards(npc_eid, gc, t);
+                int gc = obj.contains("guards") ? static_cast<int>(obj.at("guards").as_int64()) : 3;
+                spawn_guards(npc_eid, gc);
             }
+            relayout_formation(npc_eid);
         }
     }
     catch (std::exception const &e) {
@@ -231,120 +213,103 @@ void GameMode::init_systems()
                             mark_dirty(e.id());
                         });
 
-    soldier_ai_sys_ =
-        world_.system<SoldierAI, Position, Movement, CombatStats>("SoldierAI")
-            .kind(flecs::PreUpdate)
-            .each([this](flecs::entity e, SoldierAI &ai, Position &pos,
-                         Movement &mov, CombatStats &cs) {
-                run_soldier_ai(world_, e, ai, pos, mov, cs,
-                               [this](EntityId eid) { mark_dirty(eid); });
-            });
+    soldier_ai_sys_ = world_.system<SoldierAI, Transform, Movement, CombatStats>("SoldierAI")
+                          .kind(flecs::PreUpdate)
+                          .each([this](flecs::entity e, SoldierAI &ai, Transform &pos, Movement &mov, CombatStats &cs) {
+                              run_soldier_ai(world_, e, ai, pos, mov, cs, navigation_, dt_.count(),
+                                             [this](EntityId eid) { mark_dirty(eid); });
+                          });
     soldier_ai_sys_.depends_on(survival_sys_);
 
-    combat_resolution_sys_ =
-        world_.system<>("CombatResolution")
-            .kind(flecs::PreUpdate)
-            .run([this](flecs::iter &) {
-                run_combat_batch(world_, dt_.count(), pending_combat_events_,
-                                 projectiles_,
-                                 [this](EntityId eid) { mark_dirty(eid); });
-            });
+    combat_resolution_sys_ = world_.system<>("CombatResolution").kind(flecs::PreUpdate).run([this](flecs::iter) {
+        run_combat_batch(world_, dt_.count(), pending_combat_events_, projectiles_,
+                         [this](EntityId eid) { mark_dirty(eid); });
+    });
     combat_resolution_sys_.depends_on(soldier_ai_sys_);
 
     // -- OnUpdate phase: physics --
 
-    movement_sys_ =
-        world_.system<Position, Movement>("Movement")
-            .kind(flecs::OnUpdate)
-            .each([this](flecs::entity e, Position &p, Movement &m) {
-                constexpr auto eps = 1e-5F; // Epsilon
-                if (m.velocity.length() > eps) {
-                    p.world_pos += m.velocity * dt_.count();
-                    m.facing = m.velocity * (1.F / m.velocity.length());
-                    mark_dirty(e.id());
-                }
+    movement_sys_ = world_.system<Transform, Movement>("Movement")
+                        .kind(flecs::OnUpdate)
+                        .each([this](flecs::entity e, Transform &p, Movement &m) {
+                            constexpr auto eps = 1e-5F; // Epsilon
+                            if (m.velocity.length() > eps) {
+                                p.world_pos += m.velocity * dt_.count();
+                                p.facing = m.velocity.normalized();
+                                mark_dirty(e.id());
 
-                if (e.has<Player>())
-                    formation_update(e.id(), p, m);
-            });
+                                // FIXME: Temporarily skip checking
+                                // if (e.has<PlayerTag>() || e.has<NPCState>())
+                                relayout_formation(e.id());
+                            }
+                        });
 
     collision_system_ = std::make_unique<CollisionSystem>();
-    collision_sys_ =
-        world_.system<Position, Collider>("Collision")
-            .kind(flecs::OnUpdate)
-            .each([this](flecs::entity e, Position &p, Collider &c) {
-                Vec2f const original = p.world_pos;
-                Vec2f pos = original;
+    entity_query_ = world_.query<Transform, Collider>();
+    collision_sys_ = world_.system<Transform, Collider>("Collision")
+                         .kind(flecs::OnUpdate)
+                         .each([this](flecs::entity e, Transform &p, Collider &c) {
+                             Vec2f const original = p.world_pos;
+                             Vec2f pos = original;
 
-                pos = collision_system_->resolve_tile_collisions(pos, c.radius);
+                             // 1. Tile collision (hard push-out)
+                             pos = collision_system_->resolve_tile_collisions(pos, c.radius);
 
-                world_.query<Position, Collider>().each(
-                    [&](flecs::entity other, Position const &op,
-                        Collider const &oc) {
-                        if (other == e)
-                            return;
-                        float dx = pos.x - op.world_pos.x;
-                        float dy = pos.y - op.world_pos.y;
-                        float dist = (pos - op.world_pos).length();
-                        float min_dist = c.radius + oc.radius;
-                        if (dist < min_dist) {
-                            constexpr auto eps = 1e-5F; // Epsilon
-                            if (dist > eps) {
-                                float overlap = min_dist - dist;
-                                pos.x += (dx / dist) * overlap;
-                                pos.y += (dy / dist) * overlap;
-                            }
-                            else {
-                                pos.x += min_dist;
-                            }
-                        }
-                    });
+                             // 2. Soft separation — accumulate forces from nearby entities
+                             Vec2f separation_force = {0.F, 0.F};
+                             bool const is_player = e.has<PlayerTag>();
 
-                if (pos.x != original.x || pos.y != original.y) {
-                    p.world_pos = pos;
-                    mark_dirty(e.id());
-                }
-            });
+                             entity_query_.each([&](flecs::entity other, Transform const &op, Collider const &oc) {
+                                 if (other == e)
+                                     return;
+                                 float const dx = pos.x - op.world_pos.x;
+                                 float const dy = pos.y - op.world_pos.y;
+                                 float const dist = std::hypot(dx, dy);
+                                 float const min_dist = c.radius + oc.radius;
+
+                                 if (dist < min_dist && dist > 1e-5F) {
+                                     float force_factor = (min_dist - dist) / min_dist;
+                                     float weight = other.has<PlayerTag>() ? 15.F : 1.F;
+                                     separation_force.x += (dx / dist) * force_factor * weight;
+                                     separation_force.y += (dy / dist) * force_factor * weight;
+                                 }
+                             });
+
+                             // Player is immune to separation push
+                             if (is_player)
+                                 separation_force = {0.F, 0.F};
+
+                             constexpr float kSeparationPushSpeed = 3.5F;
+                             pos.x += separation_force.x * kSeparationPushSpeed;
+                             pos.y += separation_force.y * kSeparationPushSpeed;
+
+                             // 3. Tile collision re-check
+                             pos = collision_system_->resolve_tile_collisions(pos, c.radius);
+
+                             if (pos.x != original.x || pos.y != original.y) {
+                                 p.world_pos = pos;
+                                 mark_dirty(e.id());
+                             }
+                         });
     collision_sys_.depends_on(movement_sys_);
 
     // -- PostUpdate phase: cleanup --
 
     death_marker_sys_ =
-        world_.system<CombatStats>("Combat")
-            .kind(flecs::PostUpdate)
-            .each([this](flecs::entity e, CombatStats &cs) {
-                if (cs.alive && cs.hp <= 0) {
-                    cs.alive = false;
-                    mark_dirty(e.id());
-                    for (auto &[pid, ds] : player_dialogues_)
-                        if (ds.active && ds.npc_entity == e.id())
-                            ds = {};
-                }
-            });
+        world_.system<CombatStats>("Combat").kind(flecs::PostUpdate).each([this](flecs::entity e, CombatStats &cs) {
+            if (cs.alive && cs.hp <= 0) {
+                cs.alive = false;
+                // e.remove<Collider>();
+                mark_dirty(e.id());
+                for (auto &[pid, ds] : player_dialogues_)
+                    if (ds.active && ds.npc_entity == e.id())
+                        ds = {};
+            }
+        });
 }
 
-void GameMode::start_host(int port)
-{
-    Session::spawn([](GameMode *self, auto port) -> awaitable<void> {
-        co_await self->server_->listen(port);
-    }(this, port));
-}
-
-void GameMode::stop_host()
-{
-    server_->stop_listen();
-    // Keeps current local client
-    // Don't server_->clear_transports();
-    for (auto const &s : server_->sessions()) {
-        if (typeid(s.get()) == typeid(LocalSession *)) {
-            server_->kick(s, "Host stopped the session");
-        }
-    }
-}
-
-EntityId GameMode::spawn_npc(std::string const &id, std::string const &name,
-                             float x, float y, std::string const &personality,
-                             std::vector<NPCKnowledgeEntry> const &known_facts)
+EntityId GameMode::spawn_npc(std::string const &id, std::string const &name, float x, float y,
+                             std::string const &personality, std::vector<NPCKnowledgeEntry> const &known_facts)
 {
     auto e = world_.entity();
     auto eid = e.id();
@@ -354,187 +319,195 @@ EntityId GameMode::spawn_npc(std::string const &id, std::string const &name,
     npc.display_name = name;
     npc.personality = personality;
     for (auto const &kf : known_facts)
-        npc.knowledge[kf.fact_id] = {kf.fact_id, kf.version, kf.confidence,
-                                     kf.witnessed, kf.source};
+        npc.knowledge[kf.fact_id] = {
+            .fact_id = kf.fact_id,
+            .npc_version = kf.version,
+            .confidence = kf.confidence,
+            .witnessed = kf.witnessed,
+            .source_npc_id = kf.source,
+        };
 
-    e.set<Position>(Position{{x, y}});
-    e.set<Interactable>(Interactable{64.f, true});
-    e.set<NPCState>(npc);
-    e.set<CombatStats>(CombatStats{Team::neutral, 15, 15, 2, 1, 60.f});
-    e.set<Collider>(Collider{14.f});
+    e.set(Transform{.world_pos = {x, y}, .facing = Vec2f{-x, -y}.normalized()});
+    e.set(Interactable{.interact_radius = 64.F, .can_talk = true});
+    e.set(npc);
+    e.set(CombatStats{
+        .team = Team::neutral,
+        .max_hp = 15,
+        .hp = 15,
+        .attack = 2,
+        .defense = 1,
+        .attack_range = 60.F,
+    });
+    e.set(Collider{14.F});
 
     relationships_.set_relation(id, {});
     mark_dirty(eid);
     return eid;
 }
 
-EntityId GameMode::spawn_soldier(EntityId leader, int index,
-                                 Vec2f const &facing, Vec2f extra_offset,
-                                 SoldierRole role)
+EntityId GameMode::spawn_soldier(EntityId captain_id, int index, SoldierRole role)
 {
-    auto soldier_prefab = world_.prefab()
-                              .set<Position>(Position{})
+    auto rs = soldier_role_stats(role);
+    auto target = world_.entity(captain_id);
 
-                              .set<CombatStats>(CombatStats{Team::invalid_team,
-                                                            12, 12, 3, 2, 80.f})
-                              .set<Collider>(Collider{11.f})
-                              .set<Movement>(Movement{.speed = 200})
-                              .set<SoldierAI>(SoldierAI{.follow_target = leader,
-                                                        .formation_offset = {},
-                                                        .follow_distance = 32.f,
-                                                        .engage_range = 200.f});
+    // Count how many soldiers share this new soldier's formation
+    // (across all roles), so they are laid out as one group.
+    auto &new_fm = formation(captain_id, role, captain_id);
+    char const *fm_name = new_fm.name();
+    std::size_t formation_count = 0;
 
-    // Count how many soldiers (of the same role) follow this leader
-    int role_count = 0;
-    world_.query<SoldierAI, CombatStats>().each(
-        [&](flecs::entity, SoldierAI &ai, CombatStats &cs) {
-            if (cs.alive && ai.follow_target == leader && ai.role == role)
-                ++role_count;
-        });
-    Vec2f off = player_formation(leader, (uint8_t)role)
-                    .compute_offset(index, role_count + 1, facing) +
-                extra_offset;
-
-    Vec2f start = world_.entity(leader).get<Position>().world_pos;
-    auto leader_team = world_.entity(leader).get<CombatStats>().team;
+    auto mysoldiers = world_.query_builder<SoldierAI, CombatStats>().with<BelongsTo>(captain_id).build();
+    mysoldiers.each([&](flecs::entity, SoldierAI &ai, CombatStats &cs) {
+        if (!cs.alive)
+            return;
+        auto &fm = formation(captain_id, ai.role, target.id());
+        if (std::string_view{fm.name()} == fm_name)
+            ++formation_count;
+    });
+    auto target_trans = target.get<Transform>();
+    auto offsets = new_fm.compute_offsets({
+        .count = formation_count + 1,
+        .target_facing = target_trans.facing,
+        .target_position = target_trans.world_pos,
+        .time = elapsed_,
+    });
+    auto off = offsets.at(index);
+    auto pos = world_.entity(captain_id).get<Transform>().world_pos;
 
     auto e = world_.entity()
-                 .is_a(soldier_prefab)
-                 .set<Position>(Position{start})
-
-                 .set<CombatStats>(CombatStats{leader_team, 12, 12, 3, 2, 80.f})
-                 .set<SoldierAI>(SoldierAI{leader, off, 32.f, 200.f});
-    e.set<CombatStats>(CombatStats{leader_team, 12, 12, 3, 2, 80.f});
-    e.set<Collider>(Collider{11.f});
-    e.set<Movement>(Movement{.speed = 200});
-    e.set<SoldierAI>(SoldierAI{leader, off, 32.f, 200.f});
+                 .add<BelongsTo>(captain_id)
+                 .add<Follows>(captain_id)
+                 .set(Transform{.world_pos = pos, .facing = target_trans.facing})
+                 .set(Movement{.max_speed = 40.F, .velocity{}})
+                 .set(CombatStats{
+                     .team = world_.entity(captain_id).get<CombatStats>().team,
+                     .max_hp = rs.max_hp,
+                     .hp = rs.hp,
+                     .attack = rs.attack,
+                     .defense = rs.defense,
+                     .attack_range = rs.attack_range,
+                 })
+                 .set(Collider{11.F})
+                 .set(SoldierAI{
+                     .follow_distance = 8.F,
+                     .formation_offset = off,
+                     .engage_range = rs.engage_range,
+                     .role = role,
+                     .stance = rs.stance,
+                 });
     mark_dirty(e.id());
+    relayout_formation(captain_id);
     return e.id();
 }
 
 EntityId GameMode::spawn_recruit(EntityId leader)
 {
-    auto facing = world_.entity(leader).get<Movement>().facing;
-    return spawn_soldier(leader, soldier_idx_++, facing, {32.f, 32.f});
+    return spawn_soldier(leader, soldier_idx_++, SoldierRole::melee);
 }
 
 EntityId GameMode::spawn_recruit_ranged(EntityId leader)
 {
-    auto facing = world_.entity(leader).get<Movement>().facing;
-    auto eid = spawn_soldier(leader, soldier_idx_++, facing, {32.f, 32.f},
-                             SoldierRole::ranged);
-    auto e = world_.entity(eid);
-    auto *ai = e.try_get_mut<SoldierAI>();
-    if (ai)
-        ai->role = SoldierRole::ranged;
-    auto *cs = e.try_get_mut<CombatStats>();
-    if (cs) {
-        cs->attack_range = 200.f;
-        cs->attack = 2.5f;
-        cs->defense = 1;
-    }
-    mark_dirty(eid);
-    return eid;
+    return spawn_soldier(leader, soldier_idx_++, SoldierRole::ranged);
 }
 
-void GameMode::spawn_guards(EntityId captain_eid, int count, Team team)
+void GameMode::spawn_guards(EntityId captain_eid, int count)
 {
-    auto const *cp = world_.entity(captain_eid).try_get<Position>();
-    Vec2f center = cp ? cp->world_pos : Vec2f{};
     for (int g = 0; g < count; ++g) {
-        float a = (float)g / count * 6.28318f;
-        Vec2f gp{center.x + std::cos(a) * 50.f, center.y + std::sin(a) * 50.f};
-
-        auto e = world_.entity();
-        e.set<Position>(Position{gp});
-
-        e.set<CombatStats>(CombatStats{team, 10, 10, 3, 2, 70.f});
-        e.set<Collider>(Collider{10.f});
-        e.set<Movement>(Movement{});
-        e.set<SoldierAI>(SoldierAI{
-            captain_eid, {gp.x - center.x, gp.y - center.y}, 32.f, 180.f});
-        mark_dirty(e.id());
+        spawn_soldier(captain_eid, g, SoldierRole::guard);
     }
 }
 
 void GameMode::cycle_stance(EntityId leader)
 {
-    world_.query<SoldierAI, Position>().each(
-        [&](flecs::entity e, SoldierAI &ai, Position &pos) {
-            if (ai.follow_target != leader)
-                return;
-            ai.stance = static_cast<SoldierStance>(
-                (static_cast<uint8_t>(ai.stance) + 1) % 3);
-            if (ai.stance == SoldierStance::guard)
-                ai.guard_post = pos.world_pos;
-            mark_dirty(e.id());
-        });
+    auto q = world_.query_builder<SoldierAI>().with<BelongsTo>(leader);
+    q.each([&](flecs::entity e, SoldierAI &ai) {
+        ai.stance = static_cast<SoldierStance>((static_cast<uint8_t>(ai.stance) + 1) %
+                                               static_cast<uint8_t>(SoldierStance::size_));
+        mark_dirty(e.id());
+    });
 }
 
-Formation &GameMode::player_formation(EntityId player, uint8_t role)
+Formation &GameMode::formation(EntityId captain_id, SoldierRole role, EntityId target_id)
 {
-    auto &map = player_formations_[player];
-    auto it = map.find(role);
-    if (it == map.end())
-        map[role] = std::make_unique<WedgeFormation>();
-    return *map[role];
+    auto key = FormationKey{.captain_id = captain_id, .soldier_role = role, .target = target_id};
+    if (!formations_.contains(key))
+        formations_.insert({key, std::make_unique<WedgeFormation>()});
+    return *formations_[key];
 }
 
-char const *GameMode::formation_name(EntityId player, uint8_t role)
+void GameMode::relayout_formation(EntityId captain_id)
 {
-    return player_formation(player, role).name();
+    struct FormationInfo {
+        std::size_t soldier_count;
+        std::vector<Vec2f> offsets;
+    };
+
+    auto captain = world_.entity(captain_id);
+
+    auto squad_query = world_.query_builder<SoldierAI, CombatStats>().with<BelongsTo>(captain).build();
+
+    std::unordered_map<Formation *, FormationInfo> forminfo;
+
+    squad_query.each([&](flecs::entity e, SoldierAI &ai, CombatStats &cs) {
+        if (!cs.alive)
+            return;
+
+        auto &fm = formation(captain_id, ai.role, e.target<Follows>());
+        ++forminfo[&fm].soldier_count;
+    });
+
+    // Pre-compute offsets
+    for (auto &[form, info] : forminfo) { // NOLINT
+        FormationContext ctx{
+            .count = info.soldier_count,
+            .target_facing = captain.get<Transform>().facing,
+            .target_position = captain.get<Transform>().world_pos,
+            .time = elapsed_,
+        };
+        info.offsets = form->compute_offsets(ctx);
+    }
+
+    // Second Pass: 同样只遍历自己人，挨个发座位号
+    std::unordered_map<Formation *, int> indices;
+    squad_query.each([&](flecs::entity e, SoldierAI &ai, CombatStats &cs) {
+        if (!cs.alive)
+            return;
+
+        auto &form = formation(captain_id, ai.role, e.target<Follows>());
+        int idx = indices[&form]++;
+        ai.formation_offset = forminfo[&form].offsets.at(idx);
+        spdlog::debug("GameMode::relayout_formation: entity {} role {} formation {} idx "
+                      "{} offset ({:.2f}, "
+                      "{:.2f})",
+                      e.id(), static_cast<int>(ai.role), form.name(), idx, ai.formation_offset.x,
+                      ai.formation_offset.y);
+        mark_dirty(e.id());
+    });
 }
 
 void GameMode::cycle_formation(EntityId player, uint8_t role_mask)
 {
-    auto &reg = formation_registry();
-    int n = (int)reg.size();
-    for (int r = 0; r < 8; ++r) {
-        if (!(role_mask & (1 << r)))
-            continue;
-        auto &fm = player_formations_[player][(uint8_t)r];
-        int idx = 0;
-        for (int i = 0; i < n; ++i)
-            if (fm && std::strcmp(fm->name(), reg[i].first) == 0) {
-                idx = (i + 1) % n;
-                break;
-            }
-        fm = reg[idx].second();
-        spdlog::info("Player {} role {} formation: {}", player, r, fm->name());
-    }
+    spdlog::warn("GameMode: cycle formation failed, not implemented. This may "
+                 "be removed in the future.");
 
-    // Re-layout soldiers immediately
-    Vec2f facing{0, -1};
-    if (auto *mov = world_.entity(player).try_get<Movement>())
-        facing = mov->facing;
-
-    std::unordered_map<uint8_t, int> counts;
-    world_.query<SoldierAI, CombatStats>().each(
-        [&](flecs::entity, SoldierAI &ai, CombatStats &cs) {
-            if (!cs.alive)
-                return;
-            if (ai.follow_target == player &&
-                ai.stance != SoldierStance::guard &&
-                (role_mask & (1 << (uint8_t)ai.role)))
-                ++counts[(uint8_t)ai.role];
-        });
-    std::unordered_map<uint8_t, int> indices;
-    world_.query<SoldierAI, CombatStats>().each(
-        [&](flecs::entity e, SoldierAI &ai, CombatStats &cs) {
-            if (!cs.alive)
-                return;
-            if (ai.follow_target != player)
-                return;
-            if (ai.stance == SoldierStance::guard)
-                return;
-            uint8_t r = (uint8_t)ai.role;
-            if (!(role_mask & (1 << r)))
-                return;
-            int idx = indices[r]++;
-            ai.formation_offset = player_formation(player, r).compute_offset(
-                idx, counts[r], facing);
-            mark_dirty(e.id());
-        });
+    // auto &reg = formation_registry();
+    // int n = static_cast<int>(reg.size());
+    // for (int r = 0; r < 8; ++r) {
+    //     if ((role_mask & (1 << r)) == 0)
+    //         continue;
+    //     auto &fm = captain_formations_[player][static_cast<uint8_t>(r)];
+    //     int idx = 0;
+    //     for (int i = 0; i < n; ++i)
+    //         if (fm && std::strcmp(fm->name(), reg[i].first) == 0) {
+    //             idx = (i + 1) % n;
+    //             break;
+    //         }
+    //     fm = reg[idx].second();
+    //     spdlog::info("Player {} role {} formation: {}", player, r,
+    //     fm->name());
+    // }
+    //
+    // relayout_formation(player);
 }
 
 void GameMode::handle_interaction(EntityId player)
@@ -544,19 +517,18 @@ void GameMode::handle_interaction(EntityId player)
         end_dialogue(player);
         return;
     }
-    auto const *pp = world_.entity(player).try_get<Position>();
+    auto const *pp = world_.entity(player).try_get<Transform>();
     if (!pp)
         return;
     auto eid = find_nearest_interactable(player, pp->world_pos);
     if (eid == invalid_entity) {
-        spdlog::debug("No interactable NPC near player {} at ({}, {})", player,
-                      pp->world_pos.x, pp->world_pos.y);
+        spdlog::debug("No interactable NPC near player {} at ({}, {})", player, pp->world_pos.x, pp->world_pos.y);
         return;
     }
     auto const *npc = world_.entity(eid).try_get<NPCState>();
     if (!npc)
         return;
-    auto *rel = relationships_.get_relation(npc->npc_id);
+    auto const *rel = relationships_.get_relation(npc->npc_id);
     int trust = rel ? rel->trust : 0;
     auto resp = dialogue_engine_.generate_greeting(*npc, trust);
     dlg.active = true;
@@ -568,8 +540,7 @@ void GameMode::handle_interaction(EntityId player)
     dlg.available_actions.clear();
     dlg.can_gift = false;
     dlg.can_threaten = false;
-    dlg.history.push_back(
-        {DialogueLine::npc, "", resp.text, true, npc->display_name});
+    dlg.history.push_back({DialogueLine::npc, "", resp.text, true, npc->display_name});
     dlg.npc_trust = trust;
     for (auto const &[tid, _] : npc->knowledge)
         dlg.available_topics.push_back(tid);
@@ -597,20 +568,18 @@ EntityId GameMode::find_nearest_interactable(EntityId player, Vec2f player_pos)
 {
     EntityId nearest = invalid_entity;
     float nearestDist = 80.f;
-    world_.query<Position, Interactable>().each(
-        [&](flecs::entity e, Position &pos, Interactable &) {
-            if (e.id() == player)
-                return;
-            auto const *cs = e.try_get<CombatStats>();
-            if (cs && !cs->alive)
-                return;
-            float d = std::hypot(pos.world_pos.x - player_pos.x,
-                                 pos.world_pos.y - player_pos.y);
-            if (d < nearestDist) {
-                nearestDist = d;
-                nearest = e.id();
-            }
-        });
+    world_.query<Transform, Interactable>().each([&](flecs::entity e, Transform &pos, Interactable &) {
+        if (e.id() == player)
+            return;
+        auto const *cs = e.try_get<CombatStats>();
+        if (cs && !cs->alive)
+            return;
+        float d = std::hypot(pos.world_pos.x - player_pos.x, pos.world_pos.y - player_pos.y);
+        if (d < nearestDist) {
+            nearestDist = d;
+            nearest = e.id();
+        }
+    });
     return nearest;
 }
 
@@ -629,10 +598,8 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
     if (!npc)
         return;
 
-    auto addHistory = [&](DialogueLine::Speaker s, std::string const &key,
-                          std::string const &raw = "", bool use_raw = false) {
-        dlg.history.push_back({s, key, raw, use_raw, npc->display_name});
-    };
+    auto addHistory = [&](DialogueLine::Speaker s, std::string const &key, std::string const &raw = "",
+                          bool use_raw = false) { dlg.history.push_back({s, key, raw, use_raw, npc->display_name}); };
 
     if (action == "__attack__") {
         auto *cs = npc_entity.try_get_mut<CombatStats>();
@@ -641,9 +608,7 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
             cs->alive = true;
         }
         addHistory(DialogueLine::player, "resp.attack_you");
-        addHistory(DialogueLine::npc, npc->personality == "hostile"
-                                          ? "resp.attack_hostile"
-                                          : "resp.attack_neutral");
+        addHistory(DialogueLine::npc, npc->personality == "hostile" ? "resp.attack_hostile" : "resp.attack_neutral");
         end_dialogue(player);
         return;
     }
@@ -651,18 +616,15 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
         relationships_.modify_trust(npc->npc_id, 8);
         dlg.npc_trust += 8;
         addHistory(DialogueLine::player, "resp.gift_you");
-        addHistory(DialogueLine::npc, npc->personality == "friendly"
-                                          ? "resp.gift_friendly"
-                                          : "resp.gift_neutral");
+        addHistory(DialogueLine::npc, npc->personality == "friendly" ? "resp.gift_friendly" : "resp.gift_neutral");
         return;
     }
     if (action == "__threaten__") {
         relationships_.modify_fear(npc->npc_id, 15);
         dlg.npc_fear += 15;
         addHistory(DialogueLine::player, "resp.threaten_you");
-        addHistory(DialogueLine::npc, npc->personality == "hostile"
-                                          ? "resp.threaten_hostile"
-                                          : "resp.threaten_neutral");
+        addHistory(DialogueLine::npc,
+                   npc->personality == "hostile" ? "resp.threaten_hostile" : "resp.threaten_neutral");
         return;
     }
     if (action == "__quest__") {
@@ -707,8 +669,7 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
         auto &dn = topic_registry_.display_name(tid);
         addHistory(DialogueLine::player, "dialogue.tell_prefix");
         bool known = npc->knowledge.contains(tid);
-        addHistory(DialogueLine::npc,
-                   known ? "resp.already_known" : "resp.learned");
+        addHistory(DialogueLine::npc, known ? "resp.already_known" : "resp.learned");
         if (!known) {
             relationships_.modify_trust(npc->npc_id, 5);
             dlg.npc_trust += 5;
@@ -720,8 +681,7 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
     auto *rel = relationships_.get_relation(npc->npc_id);
     int trust = rel ? rel->trust : 0;
     auto &dn = topic_registry_.display_name(action);
-    auto resp = dialogue_engine_.generate_ask_response(
-        *npc, action, dn.empty() ? action : dn, trust);
+    auto resp = dialogue_engine_.generate_ask_response(*npc, action, dn.empty() ? action : dn, trust);
     addHistory(DialogueLine::player, "dialogue.ask_prefix");
     addHistory(DialogueLine::npc, "", resp.text, true);
     quests_.report_talk(npc->npc_id);
@@ -729,13 +689,11 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
         relationships_.modify_trust(npc->npc_id, resp.trust_delta);
         dlg.npc_trust += resp.trust_delta;
     }
-    if (resp.is_truthful && !resp.fact_id.empty() &&
-        npc->knowledge.contains(action)) {
+    if (resp.is_truthful && !resp.fact_id.empty() && npc->knowledge.contains(action)) {
         Fact f;
         f.id = action + "_from_" + npc->npc_id;
         f.description = npc->knowledge[action].npc_version;
-        f.origins.push_back({Fact::Origin::Source::npc_testimony, npc->npc_id,
-                             "", world_state_.day(),
+        f.origins.push_back({Fact::Origin::Source::npc_testimony, npc->npc_id, "", world_state_.day(),
                              npc->knowledge[action].confidence});
         knowledge_.add_or_update_fact(f);
     }
@@ -753,92 +711,20 @@ void GameMode::set_navigation(NavigationSystem const *nav)
         collision_system_->set_navigation(nav);
 }
 
-EntityId GameMode::load_world(SaveManager::SaveData const &data)
-{
-    throw std::runtime_error("Load world not implemented yet");
-    // world_.each([](flecs::entity e) { e.destruct(); });
-    // npc_entities_.clear();
-    //
-    // auto pid = spawn_player({data.player_pos.x, data.player_pos.y});
-    // auto *pcs = world_.entity(pid).try_get_mut<CombatStats>();
-    // if (pcs) {
-    //     pcs->hp = data.player_hp;
-    //     pcs->max_hp = data.player_max_hp;
-    // }
-    //
-    // world_state_.set_day(data.day);
-    // world_state_.set_season(data.season);
-    // for (auto const &t : data.seen_tiles)
-    //     world_state_.reveal_tile(t);
-    //
-    // knowledge_.mark_topic_known("ugarit_sack");
-    // knowledge_.mark_topic_known("sea_peoples");
-    // knowledge_.mark_topic_known("byblos_king");
-    // for (auto const &t : data.known_topics)
-    //     knowledge_.mark_topic_known(t);
-    //
-    // relationships_ = {};
-    // for (auto const &[nid, rel] : data.relations)
-    //     relationships_.set_relation(nid, {rel[0], rel[1], rel[2]});
-    //
-    // for (auto const &nd : data.npcs) {
-    //     std::vector<NPCKnowledgeEntry> facts;
-    //     for (auto const &[fid, ver] : nd.knowledge)
-    //         facts.push_back({fid, ver, 70, false, ""});
-    //     spawn_npc(nd.id, nd.name, nd.position.x, nd.position.y,
-    //     nd.personality,
-    //               facts);
-    //     EntityId eid = npc_entities_.back();
-    //     auto *ncs = world_.entity(eid).try_get_mut<CombatStats>();
-    //     if (ncs) {
-    //         ncs->hp = nd.hp;
-    //         ncs->max_hp = nd.max_hp;
-    //         ncs->alive = nd.alive;
-    //     }
-    // }
-    //
-    // return pid;
-}
-
-std::vector<SaveManager::NPCData> GameMode::collect_npc_save_data()
-{
-    std::vector<SaveManager::NPCData> npcData;
-    for (auto eid : npc_entities()) {
-        auto const *np = world_.entity(eid).try_get<Position>();
-        auto const *ns = world_.entity(eid).try_get<NPCState>();
-        auto const *ncs = world_.entity(eid).try_get<CombatStats>();
-        if (!np || !ns)
-            continue;
-        SaveManager::NPCData nd;
-        nd.id = ns->npc_id;
-        nd.name = ns->display_name;
-        nd.personality = ns->personality;
-        nd.position = np->world_pos;
-        nd.hp = ncs ? ncs->hp : 10;
-        nd.max_hp = ncs ? ncs->max_hp : 10;
-        nd.alive = ncs ? ncs->alive : true;
-        for (auto const &[fid, kf] : ns->knowledge)
-            nd.knowledge[fid] = kf.npc_version;
-        npcData.push_back(std::move(nd));
-    }
-    return npcData;
-}
-
 EntityId GameMode::spawn_player(Vec2f pos, Team team)
 {
-    auto e = world_.entity();
-    auto eid = e.id();
+    auto e = world_.entity()
+                 .add<PlayerTag>()
+                 .set<Transform>(Transform{.world_pos = pos})
+                 .set<CombatStats>(CombatStats{
+                     .team = team, .max_hp = 200, .hp = 200, .attack = 4, .defense = 3, .attack_range = 80.F})
+                 .set<Movement>(Movement{.max_speed = 200, .velocity{}})
+                 .set<SurvivalState>(SurvivalState{})
+                 .set<Collider>(Collider{14.F})
+                 .set<Vision>(Vision{});
 
-    e.set<Position>(Position{pos});
-    e.set<CombatStats>(CombatStats{team, 200, 200, 4, 3, 80.f});
-    e.set<Movement>(Movement{.speed = 200});
-    e.set<SurvivalState>(SurvivalState{});
-    e.set<Collider>(Collider{14.f});
-    e.set<Player>({});
-    e.set<Vision>(Vision{});
-
-    mark_dirty(eid);
-    return eid;
+    mark_dirty(e.id());
+    return e.id();
 }
 
 void GameMode::check_event_spawns()
@@ -849,34 +735,24 @@ void GameMode::check_event_spawns()
         return;
     last_event_count_ = cnt;
 
-    world_.query<Position>().each([&](flecs::entity e, Position &pp) {
-        if (!e.has<Player>())
+    thread_local std::mt19937 rng{std::random_device{}()};
+    world_.query<Transform>().each([&](flecs::entity e, Transform &pp) {
+        if (!e.has<PlayerTag>())
             return;
-        auto &latest = events_->triggered_events().back();
-        if (latest.type == GameEvent::Type::battle ||
-            latest.type == GameEvent::Type::refugee_wave) {
-            spawn_enemy_wave(8 + rand() % 10, pp.world_pos, 400.f, Team::enemy);
+        auto const &latest = events_->triggered_events().back();
+        if (latest.type == GameEvent::Type::battle || latest.type == GameEvent::Type::refugee_wave) {
+            std::uniform_int_distribution<int> dist(0, 9);
+            spawn_enemy_wave(8 + dist(rng), pp.world_pos, 400.F, Team::enemy);
         }
     });
 }
 
 void GameMode::update(float dt)
 {
-    while (server_->messages().try_receive([this](boost::system::error_code,
-                                                  std::shared_ptr<Session> t,
-                                                  TransportMessage msg) {
-        server_->handle_message(std::move(t), std::move(msg));
-    })) {
-    }
-
-    while (server_->player_detachments().try_receive(
-        [this](boost::system::error_code, EntityId eid) {
-            remove_player(eid);
-            server_->broadcast_entity_removed(eid);
-        })) {
-    }
+    server_->poll_messages(*this);
 
     dt_ = std::chrono::duration<double>(dt);
+    elapsed_ += dt;
     world_state_.update(dt);
     events_->update(world_state_.day());
 
@@ -889,15 +765,14 @@ void GameMode::update(float dt)
     for (auto const &ev : pending_combat_events_) {
         std::vector<uint8_t> p;
         auto push = [&](auto v) {
-            auto *pb = (uint8_t *)&v;
+            auto const *pb = reinterpret_cast<uint8_t const *>(&v);
             p.insert(p.end(), pb, pb + sizeof(v));
         };
         push(ev.attacker_id);
         push(ev.defender_id);
         push(ev.damage);
         p.push_back(ev.killed ? 1 : 0);
-        for (auto &tg : server_->sessions_)
-            Session::spawn(tg.get()->write({NetPacket::combat_event, p}));
+        server_->broadcast_to_all(NetPacket::combat_event, std::move(p));
     }
     pending_combat_events_.clear();
 
@@ -906,8 +781,7 @@ void GameMode::update(float dt)
         auto &pr = projectiles_[i];
         Vec2f dst = pr.pos + pr.direction * (pr.total_dist - pr.traveled);
         auto p = make_projectile_fired(pr.pos.x, pr.pos.y, dst.x, dst.y);
-        for (auto &tg : server_->sessions_)
-            Session::spawn(tg.get()->write({NetPacket::projectile_fired, p}));
+        server_->broadcast_to_all(NetPacket::projectile_fired, std::move(p));
     }
     last_projectile_count_ = projectiles_.size();
 
@@ -923,46 +797,15 @@ void GameMode::update(float dt)
     spdlog::trace("GameMode: update done");
 }
 
-void GameMode::formation_update(EntityId player, Position &p, Movement &m)
-{
-    // First pass: count soldiers per role (alive only)
-    std::unordered_map<uint8_t, int> counts;
-    world_.query<SoldierAI, CombatStats>().each(
-        [&](flecs::entity, SoldierAI &ai, CombatStats &cs) {
-            if (cs.alive && ai.follow_target == player &&
-                ai.stance != SoldierStance::guard)
-                ++counts[static_cast<uint8_t>(ai.role)];
-        });
-    // Second pass: assign offsets per role group
-    std::unordered_map<uint8_t, int> indices;
-    world_.query<SoldierAI, CombatStats>().each(
-        [&](flecs::entity e, SoldierAI &ai, CombatStats &cs) {
-            if (!cs.alive)
-                return;
-            if (ai.follow_target != player)
-                return;
-            if (ai.stance == SoldierStance::guard)
-                return;
-            auto r = static_cast<uint8_t>(ai.role);
-            int idx = indices[r]++;
-            ai.formation_offset = player_formation(player, r).compute_offset(
-                idx, counts[r], m.facing);
-            mark_dirty(e.id());
-        });
-}
-
 void GameMode::apply_player_input(EntityId entity, Vec2f dir)
 {
-    spdlog::debug(
-        "GameMode: applying input for player {}: dir=({:.2f}, {:.2f})", entity,
-        dir.x, dir.y);
+    spdlog::debug("GameMode: applying input for player {}: dir=({:.2f}, {:.2f})", entity, dir.x, dir.y);
     auto &mov = world_.entity(entity).get_mut<Movement>();
-    mov.velocity = dir * mov.speed;
+    mov.velocity = dir * mov.max_speed;
     mark_dirty(entity);
 }
 
-void GameMode::spawn_enemy_wave(int count, Vec2f center, float spread,
-                                Team team)
+void GameMode::spawn_enemy_wave(int count, Vec2f center, float spread, Team team)
 {
     std::vector<EntityId> new_ids;
     combat_.spawn_enemy_wave(world_, count, center, spread, team, &new_ids);
@@ -995,7 +838,7 @@ void GameMode::heal_entity(EntityId entity, int amount)
     if (is_player(entity)) {
         auto *surv = e.try_get_mut<SurvivalState>();
         if (surv) {
-            surv->health = std::clamp(surv->health + amount, 0.f, 100.f);
+            surv->health = std::clamp(surv->health + amount, 0.F, 100.F);
             mark_dirty(entity);
         }
     }
@@ -1003,25 +846,25 @@ void GameMode::heal_entity(EntityId entity, int amount)
 
 void GameMode::respawn_player(EntityId pid)
 {
-    auto e = world_.entity(pid);
-    auto *pos = e.try_get_mut<Position>();
-    if (pos)
-        pos->world_pos = {0, 0};
-    auto *cs = e.try_get_mut<CombatStats>();
-    if (cs) {
-        cs->hp = cs->max_hp;
-        cs->alive = true;
+    if (!world_.entity(pid).has<PlayerTag>()) {
+        throw std::invalid_argument("Attempted to respawn non-player entity {}");
+        return;
     }
-    auto *surv = e.try_get_mut<SurvivalState>();
-    if (surv)
-        *surv = SurvivalState{};
+
+    auto e = world_.entity(pid);
+    e.get_mut<Transform>().world_pos = {0, 0};
+    auto &cs = e.get_mut<CombatStats>();
+    cs.hp = cs.max_hp;
+    cs.alive = true;
+    auto &surv = e.get_mut<SurvivalState>();
+    surv = SurvivalState{};
+
     mark_dirty(pid);
 }
 
-void GameMode::sync_entity_state(EntityId entity, Vec2f pos, int hp, int max_hp,
-                                 bool alive)
+void GameMode::sync_entity_state(EntityId entity, Vec2f pos, int hp, int max_hp, bool alive)
 {
-    auto *p = world_.entity(entity).try_get_mut<Position>();
+    auto *p = world_.entity(entity).try_get_mut<Transform>();
     auto *c = world_.entity(entity).try_get_mut<CombatStats>();
     if (p)
         p->world_pos = pos;
@@ -1040,7 +883,7 @@ bool GameMode::has_dirty_entities() const
 
 uint8_t GameMode::entity_kind(flecs::entity e) const
 {
-    if (e.has<Player>())
+    if (e.has<PlayerTag>())
         return EntityKind::player;
     if (e.has<NPCState>())
         return EntityKind::npc;
@@ -1051,16 +894,14 @@ uint8_t GameMode::entity_kind(flecs::entity e) const
     return EntityKind::enemy;
 }
 
-void GameMode::serialize_entity(flecs::entity e,
-                                std::vector<uint8_t> &out) const
+void GameMode::serialize_entity(flecs::entity e, std::vector<uint8_t> &out) const
 {
-    auto const *ep = e.try_get<Position>();
+    auto const *ep = e.try_get<Transform>();
     auto const *ec = e.try_get<CombatStats>();
     if (!ep || !ec)
         return;
 
-    uint16_t mask = SyncComponent::entity_kind | SyncComponent::position |
-                    SyncComponent::combat;
+    uint16_t mask = SyncComponent::entity_kind | SyncComponent::position | SyncComponent::combat;
     if (e.has<Movement>())
         mask |= SyncComponent::movement;
     if (e.has<SoldierAI>())
@@ -1080,7 +921,7 @@ void GameMode::serialize_entity(flecs::entity e,
     w.write(static_cast<uint8_t>(entity_kind(e)));
 
     // position (bit 1)
-    e.get<Position>().write_sync(w);
+    e.get<Transform>().write_sync(w);
 
     // combat (bit 2)
     e.get<CombatStats>().write_sync(w);
@@ -1113,15 +954,28 @@ static void write_world_header(std::vector<uint8_t> &out, WorldState const &ws)
     write_float(out, ws.time_of_day());
 }
 
-GameMode::PlayerSyncPayload
-GameMode::build_dirty_payload(EntityId player_eid,
-                              std::unordered_set<EntityId> const &prev_sent)
+GameMode::PlayerSyncPayload GameMode::build_dirty_payload(EntityId player_eid,
+                                                          std::unordered_set<EntityId> const &prev_sent)
 {
     PlayerSyncPayload result;
     write_world_header(result.bytes, world_state_);
+
+    // Explored tiles (server-authoritative, sent every frame for now)
+    {
+        auto eit = player_explored_tiles_.find(player_eid);
+        auto count = static_cast<uint16_t>(eit != player_explored_tiles_.end() ? eit->second.size() : 0);
+        write_bytes(result.bytes, count);
+        if (eit != player_explored_tiles_.end())
+            for (auto const &t : eit->second) {
+                write_bytes(result.bytes, static_cast<int32_t>(t.x));
+                write_bytes(result.bytes, static_cast<int32_t>(t.y));
+            }
+    }
+
     auto it = player_visible_tiles_.find(player_eid);
-    auto const &visible =
-        it != player_visible_tiles_.end() ? it->second : decltype(it->second){};
+    if (it == player_visible_tiles_.end())
+        throw std::runtime_error("Player visible tiles not found for player_eid: " + std::to_string(player_eid));
+    auto const &visible = it->second;
 
     auto emit = [&](flecs::entity e) {
         serialize_entity(e, result.bytes);
@@ -1131,68 +985,73 @@ GameMode::build_dirty_payload(EntityId player_eid,
     // 1. Dirty entities on visible tiles
     for (auto eid : dirty_entities_) {
         auto e = world_.entity(eid);
-        auto const *pos = e.try_get<Position>();
+        auto const *pos = e.try_get<Transform>();
         if (!pos)
             continue;
-        if (eid == player_eid ||
-            visible.contains(world_to_tile(pos->world_pos)))
-            emit(e);
+        // if (visible.contains(world_to_tile(pos->world_pos)))
+        emit(e);
     }
 
     // 2. Newly-visible entities (on visible tiles but not sent last frame)
-    world_.query<Position, CombatStats>().each(
-        [&](flecs::entity e, Position &pos, CombatStats &) {
-            if (result.entity_ids.contains(e.id()))
-                return;
-            if (e.id() == player_eid)
-                return;
-            if (prev_sent.contains(e.id()))
-                return;
-            if (visible.contains(world_to_tile(pos.world_pos)))
-                emit(e);
-        });
+    world_.query<Transform, CombatStats>().each([&](flecs::entity e, Transform &pos, CombatStats &) {
+        if (result.entity_ids.contains(e.id()))
+            return;
+        if (e.id() == player_eid)
+            return;
+        if (prev_sent.contains(e.id()))
+            return;
+        if (visible.contains(world_to_tile(pos.world_pos)))
+            emit(e);
+    });
 
     return result;
 }
 
-GameMode::PlayerSyncPayload
-GameMode::build_full_payload(EntityId player_eid) const
+GameMode::PlayerSyncPayload GameMode::build_full_payload(EntityId player_eid) const
 {
     PlayerSyncPayload result;
     write_world_header(result.bytes, world_state_);
-    auto it = player_visible_tiles_.find(player_eid);
-    auto const &visible =
-        it != player_visible_tiles_.end() ? it->second : decltype(it->second){};
 
-    world_.query<Position, CombatStats>().each(
-        [&](flecs::entity e, Position &pos, CombatStats &) {
-            if (e.id() == player_eid ||
-                visible.contains(world_to_tile(pos.world_pos))) {
-                serialize_entity(e, result.bytes);
-                result.entity_ids.insert(e.id());
+    // Explored tiles (server-authoritative)
+    {
+        auto eit = player_explored_tiles_.find(player_eid);
+        auto count = static_cast<uint16_t>(eit != player_explored_tiles_.end() ? eit->second.size() : 0);
+        write_bytes(result.bytes, count);
+        if (eit != player_explored_tiles_.end())
+            for (auto const &t : eit->second) {
+                write_bytes(result.bytes, static_cast<int32_t>(t.x));
+                write_bytes(result.bytes, static_cast<int32_t>(t.y));
             }
-        });
+    }
+
+    auto it = player_visible_tiles_.find(player_eid);
+    auto const &visible = it != player_visible_tiles_.end() ? it->second : decltype(it->second){};
+
+    world_.query<Transform, CombatStats>().each([&](flecs::entity e, Transform &pos, CombatStats &) {
+        if (e.id() == player_eid || visible.contains(world_to_tile(pos.world_pos))) {
+            serialize_entity(e, result.bytes);
+            result.entity_ids.insert(e.id());
+        }
+    });
     return result;
 }
 
 void GameMode::recompute_player_visibility()
 {
     player_visible_tiles_.clear();
-    world_.query<Player, Position, Movement>().each(
-        [this](flecs::entity e, Player &, Position &pos, Movement &mov) {
-            EntityId pid = e.id();
-            Vec2i center = world_to_tile(pos.world_pos);
-            auto const &vis = e.get<Vision>();
-            auto visible =
-                compute_visible_arc(center, vis.range, mov.facing, vis.arc);
-            auto &explored = player_explored_tiles_[pid];
-            explored.insert(visible.begin(), visible.end());
-            player_visible_tiles_[pid] = std::move(visible);
-        });
+    auto q = world_.query_builder<Transform, Movement>().with<PlayerTag>().build();
+    q.each([this](flecs::entity e, Transform &pos, Movement &mov) {
+        EntityId pid = e.id();
+        Vec2i center = world_to_tile(pos.world_pos);
+        auto const &vis = e.get<Vision>();
+        auto visible = compute_visible_arc(center, vis.range, pos.facing, vis.arc);
+        auto &explored = player_explored_tiles_[pid];
+        explored.insert(visible.begin(), visible.end());
+        player_visible_tiles_[pid] = std::move(visible);
+    });
 }
 
-bool GameMode::is_entity_visible_to_player(EntityId player_eid,
-                                           Vec2f world_pos) const
+bool GameMode::is_entity_visible_to_player(EntityId player_eid, Vec2f world_pos) const
 {
     auto it = player_visible_tiles_.find(player_eid);
     if (it == player_visible_tiles_.end())

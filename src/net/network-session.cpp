@@ -12,14 +12,12 @@ NetworkSession::NetworkSession(tcp::socket sock) : socket_(std::move(sock))
         throw std::runtime_error("NetworkTransport: socket is not open (why do "
                                  "you pass an closed/uninit socket?)");
 
-    cached_socket_info_ =
-        std::format("{}:{}", socket_.remote_endpoint().address().to_string(),
-                    std::to_string(socket_.remote_endpoint().port()));
+    cached_socket_info_ = std::format("{}:{}", socket_.remote_endpoint().address().to_string(),
+                                      std::to_string(socket_.remote_endpoint().port()));
 }
 
 NetworkSession::Acceptor::Acceptor(std::uint16_t port)
-    : impl_(std::make_shared<tcp_acceptor>(Session::io(),
-                                           tcp::endpoint(tcp::v4(), port)))
+    : impl_(std::make_shared<tcp_acceptor>(Session::io(), tcp::endpoint(tcp::v4(), port)))
 {
 }
 
@@ -36,8 +34,7 @@ void NetworkSession::Acceptor::stop()
         impl_->close();
 }
 
-awaitable<std::shared_ptr<NetworkSession>>
-NetworkSession::connect(std::string const &ip, int port)
+awaitable<std::shared_ptr<NetworkSession>> NetworkSession::connect(std::string const &ip, int port)
 {
     spdlog::info("NetworkTransport: initiating connection to {}:{}", ip, port);
     auto t = std::make_shared<NetworkSession>();
@@ -45,8 +42,8 @@ NetworkSession::connect(std::string const &ip, int port)
 
     asio::steady_timer timer(io(), std::chrono::seconds(5));
 
-    auto r = co_await (t->socket().async_connect(ep, as_tuple(use_awaitable)) ||
-                       timer.async_wait(as_tuple(use_awaitable)));
+    auto r =
+        co_await (t->socket().async_connect(ep, as_tuple(use_awaitable)) || timer.async_wait(as_tuple(use_awaitable)));
 
     if (r.index() == 1) {
         auto [ec] = std::get<1>(r);
@@ -59,11 +56,9 @@ NetworkSession::connect(std::string const &ip, int port)
             throw std::runtime_error("Connection failed: " + ec.message());
     }
 
-    t->cached_socket_info_ = std::format(
-        "{}:{}", t->socket().remote_endpoint().address().to_string(),
-        std::to_string(t->socket().remote_endpoint().port()));
-    spdlog::info("NetworkTransport: connected to {}",
-                 t->socket_.remote_endpoint().address().to_string());
+    t->cached_socket_info_ = std::format("{}:{}", t->socket().remote_endpoint().address().to_string(),
+                                         std::to_string(t->socket().remote_endpoint().port()));
+    spdlog::info("NetworkTransport: connected to {}", t->socket_.remote_endpoint().address().to_string());
     co_return t;
 }
 
@@ -75,12 +70,9 @@ NetworkSession::~NetworkSession()
 awaitable<void> NetworkSession::write(TransportMessage msg)
 {
     if (!socket_.is_open())
-        throw std::runtime_error(
-            "NetworkTransport::write: socket is not open/closed " +
-            remote_info());
+        throw std::runtime_error("NetworkTransport::write: socket is not open/closed " + remote_info());
 
-    spdlog::log(msg.type == NetPacket::state_delta ? spdlog::level::trace
-                                                   : spdlog::level::debug,
+    spdlog::log(msg.type == NetPacket::state_delta ? spdlog::level::trace : spdlog::level::debug,
                 "NetwortTransport {} ({}) writing message of type \"{}\" with "
                 "payload size {}",
                 remote_info(), (void *)this, msg.type, msg.payload.size());
@@ -91,9 +83,8 @@ awaitable<void> NetworkSession::write(TransportMessage msg)
 awaitable<TransportMessage> NetworkSession::read()
 {
     // Deserialize the packet
-    auto [ec_head, _] = co_await asio::async_read(
-        socket_, asio::buffer(&read_head_buffer_, sizeof(read_head_buffer_)),
-        as_tuple(use_awaitable));
+    auto [ec_head, _] = co_await asio::async_read(socket_, asio::buffer(&read_head_buffer_, sizeof(read_head_buffer_)),
+                                                  as_tuple(use_awaitable));
 
     if (ec_head) {
         socket_.close();
@@ -101,15 +92,13 @@ awaitable<TransportMessage> NetworkSession::read()
     }
 
     read_body_buffer_.resize(read_head_buffer_.size);
-    auto [ec_body, _] = co_await asio::async_read(
-        socket_, asio::buffer(read_body_buffer_), as_tuple(use_awaitable));
+    auto [ec_body, _] = co_await asio::async_read(socket_, asio::buffer(read_body_buffer_), as_tuple(use_awaitable));
     if (ec_body) {
         socket_.close();
         throw boost::system::system_error(ec_head);
     }
 
-    co_return TransportMessage{.type = read_head_buffer_.type,
-                               .payload = read_body_buffer_};
+    co_return TransportMessage{read_head_buffer_.type, read_body_buffer_};
 }
 
 bool NetworkSession::is_open() const

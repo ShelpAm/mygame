@@ -1,6 +1,5 @@
 #include "world/map-data.hpp"
-MapData::MapData(int width, int height)
-    : width_(width), height_(height), tiles_(width * height)
+MapData::MapData(int width, int height) : width_(width), height_(height), tiles_(width * height)
 {
 }
 

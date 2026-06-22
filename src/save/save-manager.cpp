@@ -6,9 +6,8 @@
 #include <fstream>
 #include <spdlog/spdlog.h>
 
-bool SaveManager::save(std::string const &path, WorldState const &ws,
-                       KnowledgeGraph const &kg, RelationshipTable const &rt,
-                       Vec2f player_pos, int player_hp, int player_max_hp,
+bool SaveManager::save(std::string const &path, WorldState const &ws, KnowledgeGraph const &kg,
+                       RelationshipTable const &rt, Vec2f player_pos, int player_hp, int player_max_hp,
                        std::vector<NPCData> const &npcs)
 {
     boost::json::object root;
@@ -27,15 +26,8 @@ bool SaveManager::save(std::string const &path, WorldState const &ws,
     }
     root["known_topics"] = topicsArr;
 
-    // Seen tiles
-    boost::json::array tilesArr;
-    for (auto const &t : ws.seen_tiles()) {
-        boost::json::array tile;
-        tile.emplace_back(t.x);
-        tile.emplace_back(t.y);
-        tilesArr.emplace_back(std::move(tile));
-    }
-    root["seen_tiles"] = tilesArr;
+    // Seen tiles — TODO: iterate player_explored_tiles_ from GameMode
+    // (save function is currently disabled, see app.cpp:380)
 
     // Relationships
     boost::json::array relArr;
@@ -93,13 +85,11 @@ bool SaveManager::load(std::string const &path, SaveData &out)
         auto root = boost::json::parse(content).as_object();
         out.day = static_cast<int>(root.at("day").as_int64());
         out.season = static_cast<int>(root.at("season").as_int64());
-        out.time_of_day =
-            static_cast<float>(root.at("time_of_day").as_double());
+        out.time_of_day = static_cast<float>(root.at("time_of_day").as_double());
         out.player_pos = {static_cast<float>(root.at("playerX").as_double()),
                           static_cast<float>(root.at("playerY").as_double())};
         out.player_hp = static_cast<int>(root.at("player_hp").as_int64());
-        out.player_max_hp =
-            static_cast<int>(root.at("player_max_hp").as_int64());
+        out.player_max_hp = static_cast<int>(root.at("player_max_hp").as_int64());
 
         if (root.contains("known_topics"))
             for (auto const &t : root.at("known_topics").as_array())
@@ -109,15 +99,14 @@ bool SaveManager::load(std::string const &path, SaveData &out)
             for (auto const &t : root.at("seen_tiles").as_array())
                 // TODO: player_explored_tiles per-player when load_world is
                 // implemented
-                (void)t;
+                (void)t; // TODO: implement when load_world is re-enabled
 
         if (root.contains("relationships"))
             for (auto const &r : root.at("relationships").as_array())
-                out.relations.push_back(
-                    {std::string(r.as_object().at("npc_id").as_string()),
-                     {{(int)r.as_object().at("trust").as_int64(),
-                       (int)r.as_object().at("fear").as_int64(),
-                       (int)r.as_object().at("respect").as_int64()}}});
+                out.relations.push_back({std::string(r.as_object().at("npc_id").as_string()),
+                                         {{static_cast<int>(r.as_object().at("trust").as_int64()),
+                                           static_cast<int>(r.as_object().at("fear").as_int64()),
+                                           static_cast<int>(r.as_object().at("respect").as_int64())}}});
 
         if (root.contains("npcs"))
             for (auto const &n : root.at("npcs").as_array()) {
@@ -126,10 +115,10 @@ bool SaveManager::load(std::string const &path, SaveData &out)
                 nd.id = std::string(obj.at("id").as_string());
                 nd.name = std::string(obj.at("name").as_string());
                 nd.personality = std::string(obj.at("personality").as_string());
-                nd.position = {(float)obj.at("x").as_double(),
-                               (float)obj.at("y").as_double()};
-                nd.hp = (int)obj.at("hp").as_int64();
-                nd.max_hp = (int)obj.at("max_hp").as_int64();
+                nd.position = {static_cast<float>(obj.at("x").as_double()),
+                               static_cast<float>(obj.at("y").as_double())};
+                nd.hp = static_cast<int>(obj.at("hp").as_int64());
+                nd.max_hp = static_cast<int>(obj.at("max_hp").as_int64());
                 nd.alive = obj.at("alive").as_bool();
                 for (auto const &[k, v] : obj.at("knowledge").as_object())
                     nd.knowledge[std::string(k)] = std::string(v.as_string());

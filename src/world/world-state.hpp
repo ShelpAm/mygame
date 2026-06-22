@@ -33,6 +33,19 @@ compute_visible_arc(Vec2i center, int radius, Vec2f facing, float arc_deg)
 
 enum class TileVisibility { Unexplored, Explored, Visible };
 
+inline std::ostream &operator<<(std::ostream &os, TileVisibility v)
+{
+    switch (v) {
+    case TileVisibility::Unexplored:
+        return os << "Unexplored";
+    case TileVisibility::Explored:
+        return os << "Explored";
+    case TileVisibility::Visible:
+        return os << "Visible";
+    }
+    return os;
+}
+
 struct PlayerVisibility {
     std::unordered_set<Vec2i> visible;
     std::unordered_set<Vec2i> explored;
@@ -46,8 +59,7 @@ struct PlayerVisibility {
         return TileVisibility::Unexplored;
     }
 
-    void explore(Vec2i tile) { explored.insert(tile); }
-
+    void explore_single(Vec2i tile) { explored.insert(tile); }
     void explore_radius(Vec2f center_world, float radius_world);
 
     void set_visible_arc(Vec2i center, int radius, Vec2f facing, float arc_deg);
@@ -75,32 +87,6 @@ class WorldState {
     LocationState *location_mutable(std::string const &id);
     void add_location(std::string const &id, LocationState state);
 
-    // Tile visibility — three-state model
-    bool is_tile_explored(Vec2i tile) const;
-    bool is_tile_visible(Vec2i tile) const;
-    TileVisibility tile_visibility(Vec2i tile) const;
-
-    void explore_tile(Vec2i tile);
-    void explore_radius(Vec2f center_world, float radius_world);
-    void reveal_tile(Vec2i tile) { explore_tile(tile); }
-
-    void set_visible_tiles_from_center(Vec2i center, int radius);
-    void set_visible_arc(Vec2i center, int radius, Vec2f facing, float arc_deg);
-    void clear_visible_tiles();
-
-    std::unordered_set<Vec2i> const &explored_tiles() const
-    {
-        return explored_tiles_;
-    }
-    std::unordered_set<Vec2i> const &visible_tiles() const
-    {
-        return visible_tiles_;
-    }
-    std::unordered_set<Vec2i> const &seen_tiles() const
-    {
-        return explored_tiles_;
-    }
-
     int day() const { return day_; }
     int season() const { return season_; }
     float time_of_day() const { return time_of_day_; }
@@ -111,8 +97,6 @@ class WorldState {
 
   private:
     std::unordered_map<std::string, LocationState> locations_;
-    std::unordered_set<Vec2i> explored_tiles_;
-    std::unordered_set<Vec2i> visible_tiles_;
 
     static constexpr float day_length = 24.F;
     int day_ = 1;

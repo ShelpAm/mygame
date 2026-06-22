@@ -30,8 +30,14 @@ using deferred_concurrent_channel =
 
 struct TransportMessage {
     using Type = NetPacket::Type;
-    Type type;
+    Type type{};
     std::vector<uint8_t> payload;
+
+    TransportMessage() = default;
+    TransportMessage(Type t, std::vector<uint8_t> p)
+        : type(t), payload(std::move(p))
+    {
+    }
 };
 
 // Abstract bidirectional pipe between two endpoints.
@@ -42,10 +48,7 @@ struct TransportMessage {
 // ITrasnsport implements a custom protocol design for the game.
 class Session {
   public:
-    static void set_io(asio::io_context *io)
-    {
-        s_io_ = io;
-    }
+    static void set_io(asio::io_context *io) { s_io_ = io; }
     static asio::io_context &io()
     {
         if (!s_io_)

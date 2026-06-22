@@ -3,7 +3,7 @@
 #include "net/sync-io.hpp"
 
 struct Vision {
-    int range = 5;
+    int range = 6;
     float arc = 360.f;
 
     static constexpr uint16_t kSyncWireSize = 8;

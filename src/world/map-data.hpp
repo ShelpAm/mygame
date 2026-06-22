@@ -5,6 +5,12 @@
 
 inline constexpr float tile_size = 64.F;
 
+inline Vec2f lu_of_tile(Vec2i tile)
+{
+    return {static_cast<float>(tile.x) * tile_size,
+            static_cast<float>(tile.y) * tile_size};
+}
+
 inline Vec2f center_of_tile(Vec2i tile)
 {
     constexpr auto half = 0.5F;
@@ -14,8 +20,8 @@ inline Vec2f center_of_tile(Vec2i tile)
 
 inline Vec2i world_to_tile(Vec2f pos)
 {
-    return {static_cast<int>(pos.x / tile_size),
-            static_cast<int>(pos.y / tile_size)};
+    return {static_cast<int>(std::floor(pos.x / tile_size)),
+            static_cast<int>(std::floor(pos.y / tile_size))};
 }
 
 struct TileData {

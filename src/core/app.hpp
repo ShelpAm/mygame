@@ -17,6 +17,7 @@
 class ResourceManager;
 class RenderSystem;
 class UIManager;
+class Server;
 struct CombatStats;
 
 enum class SessionMode : std::uint8_t { local, host, client };
@@ -30,19 +31,6 @@ class App {
     void shutdown();
 
     LocaleManager const &locale() const { return locale_; }
-    bool show_load_menu() const { return show_load_menu_; }
-    void set_show_load_menu(bool v) { show_load_menu_ = v; }
-    bool show_help() const { return show_help_; }
-    void set_show_help(bool v) { show_help_ = v; }
-    bool show_multiplayer() const { return show_multiplayer_; }
-    void set_show_multiplayer(bool v) { show_multiplayer_ = v; }
-    asio::io_context &io() { return io_; }
-    GameMode &game_mode()
-    {
-        if (!game_mode_)
-            throw std::runtime_error("Game mode not initialized");
-        return *game_mode_;
-    }
     Client &client()
     {
         if (!client_)
@@ -63,22 +51,18 @@ class App {
     void start_host_session(int port);
     void start_client_session(std::string const &host, int port);
 
+    void start_listen(int port);
+    void stop_listen();
+    std::vector<std::shared_ptr<Session>> const &server_sessions() const;
+    void kick_session(std::shared_ptr<Session> s, std::string const &reason);
+
     void set_ui_language(int lang_index);
     DialogueState const &dialogue() const { return client_->dialogue(); }
-    void end_dialogue()
-    {
-        if (session_mode_ == SessionMode::client)
-            client_->send_dialogue_action("__end__");
-        else
-            game_mode_->end_dialogue(client_->player_id());
-    }
+    void end_dialogue() { client_->send_dialogue_action("__end__"); }
     void ask_topic(std::string const &t) { do_dialogue_action(t); }
     void do_dialogue_action(std::string const &a)
     {
-        if (session_mode_ == SessionMode::client)
-            client_->send_dialogue_action(a);
-        else
-            game_mode_->do_dialogue_action(client_->player_id(), a);
+        client_->send_dialogue_action(a);
     }
 
     void quick_save();
@@ -99,7 +83,7 @@ class App {
 
     int window_width_ = 800;
     int window_height_ = 450;
-    static constexpr char const *window_title = "The Sunset Straits";
+    static constexpr const char *window_title = "The Sunset Straits";
 
     Stopwatch stopwatch_;
 
@@ -116,17 +100,23 @@ class App {
         asio::make_work_guard(io_);
     std::jthread io_thread_;
 
+    GameMode &game_mode()
+    {
+        if (!game_mode_)
+            throw std::runtime_error("Game mode not initialized");
+        return *game_mode_;
+    }
+
     // GameMode 本应运行在另一进程，和client互不影响的，现在只分离线程
     std::unique_ptr<GameMode> game_mode_;
     std::jthread game_mode_thread_;
+
+    std::unique_ptr<Server> server_;
 
     std::unique_ptr<Client> client_;
 
     SessionMode session_mode_ = SessionMode::local;
 
-    bool show_load_menu_ = false;
-    bool show_help_ = false;
-    bool show_multiplayer_ = false;
     bool running_ = false;
     int next_save_slot_ = 1;
 };

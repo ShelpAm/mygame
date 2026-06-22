@@ -14,8 +14,7 @@ int LocaleManager::discover_languages(std::string const &locale_dir)
     strings_.clear();
 
     try {
-        for (auto const &entry :
-             std::filesystem::directory_iterator(locale_dir)) {
+        for (auto const &entry : std::filesystem::directory_iterator(locale_dir)) {
             if (!entry.is_regular_file())
                 continue;
             auto ext = entry.path().extension().string();
@@ -34,8 +33,7 @@ int LocaleManager::discover_languages(std::string const &locale_dir)
     return static_cast<int>(language_names_.size());
 }
 
-bool LocaleManager::load_language_file(std::string const &path,
-                                       std::string const &name)
+bool LocaleManager::load_language_file(std::string const &path, std::string const &name)
 {
     std::ifstream file(path);
     if (!file.is_open())
@@ -60,13 +58,13 @@ bool LocaleManager::load_language_file(std::string const &path,
 
 void LocaleManager::set_language(int lang_index)
 {
-    if (lang_index >= 0 && lang_index < (int)strings_.size())
+    if (lang_index >= 0 && lang_index < static_cast<int>(strings_.size()))
         current_ = lang_index;
 }
 
 std::string LocaleManager::language_name() const
 {
-    if (current_ >= 0 && current_ < (int)language_names_.size())
+    if (current_ >= 0 && current_ < static_cast<int>(language_names_.size()))
         return language_names_[current_];
     return "?";
 }
@@ -74,16 +72,15 @@ std::string LocaleManager::language_name() const
 std::string const &LocaleManager::language_name(int idx) const
 {
     static std::string const empty;
-    if (idx >= 0 && idx < (int)language_names_.size())
+    if (idx >= 0 && idx < static_cast<int>(language_names_.size()))
         return language_names_[idx];
     return empty;
 }
 
 std::string const &LocaleManager::get(std::string const &key) const
 {
-    if (current_ < 0 || current_ >= (int)strings_.size()) {
-        throw std::runtime_error(
-            "LocaleManager: current language index is out of range");
+    if (current_ < 0 || current_ >= static_cast<int>(strings_.size())) {
+        throw std::runtime_error("LocaleManager: current language index is out of range");
     }
     auto const &strings = current_strings();
     auto it = strings.find(key);
@@ -97,12 +94,10 @@ std::string const &LocaleManager::get(std::string const &key) const
             return it0->second;
     }
 
-    throw std::runtime_error("LocaleManager: missing key '" + key +
-                             "' in language '" + language_name() + "'");
+    throw std::runtime_error("LocaleManager: missing key '" + key + "' in language '" + language_name() + "'");
 }
 
-std::string LocaleManager::fmt(std::string const &key, std::string const &arg0,
-                               std::string const &arg1,
+std::string LocaleManager::fmt(std::string const &key, std::string const &arg0, std::string const &arg1,
                                std::string const &arg2) const
 {
     std::string text = get(key);
@@ -123,8 +118,7 @@ std::string LocaleManager::fmt(std::string const &key, std::string const &arg0,
     return text;
 }
 
-std::unordered_map<std::string, std::string> const &
-LocaleManager::current_strings() const
+std::unordered_map<std::string, std::string> const &LocaleManager::current_strings() const
 {
     return strings_[current_];
 }

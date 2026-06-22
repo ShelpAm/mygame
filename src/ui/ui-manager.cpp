@@ -1,6 +1,5 @@
 #include "ui/ui-manager.hpp"
 #include "core/app.hpp"
-#include "core/game-mode.hpp"
 #include "core/locale-manager.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/soldier-ai.hpp"
@@ -16,8 +15,7 @@
 #include <imgui_impl_sdlrenderer3.h>
 #include <spdlog/spdlog.h>
 
-UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer)
-    : window_(window), renderer_(renderer)
+UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer) : window_(window), renderer_(renderer)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -38,8 +36,7 @@ UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer)
     ImFontConfig cfg;
     cfg.MergeMode = true;
     static ImWchar const cjkRanges[] = {
-        0x0020, 0x00FF, 0x2000, 0x206F, 0x3000, 0x30FF, 0x31F0,
-        0x31FF, 0xFF00, 0xFFEF, 0x4E00, 0x9FFF, 0,
+        0x0020, 0x00FF, 0x2000, 0x206F, 0x3000, 0x30FF, 0x31F0, 0x31FF, 0xFF00, 0xFFEF, 0x4E00, 0x9FFF, 0,
     };
     // Try CJK fonts across platforms
     static char const *cjkPaths[] = {
@@ -100,10 +97,10 @@ void UIManager::render(WorldState *world_state, App &app)
     if (show_journal_)                     render_journal(app);
     if (show_inventory_)                   render_inventory(app);
     if (show_map_)                         render_map(app);
-    if (app.show_help())                   render_help_panel(app);
-    if (app.show_load_menu())              render_load_menu(app);
+    if (show_help_)                   render_help_panel(app);
+    if (show_load_menu_)              render_load_menu(app);
 
-    if (app.show_multiplayer()) {
+    if (show_multiplayer_) {
         if (!chat_active_) {
             chat_buf_[0] = '\0';
             chat_active_ = true;
@@ -128,26 +125,21 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
 
     ImGui::SetNextWindowPos(ImVec2(10, 10));
     ImGui::Begin("HUD", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
-                     ImGuiWindowFlags_AlwaysAutoResize |
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoInputs);
 
-    ImGui::TextColored(ImVec4(0.8f, 0.7f, 0.4f, 1.0f), "%s",
-                       loc.get("game.title").c_str());
+    ImGui::TextColored(ImVec4(0.8f, 0.7f, 0.4f, 1.0f), "%s", loc.get("game.title").c_str());
     ImGui::SameLine();
-    ImGui::Text(" | %s: %s", loc.get("menu.language").c_str(),
-                loc.language_name().c_str());
+    ImGui::Text(" | %s: %s", loc.get("menu.language").c_str(), loc.language_name().c_str());
 
     ImGui::SameLine();
     ImGui::Text(" | %s: %.02f", "FPS", app.stopwatch().fps());
 
     ImGui::Separator();
 
-    static char const *seasonKeys[] = {"season.spring", "season.summer",
-                                       "season.autumn", "season.winter"};
-    ImGui::Text("%s: %d | %s: %s | %s: %.0f", loc.get("hud.day").c_str(),
-                world_state.day(), loc.get("hud.season").c_str(),
-                loc.get(seasonKeys[world_state.season()]).c_str(),
+    static constexpr char const *seasonKeys[] = {"season.spring", "season.summer", "season.autumn", "season.winter"};
+    ImGui::Text("%s: %d | %s: %s | %s: %.0f", loc.get("hud.day").c_str(), world_state.day(),
+                loc.get("hud.season").c_str(), loc.get(seasonKeys[world_state.season()]).c_str(),
                 loc.get("hud.time").c_str(), world_state.time_of_day());
     ImGui::TextDisabled("%s", loc.get("hud.keys").c_str());
 
@@ -155,10 +147,8 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
     auto *cs = app.client().player_stats();
     ImGui::Separator();
     assert(cs != nullptr);
-    ImGui::Text("%s: %d/%d | %s: %.0f | %s: %.0f | %s: %.0f",
-                loc.get("hud.hp").c_str(), cs->hp, cs->max_hp,
-                loc.get("hud.food").c_str(), sv.food,
-                loc.get("hud.water").c_str(), sv.water,
+    ImGui::Text("%s: %d/%d | %s: %.0f | %s: %.0f | %s: %.0f", loc.get("hud.hp").c_str(), cs->hp, cs->max_hp,
+                loc.get("hud.food").c_str(), sv.food, loc.get("hud.water").c_str(), sv.water,
                 loc.get("hud.energy").c_str(), sv.energy);
 
     // Soldier info (only player's own team)
@@ -169,11 +159,11 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
     for (auto &re : app.client().remote_entities()) {
         if (re.kind == EntityKind::soldier && re.alive && re.team == my_team) {
             ++soldier_count;
-            if (re.soldier_stance == SoldierStance::follow)
+            if (re.soldier_stance == SoldierStance::defensive)
                 ++follow_count;
-            else if (re.soldier_stance == SoldierStance::guard)
+            else if (re.soldier_stance == SoldierStance::offensive)
                 ++guard_count;
-            else if (re.soldier_stance == SoldierStance::patrol)
+            else if (re.soldier_stance == SoldierStance::passive)
                 ++patrol_count;
             if (re.soldier_role == SoldierRole::melee)
                 ++melee_count;
@@ -184,14 +174,11 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
     if (soldier_count > 0) {
         auto &cli2 = app.client();
         auto sel = cli2.selected_roles();
-        int n = (int)formation_registry().size();
+        int n = static_cast<int>(formation_registry().size());
         auto &fm_reg = formation_registry();
-        ImGui::Text("Soldiers: %d | [G] %dF/%dG/%dP", soldier_count,
-                    follow_count, guard_count, patrol_count);
-        ImGui::Text("[1] Melee:%d %s [2] Ranged:%d %s | [F4] Formation: %s",
-                    melee_count, (sel & 1) ? "*" : " ", ranged_count,
-                    (sel & 2) ? "*" : " ",
-                    fm_reg[cli2.formation_idx() % n].first);
+        ImGui::Text("Soldiers: %d | [G] %dF/%dG/%dP", soldier_count, follow_count, guard_count, patrol_count);
+        ImGui::Text("[1] Melee:%d %s [2] Ranged:%d %s | [F4] Formation: %s", melee_count, (sel & 1) ? "*" : " ",
+                    ranged_count, (sel & 2) ? "*" : " ", fm_reg[cli2.formation_idx() % n].first);
     }
     else {
         ImGui::TextDisabled("[F2] Melee [F3] Ranged — recruit soldiers");
@@ -200,9 +187,7 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
 
     // Language switcher (top-right, out of HUD way)
     ImGui::SetNextWindowPos(ImVec2(600, 10), ImGuiCond_Always);
-    ImGui::Begin("Lang", nullptr,
-                 ImGuiWindowFlags_NoDecoration |
-                     ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Begin("Lang", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize);
     for (int i = 0; i < app.locale().language_count(); ++i) {
         if (i > 0)
             ImGui::SameLine();
@@ -214,15 +199,12 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
 
     // Death overlay
     auto const &surv = app.client().survival();
-    auto *pcs = app.client().player_stats();
-    if ((pcs && !pcs->alive) || surv.health <= 0.f) {
+    auto const *stat = app.client().player_stats();
+    if ((stat && !stat->alive) || surv.health <= 0.F) {
         ImGui::SetNextWindowPos(ImVec2(440, 300), ImGuiCond_Always);
         ImGui::Begin("DeathOverlay", nullptr,
-                     ImGuiWindowFlags_NoDecoration |
-                         ImGuiWindowFlags_AlwaysAutoResize |
-                         ImGuiWindowFlags_NoInputs);
-        ImGui::TextColored(ImVec4(1.f, 0.1f, 0.1f, 1.f), "%s",
-                           app.locale().get("resp.dead").c_str());
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
+        ImGui::TextColored(ImVec4(1.f, 0.1f, 0.1f, 1.f), "%s", app.locale().get("resp.dead").c_str());
         ImGui::TextDisabled("%s", app.locale().get("resp.dead_hint").c_str());
         ImGui::End();
     }
@@ -235,15 +217,12 @@ void UIManager::render_dialogue(App const &app)
 
     ImGui::SetNextWindowSize(ImVec2(500, 480), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImVec2(50, 50), ImGuiCond_Appearing);
-    ImGui::Begin(loc.get("dialogue.title").c_str(), nullptr,
-                 ImGuiWindowFlags_NoResize);
+    ImGui::Begin(loc.get("dialogue.title").c_str(), nullptr, ImGuiWindowFlags_NoResize);
 
     // Title + trust indicator
-    ImGui::TextColored(ImVec4(0.8f, 0.7f, 0.4f, 1.0f), "%s",
-                       ds.npc_name.c_str());
+    ImGui::TextColored(ImVec4(0.8f, 0.7f, 0.4f, 1.0f), "%s", ds.npc_name.c_str());
     ImGui::SameLine();
-    ImGui::TextDisabled(" %s: %+d", loc.get("dialogue.trust").c_str(),
-                        ds.npc_trust);
+    ImGui::TextDisabled(" %s: %+d", loc.get("dialogue.trust").c_str(), ds.npc_trust);
     ImGui::Separator();
 
     // Conversation history
@@ -261,12 +240,10 @@ void UIManager::render_dialogue(App const &app)
         }
 
         if (line.speaker == DialogueLine::player) {
-            ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.f), "%s: %s",
-                               playerLabel.c_str(), text.c_str());
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.f), "%s: %s", playerLabel.c_str(), text.c_str());
         }
         else {
-            char const *name = line.npc_name.empty() ? ds.npc_name.c_str()
-                                                     : line.npc_name.c_str();
+            char const *name = line.npc_name.empty() ? ds.npc_name.c_str() : line.npc_name.c_str();
             ImGui::TextWrapped("%s: %s", name, text.c_str());
         }
     }
@@ -318,8 +295,7 @@ void UIManager::render_dialogue(App const &app)
         const_cast<App &>(app).do_dialogue_action("__gift__");
     }
     ImGui::SameLine();
-    if (ds.can_threaten &&
-        ImGui::Button(loc.get("dialogue.threaten").c_str())) {
+    if (ds.can_threaten && ImGui::Button(loc.get("dialogue.threaten").c_str())) {
         const_cast<App &>(app).do_dialogue_action("__threaten__");
     }
     ImGui::SameLine();
@@ -336,8 +312,7 @@ void UIManager::render_journal(App const &app)
     ImGui::Begin(loc.get("ui.journal").c_str(), &show_journal_);
     ImGui::Text("%s", loc.get("ui.journal_placeholder").c_str());
     static char buf[4096] = {};
-    ImGui::InputTextMultiline("##journal_entry", buf, sizeof(buf),
-                              ImVec2(-1, 300));
+    ImGui::InputTextMultiline("##journal_entry", buf, sizeof(buf), ImVec2(-1, 300));
     ImGui::End();
 }
 
@@ -395,20 +370,20 @@ void UIManager::render_load_menu(App const &app)
 
     ImGui::Separator();
     if (ImGui::Button("Close")) {
-        const_cast<App &>(app).set_show_load_menu(false);
+        show_load_menu_ = false;
     }
     ImGui::End();
 }
 
 void UIManager::render_multiplayer_menu(App const &app)
 {
-    assert(app.show_multiplayer());
+    assert(show_multiplayer_);
     ImGui::SetNextWindowSize(ImVec2(320, 320), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImVec2(400, 200), ImGuiCond_Appearing);
     bool show = true;
     ImGui::Begin("Multiplayer", &show, ImGuiWindowFlags_NoResize);
     if (!show)
-        const_cast<App &>(app).set_show_multiplayer(false);
+        show_multiplayer_ = false;
 
     auto &mutApp = const_cast<App &>(app);
 
@@ -426,7 +401,7 @@ void UIManager::render_multiplayer_menu(App const &app)
 
     ImGui::Separator();
     if (ImGui::Button(app.locale().get("mp.close").c_str()))
-        mutApp.set_show_multiplayer(false);
+        show_multiplayer_ = false;
     ImGui::End();
 }
 
@@ -460,15 +435,13 @@ void UIManager::render_map(App const &app)
 void UIManager::render_hosting(App &app)
 {
     auto const &loc = app.locale();
-    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s",
-                       loc.get("mp.hosting").c_str());
+    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s", loc.get("mp.hosting").c_str());
     ImGui::TextDisabled("%s", loc.get("mp.hosting_hint").c_str());
-    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
-                app.client().remote_entities().size());
+    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(), app.client().remote_entities().size());
     ImGui::Separator();
 
     if (ImGui::Button(loc.get("mp.stop_hosting").c_str())) {
-        app.game_mode().stop_host();
+        app.stop_listen();
         // app.start_local_session();
         app.set_session_mode(SessionMode::local);
     }
@@ -494,16 +467,14 @@ void UIManager::render_local(App &app)
     ImGui::Separator();
     ImGui::Text("%s", loc.get("mp.join").c_str());
     host_ip_.resize(63);
-    ImGui::InputText(loc.get("mp.ip").c_str(), host_ip_.data(),
-                     host_ip_.size() + 1);
+    ImGui::InputText(loc.get("mp.ip").c_str(), host_ip_.data(), host_ip_.size() + 1);
     host_ip_.resize(std::strlen(host_ip_.c_str()));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80);
     ImGui::InputInt("##port", &host_port_);
     host_port_ = std::clamp(host_port_, 1, 65535);
     if (ImGui::Button(loc.get("mp.connect").c_str())) {
-        spdlog::debug("Clicked button, Connecting to {}:{}", host_ip_,
-                      host_port_);
+        spdlog::debug("Clicked button, Connecting to {}:{}", host_ip_, host_port_);
         app.start_client_session(host_ip_, host_port_);
         auto entry = host_ip_ + ":" + std::to_string(host_port_);
         if (!std::ranges::contains(server_list_, entry)) {
@@ -514,7 +485,7 @@ void UIManager::render_local(App &app)
     if (!server_list_.empty()) {
         ImGui::Separator();
         ImGui::Text("%s", loc.get("mp.saved_servers").c_str());
-        for (int i = 0; i < (int)server_list_.size(); ++i) {
+        for (int i = 0; i < static_cast<int>(server_list_.size()); ++i) {
             ImGui::PushID(i);
             if (ImGui::Button(server_list_[i].c_str())) {
                 // Parse "ip:port" or just "ip"
@@ -532,8 +503,7 @@ void UIManager::render_local(App &app)
                     host_ip_ = ip;
                     host_port_ = port;
                 }
-                spdlog::debug("Clicked button, Connecting to {}:{}", host_ip_,
-                              host_port_);
+                spdlog::debug("Clicked button, Connecting to {}:{}", host_ip_, host_port_);
                 app.start_client_session(host_ip_, host_port_);
             }
             ImGui::SameLine();
@@ -554,10 +524,8 @@ void UIManager::render_client(App &app)
     ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f),
                        "%s Host: %s", // FIXME: i18n
                                       // support
-                       loc.get("mp.connected").c_str(),
-                       app.client().session()->remote_info().c_str());
-    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
-                app.client().remote_entities().size());
+                       loc.get("mp.connected").c_str(), app.client().session_remote_info().c_str());
+    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(), app.client().remote_entities().size());
     ImGui::Separator();
     render_chat(app);
     if (ImGui::Button(loc.get("mp.disconnect").c_str())) {
@@ -569,33 +537,26 @@ void UIManager::render_client(App &app)
 void UIManager::render_client_list(App &app)
 {
     auto const &loc = app.locale();
-    auto *server = app.game_mode().server();
+    auto const &sessions = app.server_sessions();
 
-    if (server->sessions().empty()) {
+    if (sessions.empty()) {
         ImGui::TextDisabled("%s", loc.get("mp.no_clients").c_str());
         return;
     }
 
-    if (ImGui::CollapsingHeader(loc.get("mp.clients").c_str(),
-                                ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader(loc.get("mp.clients").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent();
 
         // 表格方式显示
-        if (ImGui::BeginTable("client_list", 4,
-                              ImGuiTableFlags_Borders |
-                                  ImGuiTableFlags_RowBg)) {
+        if (ImGui::BeginTable("client_list", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
 
-            ImGui::TableSetupColumn(loc.get("mp.id").c_str(),
-                                    ImGuiTableColumnFlags_WidthFixed, 60.0f);
-            ImGui::TableSetupColumn(loc.get("mp.address").c_str(),
-                                    ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn(loc.get("mp.status").c_str(),
-                                    ImGuiTableColumnFlags_WidthFixed, 80.0f);
-            ImGui::TableSetupColumn("Kick", ImGuiTableColumnFlags_WidthFixed,
-                                    50.0f);
+            ImGui::TableSetupColumn(loc.get("mp.id").c_str(), ImGuiTableColumnFlags_WidthFixed, 60.0f);
+            ImGui::TableSetupColumn(loc.get("mp.address").c_str(), ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn(loc.get("mp.status").c_str(), ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableSetupColumn("Kick", ImGuiTableColumnFlags_WidthFixed, 50.0f);
             ImGui::TableHeadersRow();
 
-            for (auto const &tg : server->sessions()) {
+            for (auto const &tg : sessions) {
                 ImGui::TableNextRow();
 
                 // ID
@@ -609,19 +570,17 @@ void UIManager::render_client_list(App &app)
                 // Status
                 ImGui::TableSetColumnIndex(2);
                 if (tg.get()->is_open()) {
-                    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s",
-                                       loc.get("mp.connected").c_str());
+                    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s", loc.get("mp.connected").c_str());
                 }
                 else {
-                    ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "%s",
-                                       loc.get("mp.disconnected").c_str());
+                    ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "%s", loc.get("mp.disconnected").c_str());
                 }
 
                 // Kick
                 ImGui::TableSetColumnIndex(3);
                 ImGui::PushID(tg.get());
                 if (ImGui::SmallButton("X"))
-                    server->kick(tg, "kicked by host");
+                    app.kick_session(tg, "kicked by host");
                 ImGui::PopID();
             }
 
@@ -643,11 +602,9 @@ void UIManager::render_chat(App &app)
         ImGui::SetScrollHereY(1.f);
     ImGui::EndChild();
     chat_buf_.resize(255);
-    ImGui::InputText("##chat", chat_buf_.data(), chat_buf_.size() + 1,
-                     ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::InputText("##chat", chat_buf_.data(), chat_buf_.size() + 1, ImGuiInputTextFlags_EnterReturnsTrue);
     chat_buf_.resize(std::strlen(chat_buf_.c_str()));
-    if (ImGui::IsItemDeactivatedAfterEdit() ||
-        ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+    if (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
         if (!chat_buf_.empty()) {
             app.client().send_chat(chat_buf_);
             chat_buf_.clear();

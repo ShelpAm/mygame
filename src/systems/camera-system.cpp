@@ -1,6 +1,5 @@
 #include "systems/camera-system.hpp"
-CameraSystem::CameraSystem(int width, int height)
-    : width_(width), height_(height)
+CameraSystem::CameraSystem(int width, int height) : width_(width), height_(height)
 {
 }
 
@@ -31,20 +30,14 @@ void CameraSystem::center_on(Vec2f pos)
 
 Vec2f CameraSystem::world_to_screen(Vec2f world_pos) const
 {
-    return {
-        (world_pos.x - center_.x) * zoom_ + static_cast<float>(width_) / 2.f,
-        (world_pos.y - center_.y) * zoom_ + static_cast<float>(height_) / 2.f};
+    return {((world_pos.x - center_.x) * zoom_) + (static_cast<float>(width_) / 2.F),
+            ((world_pos.y - center_.y) * zoom_) + (static_cast<float>(height_) / 2.F)};
 }
 
 Vec2f CameraSystem::screen_to_world(Vec2i screen_pos) const
 {
-    return {
-        (static_cast<float>(screen_pos.x) - static_cast<float>(width_) / 2.f) /
-                zoom_ +
-            center_.x,
-        (static_cast<float>(screen_pos.y) - static_cast<float>(height_) / 2.f) /
-                zoom_ +
-            center_.y};
+    return {(static_cast<float>(screen_pos.x) - static_cast<float>(width_) / 2.f) / zoom_ + center_.x,
+            (static_cast<float>(screen_pos.y) - static_cast<float>(height_) / 2.f) / zoom_ + center_.y};
 }
 
 // View port of world pos

@@ -71,13 +71,11 @@ bool InputManager::is_pressed(Action action) const
 bool InputManager::just_pressed(Action action) const
 {
     auto it = actions_.find(action);
-    return it != actions_.end() && it->second.pressed &&
-           !it->second.was_pressed;
+    return it != actions_.end() && it->second.pressed && !it->second.was_pressed;
 }
 
 bool InputManager::just_released(Action action) const
 {
     auto it = actions_.find(action);
-    return it != actions_.end() && !it->second.pressed &&
-           it->second.was_pressed;
+    return it != actions_.end() && !it->second.pressed && it->second.was_pressed;
 }

@@ -24,22 +24,14 @@ BOOST_AUTO_TEST_CASE(damage_kills_entity)
 {
     flecs::world world;
     auto e1 = world.entity();
-    e1.set<CombatStats>(CombatStats{.team = Team::player_begin,
-                                    .max_hp = 10,
-                                    .hp = 10,
-                                    .attack = 10,
-                                    .defense = 1,
-                                    .attack_range = 100.F});
-    e1.set<Position>(Position{.world_pos = Vec2f(0.F, 0.F)});
+    e1.set<CombatStats>(CombatStats{
+        .team = Team::player_begin, .max_hp = 10, .hp = 10, .attack = 10, .defense = 1, .attack_range = 100.F});
+    e1.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
 
     auto e2 = world.entity();
-    e2.set<CombatStats>(CombatStats{.team = Team::enemy,
-                                    .max_hp = 3,
-                                    .hp = 3,
-                                    .attack = 0,
-                                    .defense = 0,
-                                    .attack_range = 100.F});
-    e2.set<Position>(Position{.world_pos = Vec2f(50.F, 0.F)});
+    e2.set<CombatStats>(
+        CombatStats{.team = Team::enemy, .max_hp = 3, .hp = 3, .attack = 0, .defense = 0, .attack_range = 100.F});
+    e2.set<Transform>(Transform{.world_pos = Vec2f(50.F, 0.F)});
 
     std::vector<CombatEvent> events;
     auto noop = [](EntityId) {};
@@ -55,56 +47,47 @@ BOOST_AUTO_TEST_CASE(soldier_ai_follows_leader)
 {
     flecs::world world;
     auto leader = world.entity();
-    leader.set<Position>(Position{.world_pos = Vec2f(100.F, 100.F)});
+    leader.set<Transform>(Transform{.world_pos = Vec2f(100.F, 100.F)});
     auto leader_team = static_cast<Team>(static_cast<int>(Team::player_begin) + 10);
-    leader.set<CombatStats>(
-        CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
+    leader.set<CombatStats>(CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
 
-    auto soldier = world.entity();
-    soldier.set<Position>(Position{.world_pos = Vec2f(0.F, 0.F)});
-    soldier.set<CombatStats>(
-        CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
-    soldier.set<SoldierAI>(SoldierAI{.follow_target = leader.id(),
-                                     .formation_offset = Vec2f(32.F, -32.F),
-                                     .follow_distance = 16.F,
-                                     .guard_post = {}});
+    auto soldier = world.entity().add<Follows>(leader.id());
+    soldier.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
+    soldier.set<CombatStats>(CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
+    soldier.set<SoldierAI>(SoldierAI{.formation_offset = Vec2f(32.F, -32.F), .follow_distance = 16.F});
 
-    auto const *sPos = soldier.try_get<Position>();
+    auto const *sPos = soldier.try_get<Transform>();
     BOOST_REQUIRE(sPos != nullptr);
     BOOST_TEST(sPos->world_pos.x == 0.F);
 
     auto const *sAi = soldier.try_get<SoldierAI>();
     BOOST_REQUIRE(sAi != nullptr);
-    BOOST_TEST(sAi->follow_target == leader.id());
+    BOOST_TEST(soldier.target<Follows>() == leader.id());
 }
 
 BOOST_AUTO_TEST_CASE(soldier_ai_moves_toward_leader)
 {
     flecs::world world;
     auto leader = world.entity();
-    leader.set<Position>(Position{.world_pos = Vec2f(200.F, 200.F)});
+    leader.set<Transform>(Transform{.world_pos = Vec2f(200.F, 200.F)});
     auto leader_team = static_cast<Team>(static_cast<int>(Team::player_begin) + 10);
-    leader.set<CombatStats>(
-        CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
+    leader.set<CombatStats>(CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
 
     auto soldier = world.entity();
-    soldier.set<Position>(Position{.world_pos = Vec2f(0.F, 0.F)});
-    soldier.set<CombatStats>(
-        CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
-    soldier.set<Movement>(Movement{.velocity = {}, .target_pos = {}, .speed = 200.F, .facing = {}});
-    soldier.set<SoldierAI>(SoldierAI{.follow_target = leader.id(),
-                                     .formation_offset = Vec2f(0.F, 0.F),
-                                     .follow_distance = 16.F,
-                                     .guard_post = {}});
+    soldier.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
+    soldier.set<CombatStats>(CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
+    soldier.set<Movement>(Movement{.velocity = {}, .max_speed = 200.F});
+    soldier.add<Follows>(leader.id());
+    soldier.set<SoldierAI>(SoldierAI{.formation_offset = Vec2f(0.F, 0.F), .follow_distance = 16.F});
 
     auto noop = [](EntityId) {};
     auto *ai = soldier.try_get_mut<SoldierAI>();
-    auto *pos = soldier.try_get_mut<Position>();
+    auto *pos = soldier.try_get_mut<Transform>();
     auto *mov = soldier.try_get_mut<Movement>();
     auto *cs = soldier.try_get_mut<CombatStats>();
     BOOST_REQUIRE(ai && pos && mov && cs);
 
-    run_soldier_ai(world, soldier, *ai, *pos, *mov, *cs, noop);
+    run_soldier_ai(world, soldier, *ai, *pos, *mov, *cs, nullptr, 0.016F, noop);
     BOOST_TEST(mov->velocity.x > 0.F);
 }
 
@@ -128,15 +111,12 @@ BOOST_AUTO_TEST_CASE(team_near_position)
 {
     flecs::world world;
     auto e = world.entity();
-    e.set<CombatStats>(
-        CombatStats{.team = Team::player_begin, .max_hp = 10, .hp = 10});
-    e.set<Position>(Position{.world_pos = Vec2f(50.F, 0.F)});
+    e.set<CombatStats>(CombatStats{.team = Team::player_begin, .max_hp = 10, .hp = 10});
+    e.set<Transform>(Transform{.world_pos = Vec2f(50.F, 0.F)});
 
     CombatSystem csys;
-    BOOST_TEST(
-        csys.team_near_position(world, Team::player_begin, Vec2f(0.F, 0.F), 100.F));
-    BOOST_TEST(
-        !csys.team_near_position(world, Team::player_begin, Vec2f(0.F, 0.F), 10.F));
+    BOOST_TEST(csys.team_near_position(world, Team::player_begin, Vec2f(0.F, 0.F), 100.F));
+    BOOST_TEST(!csys.team_near_position(world, Team::player_begin, Vec2f(0.F, 0.F), 10.F));
     BOOST_TEST(!csys.team_near_position(world, Team::enemy, Vec2f(0.F, 0.F), 200.F));
 }
 
@@ -144,33 +124,24 @@ BOOST_AUTO_TEST_CASE(dead_entity_not_in_combat)
 {
     flecs::world world;
     auto e = world.entity();
-    e.set<CombatStats>(CombatStats{
-        .team = Team::player_begin, .max_hp = 10, .hp = 10, .alive = false});
-    e.set<Position>(Position{.world_pos = Vec2f(0.F, 0.F)});
+    e.set<CombatStats>(CombatStats{.team = Team::player_begin, .max_hp = 10, .hp = 10, .alive = false});
+    e.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
 
     CombatSystem csys;
-    BOOST_TEST(
-        !csys.team_near_position(world, Team::player_begin, Vec2f(0.F, 0.F), 200.F));
+    BOOST_TEST(!csys.team_near_position(world, Team::player_begin, Vec2f(0.F, 0.F), 200.F));
 }
 
 BOOST_AUTO_TEST_CASE(combat_events_generated)
 {
     flecs::world world;
     auto e1 = world.entity();
-    e1.set<CombatStats>(CombatStats{.team = Team::player_begin,
-                                    .max_hp = 10,
-                                    .hp = 10,
-                                    .attack = 10,
-                                    .attack_range = 100.F});
-    e1.set<Position>(Position{.world_pos = Vec2f(0.F, 0.F)});
+    e1.set<CombatStats>(
+        CombatStats{.team = Team::player_begin, .max_hp = 10, .hp = 10, .attack = 10, .attack_range = 100.F});
+    e1.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
 
     auto e2 = world.entity();
-    e2.set<CombatStats>(CombatStats{.team = Team::enemy,
-                                    .max_hp = 10,
-                                    .hp = 10,
-                                    .attack = 3,
-                                    .attack_range = 100.F});
-    e2.set<Position>(Position{.world_pos = Vec2f(50.F, 0.F)});
+    e2.set<CombatStats>(CombatStats{.team = Team::enemy, .max_hp = 10, .hp = 10, .attack = 3, .attack_range = 100.F});
+    e2.set<Transform>(Transform{.world_pos = Vec2f(50.F, 0.F)});
 
     std::vector<CombatEvent> events;
     auto noop = [](EntityId) {};

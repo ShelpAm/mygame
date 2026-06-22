@@ -10,6 +10,7 @@ class NavigationSystem {
 
     std::vector<Vec2i> find_path(Vec2i start, Vec2i goal) const;
     bool is_walkable(Vec2i tile) const;
+    bool walkable_line(Vec2i a, Vec2i b) const;
     void set_walkable(Vec2i tile, bool walkable);
 
   private:

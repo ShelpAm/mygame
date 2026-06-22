@@ -18,16 +18,14 @@ Faction const *FactionNetwork::get_faction(std::string const &id) const
     return it != factions_.end() ? &it->second : nullptr;
 }
 
-void FactionNetwork::set_relation(std::string const &a, std::string const &b,
-                                  int value)
+void FactionNetwork::set_relation(std::string const &a, std::string const &b, int value)
 {
     value = std::clamp(value, -100, 100);
     factions_[a].relations[b] = value;
     factions_[b].relations[a] = value;
 }
 
-int FactionNetwork::get_relation(std::string const &a,
-                                 std::string const &b) const
+int FactionNetwork::get_relation(std::string const &a, std::string const &b) const
 {
     auto itA = factions_.find(a);
     if (itA == factions_.end())
@@ -66,9 +64,7 @@ std::vector<std::string> FactionNetwork::all_faction_ids() const
     return result;
 }
 
-void FactionNetwork::apply_event(std::string const &source_faction,
-                                 int power_shift,
-                                 std::string const &target_faction)
+void FactionNetwork::apply_event(std::string const &source_faction, int power_shift, std::string const &target_faction)
 {
     modify_power(source_faction, power_shift);
     if (!target_faction.empty()) {
@@ -79,8 +75,7 @@ void FactionNetwork::apply_event(std::string const &source_faction,
             for (auto const &[allyId, rel] : target->relations) {
                 if (rel > 50 && allyId != source_faction) {
                     modify_power(allyId, -power_shift / 4);
-                    set_relation(source_faction, allyId,
-                                 get_relation(source_faction, allyId) - 10);
+                    set_relation(source_faction, allyId, get_relation(source_faction, allyId) - 10);
                 }
             }
         }

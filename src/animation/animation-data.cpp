@@ -13,10 +13,7 @@ static void init_knight_clips()
         return;
     knight_clips_init = true;
 
-    auto idle = AnimationClip{.name = "idle",
-                              .frame_duration = 0.12f,
-                              .loop = true,
-                              .faces_right = false};
+    auto idle = AnimationClip{.name = "idle", .frame_duration = 0.12f, .loop = true, .faces_right = false};
     for (int i = 0; i < 8; ++i)
         idle.frame_names.push_back("knight_idle_" + std::to_string(i));
 
@@ -36,14 +33,12 @@ static void init_knight_clips()
     for (int i = 0; i < 8; ++i)
         die.frame_names.push_back("knight_die_" + std::to_string(i));
 
-    knight_clips = {std::move(idle), std::move(run), std::move(attack),
-                    std::move(hurt), std::move(die)};
+    knight_clips = {std::move(idle), std::move(run), std::move(attack), std::move(hurt), std::move(die)};
 }
 
 static std::vector<AnimationClip> empty_clips;
 
-std::vector<AnimationClip> const &animation_clips_for_kind(uint8_t entity_kind,
-                                                           uint8_t /*team*/)
+std::vector<AnimationClip> const &animation_clips_for_kind(uint8_t entity_kind, uint8_t /*team*/)
 {
     using namespace EntityKind;
     switch (entity_kind) {
@@ -58,8 +53,7 @@ std::vector<AnimationClip> const &animation_clips_for_kind(uint8_t entity_kind,
     }
 }
 
-AnimationClip const *find_clip(std::vector<AnimationClip> const &clips,
-                               std::string const &name)
+AnimationClip const *find_clip(std::vector<AnimationClip> const &clips, std::string const &name)
 {
     for (auto &c : clips)
         if (c.name == name)
@@ -67,8 +61,7 @@ AnimationClip const *find_clip(std::vector<AnimationClip> const &clips,
     return nullptr;
 }
 
-AnimationClip const *determine_clip(std::vector<AnimationClip> const &clips,
-                                    AnimationState &state, Vec2f velocity,
+AnimationClip const *determine_clip(std::vector<AnimationClip> const &clips, AnimationState &state, Vec2f velocity,
                                     bool alive, float dt)
 {
     // Tick down transient triggers

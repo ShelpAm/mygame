@@ -5,9 +5,7 @@
 #include <spdlog/spdlog.h>
 #include <sstream>
 
-EventSimulator::EventSimulator(FactionNetwork &factions,
-                               KnowledgeGraph &knowledge,
-                               WorldState &world_state)
+EventSimulator::EventSimulator(FactionNetwork &factions, KnowledgeGraph &knowledge, WorldState &world_state)
     : factions_(factions), knowledge_(knowledge), world_state_(world_state)
 {
 }
@@ -21,10 +19,8 @@ void EventSimulator::update(int current_day)
 {
     for (auto &event : events_) {
         if (!event.triggered && event.trigger_day <= current_day) {
-            spdlog::debug("applying event: {}, is refugee or battle = {}",
-                          event.description,
-                          event.type == GameEvent::Type::refugee_wave ||
-                              event.type == GameEvent::Type::battle);
+            spdlog::debug("applying event: {}, is refugee or battle = {}", event.description,
+                          event.type == GameEvent::Type::refugee_wave || event.type == GameEvent::Type::battle);
             apply_event(event, current_day);
         }
     }
@@ -36,16 +32,12 @@ void EventSimulator::apply_event(GameEvent &event, int current_day)
 
     // Apply faction effects
     if (!event.source_faction_id.empty()) {
-        factions_.apply_event(event.source_faction_id, event.power_shift,
-                              event.target_faction_id);
+        factions_.apply_event(event.source_faction_id, event.power_shift, event.target_faction_id);
     }
     if (!event.target_faction_id.empty()) {
-        factions_.modify_power(event.target_faction_id,
-                               event.power_shift < 0 ? event.power_shift / 2
-                                                     : 0);
+        factions_.modify_power(event.target_faction_id, event.power_shift < 0 ? event.power_shift / 2 : 0);
         factions_.modify_wealth(event.target_faction_id, event.wealth_shift);
-        factions_.modify_cohesion(event.target_faction_id,
-                                  event.cohesion_shift);
+        factions_.modify_cohesion(event.target_faction_id, event.cohesion_shift);
     }
 
     // Generate knowledge facts

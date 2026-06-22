@@ -1,7 +1,5 @@
 #include "dialogue/topic-registry.hpp"
-void TopicRegistry::register_topic(std::string const &id,
-                                   std::string const &display_name,
-                                   std::string const &category)
+void TopicRegistry::register_topic(std::string const &id, std::string const &display_name, std::string const &category)
 {
     topics_[id] = {display_name, category};
 }
@@ -27,8 +25,7 @@ std::vector<std::string> TopicRegistry::all_topics() const
     return result;
 }
 
-std::vector<std::string>
-TopicRegistry::by_category(std::string const &category) const
+std::vector<std::string> TopicRegistry::by_category(std::string const &category) const
 {
     std::vector<std::string> result;
     for (auto const &[id, topic] : topics_) {

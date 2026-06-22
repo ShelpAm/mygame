@@ -1,10 +1,8 @@
 #include "core/app.hpp"
 #include <spdlog/spdlog.h>
 
-int main(int argc, char **argv)
+int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv)
 {
-    (void)argc;
-    (void)argv;
 
     // Report error on Release, to let user know instead of silent crash. In
     // Debug we want the exception to propagate for easier debugging.

@@ -2,7 +2,6 @@
 
 #include "entities/components/npc-state.hpp"
 #include "knowledge/knowledge-graph.hpp"
-#include <cstdlib>
 #include <string>
 #include <unordered_map>
 #include <vector>

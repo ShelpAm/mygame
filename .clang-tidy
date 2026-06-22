@@ -1,0 +1,5 @@
+Checks: '-cppcoreguidelines-avoid-magic-numbers'
+CheckOptions:
+  - key: readability-implicit-bool-conversion.AllowPointerConditions
+    value: true
+

@@ -1,21 +1,18 @@
 #include "dialogue/relationship-table.hpp"
 #include <algorithm>
 
-void RelationshipTable::set_relation(std::string const &npc_id,
-                                     Relation const &rel)
+void RelationshipTable::set_relation(std::string const &npc_id, Relation const &rel)
 {
     relations_[npc_id] = rel;
 }
 
-RelationshipTable::Relation const *
-RelationshipTable::get_relation(std::string const &npc_id) const
+RelationshipTable::Relation const *RelationshipTable::get_relation(std::string const &npc_id) const
 {
     auto it = relations_.find(npc_id);
     return it != relations_.end() ? &it->second : nullptr;
 }
 
-RelationshipTable::Relation *
-RelationshipTable::get_mutable(std::string const &npc_id)
+RelationshipTable::Relation *RelationshipTable::get_mutable(std::string const &npc_id)
 {
     auto it = relations_.find(npc_id);
     return it != relations_.end() ? &it->second : nullptr;

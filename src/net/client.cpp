@@ -31,8 +31,7 @@ awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
     spdlog::debug("Client: attaching transport {}", t->remote_info());
 
     if (!co_await authenticate_transport(t))
-        throw std::runtime_error(
-            "Server verification failed: unexpected response");
+        throw std::runtime_error("Server verification failed: unexpected response");
 
     spdlog::info("Client: auth successful ({})", t->remote_info());
 
@@ -40,32 +39,28 @@ awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
     spdlog::info("Client: transport ({}) attached", t->remote_info());
 
     // Note to ensure that `c` should outlive this coro.
-    auto reading_loop = [](Client *c,
-                           std::shared_ptr<Session> t) -> awaitable<void> {
+    auto reading_loop = [](Client *c, std::shared_ptr<Session> t) -> awaitable<void> {
         try {
             while (true) {
                 auto msg = co_await t->read();
-                spdlog::log((msg.type == NetPacket::state_delta
-                                 ? spdlog::level::trace
-                                 : spdlog::level::debug),
+                spdlog::log((msg.type == NetPacket::state_delta ? spdlog::level::trace : spdlog::level::debug),
                             "Client: received message {} with payload size {} "
                             "from transport {}",
                             msg.type, msg.payload.size(), t->remote_info());
                 if (!c->messages_.try_send(boost::system::error_code{}, t, msg))
-                    co_await c->messages_.async_send(
-                        boost::system::error_code{}, t, std::move(msg));
+                    Session::spawn([](Client *c, auto t, auto msg) -> awaitable<void> {
+                        co_await c->messages_.async_send(boost::system::error_code{}, t, std::move(msg));
+                    }(c, t, std::move(msg)));
             }
         }
         catch (boost::system::system_error const &e) {
             // If passive, notify. If active, transport_guard_ may be guarding
             // others.
             c->detach_transport(detach_token{}, t.get());
-            if (e.code() == asio::error::operation_aborted ||
-                e.code() == asio::error::eof ||
+            if (e.code() == asio::error::operation_aborted || e.code() == asio::error::eof ||
                 e.code() == asio::experimental::error::channel_closed ||
                 e.code() == asio::experimental::error::channel_cancelled) {
-                spdlog::debug("Client: transport {} closed because {}",
-                              t->remote_info(), e.what());
+                spdlog::debug("Client: transport {} closed because {}", t->remote_info(), e.what());
                 co_return; // Normal exits
             }
             throw;
@@ -89,8 +84,7 @@ void Client::detach_transport(detach_token, Session *s)
 void Client::send_join_request()
 {
     if (!session_ || !session_->is_open())
-        throw std::runtime_error(
-            "send_join_request: transport not attached or closed");
+        throw std::runtime_error("send_join_request: transport not attached or closed");
     Session::spawn([](std::shared_ptr<Session> t) -> awaitable<void> {
         co_await t->write({NetPacket::join, std::vector<std::uint8_t>{}});
     }(session_));
@@ -99,14 +93,12 @@ void Client::send_join_request()
 void Client::send_player_direction(Vec2f dir)
 {
     if (!session_ || !session_->is_open()) {
-        throw std::runtime_error(
-            "send_player_direction: transport not attached or closed");
+        throw std::runtime_error("send_player_direction: transport not attached or closed");
     }
     spdlog::debug("Client: sending move dir: {}, {}", dir.x, dir.y);
-    Session::spawn(
-        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::player_input, payload});
-        }(session_, make_player_input(player_id_, dir.x, dir.y)));
+    Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
+        co_await t->write({NetPacket::player_input, payload});
+    }(session_, make_player_input(player_id_, dir.x, dir.y)));
 }
 
 void Client::send_recruit()
@@ -193,19 +185,17 @@ void Client::send_chat(std::string const &msg)
     assert(session_);
     chat_history_.push_back("You: " + msg);
     std::vector<uint8_t> p(msg.begin(), msg.end());
-    Session::spawn(
-        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::chat, std::move(payload)});
-        }(session_, std::move(p)));
+    Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
+        co_await t->write({NetPacket::chat, std::move(payload)});
+    }(session_, std::move(p)));
 }
 
 void Client::send_dialogue_action(std::string const &action)
 {
     assert(session_);
-    Session::spawn(
-        [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::dialogue_action, std::move(payload)});
-        }(session_, std::vector<uint8_t>(action.begin(), action.end())));
+    Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
+        co_await t->write({NetPacket::dialogue_action, std::move(payload)});
+    }(session_, std::vector<uint8_t>(action.begin(), action.end())));
 }
 
 void Client::handle_message(Session &from, TransportMessage msg)
@@ -215,13 +205,11 @@ void Client::handle_message(Session &from, TransportMessage msg)
         assert(msg.payload.size() >= 9);
         memcpy(&player_id_, msg.payload.data(), 8);
         player_team_ = static_cast<Team>(msg.payload[8]);
-        spdlog::info("Client: Returned player ID from server: {} team: {}",
-                     player_id_, player_team_);
+        spdlog::info("Client: Returned player ID from server: {} team: {}", player_id_, player_team_);
         return;
     }
     if (msg.type == NetPacket::chat) {
-        chat_history_.push_back(
-            std::string(msg.payload.begin(), msg.payload.end()));
+        chat_history_.push_back(std::string(msg.payload.begin(), msg.payload.end()));
         return;
     }
     if (msg.type == NetPacket::dialogue_sync) {
@@ -240,9 +228,7 @@ void Client::handle_message(Session &from, TransportMessage msg)
         if (msg.payload.size() >= 8) {
             EntityId eid;
             memcpy(&eid, msg.payload.data(), 8);
-            std::erase_if(remote_entities_, [eid](RemoteEntity const &re) {
-                return re.id == eid;
-            });
+            std::erase_if(remote_entities_, [eid](RemoteEntity const &re) { return re.id == eid; });
         }
         break;
     case NetPacket::kicked: {
@@ -257,8 +243,7 @@ void Client::handle_message(Session &from, TransportMessage msg)
         break;
     case NetPacket::combat_event: {
         auto ev = parse_combat_event(msg.payload);
-        handle_combat_event(ev.attacker_id, ev.defender_id, ev.damage,
-                            ev.killed);
+        handle_combat_event(ev.attacker_id, ev.defender_id, ev.damage, ev.killed);
         break;
     }
     case NetPacket::projectile_fired: {
@@ -270,9 +255,7 @@ void Client::handle_message(Session &from, TransportMessage msg)
             memcpy(&pv.dst.y, msg.payload.data() + 12, 4);
             Vec2f d = pv.dst - pv.pos;
             pv.total_dist = std::sqrt(d.x * d.x + d.y * d.y);
-            pv.dir = pv.total_dist > 0.f
-                         ? Vec2f{d.x / pv.total_dist, d.y / pv.total_dist}
-                         : Vec2f{1.f, 0.f};
+            pv.dir = pv.total_dist > 0.f ? Vec2f{d.x / pv.total_dist, d.y / pv.total_dist} : Vec2f{1.f, 0.f};
             projectile_visuals_.push_back(pv);
         }
         break;
@@ -303,41 +286,63 @@ void Client::handle_entity_update(NetPacket const &pkt)
     re.hp = u.hp;
     re.max_hp = u.max_hp;
     re.alive = u.alive;
-    remote_entities_.push_back(std::move(re));
+    remote_entities_.push_back(re);
 }
 
 void Client::update(float dt)
 {
-    while (messages_.try_receive(
-        [this](boost::system::error_code, std::shared_ptr<Session> t,
-               TransportMessage msg) { handle_message(*t, std::move(msg)); })) {
+    while (messages_.try_receive([this](boost::system::error_code, std::shared_ptr<Session> t, TransportMessage msg) {
+        handle_message(*t, std::move(msg));
+    })) {
     }
 
     if (player_id_ != invalid_entity) {
         interpolate_entities(dt);
-        player_visibility_.set_visible_arc(world_to_tile(player_pos_),
-                                             player_vision_range_, player_facing_,
-                                             player_vision_arc_);
+        player_visibility_.set_visible_arc(world_to_tile(player_pos_), player_vision_range_, player_facing_,
+                                           player_vision_arc_);
 
-        // Mark entities outside visible tiles as snapshots
-        auto const &visible = player_visibility_.visible;
-        for (auto &re : remote_entities_) {
-            if (!visible.contains(world_to_tile(re.position)))
-                re.snapshot = true;
-        }
+        // Manage snapshots based on tile visibility
+        // auto const &visible = player_visibility_.visible;
+
+        // Create/update snapshots for entities not on visible tiles
+        // (entities in remote_entities_ were synced when visible, so their
+        //  tiles are implicitly explored)
+        // for (auto &re : remote_entities_) {
+        //     auto tile = world_to_tile(re.position);
+        //     if (!visible.contains(tile)) {
+        //         auto it = std::find_if(
+        //             snapshots_.begin(), snapshots_.end(),
+        //             [&tile](SnapshotEntity const &s) {
+        //                 return world_to_tile(s.position) == tile;
+        //             });
+        //         SnapshotEntity *sn = nullptr;
+        //         if (it != snapshots_.end()) {
+        //             sn = &*it;
+        //         } else {
+        //             snapshots_.emplace_back();
+        //             sn = &snapshots_.back();
+        //         }
+        //         sn->position = re.position;
+        //         sn->kind = re.kind;
+        //         sn->facing = re.facing;
+        //         sn->color = re.color;
+        //         sn->scale = re.scale;
+        //         sn->team = re.team;
+        //         sn->alive = re.alive;
+        //         sn->texture_name = re.texture_name;
+        //     }
+        // }
 
         for (auto &re : remote_entities_) {
             auto &clips = animation_clips_for_kind(re.kind, (uint8_t)re.team);
-            auto *clip =
-                determine_clip(clips, re.anim_state, re.velocity, re.alive, dt);
+            auto *clip = determine_clip(clips, re.anim_state, re.velocity, re.alive, dt);
             switch_clip(re.anim_state, clip);
             tick_animation(re.anim_state, re.velocity, dt);
         }
     }
 
     // Tick projectile visuals
-    for (auto it = projectile_visuals_.begin();
-         it != projectile_visuals_.end();) {
+    for (auto it = projectile_visuals_.begin(); it != projectile_visuals_.end();) {
         float step = it->speed * dt;
         it->pos = it->pos + it->dir * step;
         it->traveled += step;
@@ -348,12 +353,7 @@ void Client::update(float dt)
     }
 }
 
-EntityId Client::local_player() const
-{
-    return player_id_;
-}
-
-Vec2f Client::player_position()
+Vec2f Client::player_position() const
 {
     if (player_id_ == invalid_entity)
         throw std::runtime_error("player_position: player ID not set");
@@ -395,34 +395,32 @@ static void set_visual_from_kind(RemoteEntity &re)
     case EntityKind::player:
         re.color = {0.3f, 0.8f, 0.3f, 1.f};
         re.scale = 1.f;
-        std::strncpy(re.texture_name, "player", 31);
+        re.texture_name = "player";
         break;
     case EntityKind::soldier:
-        re.color = re.team == Team::enemy ? SDL_FColor{0.8f, 0.3f, 0.1f, 1.f}
-                                          : SDL_FColor{0.3f, 0.5f, 0.9f, 1.f};
+        re.color = re.team == Team::enemy ? SDL_FColor{0.8f, 0.3f, 0.1f, 1.f} : SDL_FColor{0.3f, 0.5f, 0.9f, 1.f};
         re.scale = 0.8f;
-        std::strncpy(re.texture_name,
-                     re.team == Team::enemy ? "enemy_soldier" : "soldier", 31);
+        re.texture_name = re.team == Team::enemy ? "enemy_soldier" : "soldier";
         break;
     case EntityKind::npc:
         re.color = {0.8f, 0.6f, 0.2f, 1.f};
         re.scale = 1.f;
-        std::strncpy(re.texture_name, "npc", 31);
+        re.texture_name = "npc";
         break;
     case EntityKind::enemy:
         re.color = {0.9f, 0.2f, 0.1f, 1.f};
         re.scale = 1.f;
-        std::strncpy(re.texture_name, "enemy", 31);
+        re.texture_name = "enemy";
         break;
     case EntityKind::structure:
         re.color = {0.5f, 0.5f, 0.5f, 1.f};
         re.scale = 1.2f;
-        std::strncpy(re.texture_name, "structure", 31);
+        re.texture_name = "structure";
         break;
     default:
         re.color = {0.3f, 0.5f, 0.9f, 1.f};
         re.scale = 0.8f;
-        std::strncpy(re.texture_name, "entity", 31);
+        re.texture_name = "entity";
         break;
     }
     re.color.a = 1.f;
@@ -453,9 +451,10 @@ std::optional<ParsedEntity> parse_one_entity(SyncReader &r)
     if (mask & SyncComponent::entity_kind)
         re.kind = r.read<uint8_t>();
     if (mask & SyncComponent::position) {
-        Position pos;
+        Transform pos;
         pos.read_sync(r);
         re.target_pos = pos.world_pos;
+        re.facing = pos.facing;
     }
     if (mask & SyncComponent::combat) {
         CombatStats cs;
@@ -472,7 +471,6 @@ std::optional<ParsedEntity> parse_one_entity(SyncReader &r)
         Movement mov;
         mov.read_sync(r);
         re.velocity = mov.velocity;
-        re.facing = mov.facing;
     }
     if (mask & SyncComponent::soldier_ai) {
         SoldierAI ai;
@@ -515,6 +513,13 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
 
     parse_world_header(r, world_state_);
 
+    // Parse explored tiles (server-authoritative)
+    {
+        auto count = r.read<uint16_t>();
+        for (uint16_t i = 0; i < count; ++i)
+            player_visibility_.explore_single(Vec2i(r.read<int32_t>(), r.read<int32_t>()));
+    }
+
     while (!r.done()) {
         auto opt = parse_one_entity(r);
         if (!opt)
@@ -537,14 +542,13 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
             player_vision_arc_ = re.vision_arc;
             if (pe.has_survival)
                 player_survival_ = pe.survival;
-            player_visibility_.explore_radius(re.position, re.vision_range);
         }
 
         // Upsert into remote_entities
         auto *rp = find_entity(re.id);
         if (!rp) {
             re.position = re.target_pos;
-            remote_entities_.push_back(std::move(re));
+            remote_entities_.push_back(re);
         }
         else {
             rp->kind = re.kind;
@@ -556,12 +560,11 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
             rp->velocity = re.velocity;
             rp->facing = re.facing;
             rp->interactable = re.interactable;
-            rp->snapshot = false;
             set_visual_from_kind(*rp);
         }
     }
-    // Entities not in this sync stay — they become snapshots via per-frame
-    // check
+    // Entities not in this sync stay — snapshot management is handled
+    // per-frame in update() based on tile visibility
 }
 
 void Client::apply_sync_delta(std::vector<uint8_t> const &data)
@@ -570,6 +573,16 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
 
     parse_world_header(r, world_state_);
 
+    // Parse explored tiles (server-authoritative)
+    {
+        auto count = r.read<uint16_t>();
+        for (uint16_t i = 0; i < count; ++i) {
+            auto x = r.read<int32_t>();
+            auto y = r.read<int32_t>();
+            player_visibility_.explore_single({x, y});
+        }
+    }
+
     while (!r.done()) {
         auto opt = parse_one_entity(r);
         if (!opt)
@@ -592,7 +605,6 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
             player_vision_arc_ = re.vision_arc;
             if (pe.has_survival)
                 player_survival_ = pe.survival;
-            player_visibility_.explore_radius(re.position, re.vision_range);
         }
 
         auto *rp = find_entity(re.id);
@@ -610,14 +622,12 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
             rp->velocity = re.velocity;
             rp->facing = re.facing;
             rp->interactable = re.interactable;
-            rp->snapshot = false;
             set_visual_from_kind(*rp);
         }
     }
 }
 
-void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id,
-                                 int damage, bool killed)
+void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int damage, bool killed)
 {
     EntityId target = (defender_id == 0) ? player_id_ : defender_id;
     if (target == invalid_entity) {
@@ -667,8 +677,7 @@ void Client::interpolate_entities(float dt)
 void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
 {
     if (data.size() < 4)
-        throw std::runtime_error(
-            "handle_dialogue_sync: data too short, maybe corrupted");
+        throw std::runtime_error("handle_dialogue_sync: data too short, maybe corrupted");
     uint32_t name_len;
     memcpy(&name_len, data.data(), 4);
     if (name_len == 0) {
@@ -683,10 +692,8 @@ void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
     dialogue_.can_threaten = s.can_threaten;
     dialogue_.history.clear();
     for (auto &l : s.lines) {
-        dialogue_.history.push_back(
-            {l.speaker == 0 ? DialogueLine::player : DialogueLine::npc,
-             l.use_raw ? "" : l.text, l.use_raw ? l.text : "", l.use_raw,
-             std::move(l.npc_name)});
+        dialogue_.history.push_back({l.speaker == 0 ? DialogueLine::player : DialogueLine::npc, l.use_raw ? "" : l.text,
+                                     l.use_raw ? l.text : "", l.use_raw, std::move(l.npc_name)});
     }
     dialogue_.available_topics = std::move(s.topics);
     dialogue_.available_actions = std::move(s.actions);
@@ -696,10 +703,9 @@ awaitable<bool> Client::authenticate_transport(std::shared_ptr<Session> t)
 {
     try {
         spdlog::debug("Client: sending auth: payload: {}", auth_payload());
-        co_await t->write({.type = NetPacket::auth, .payload = auth_payload()});
+        co_await t->write({NetPacket::auth, auth_payload()});
         auto res = co_await t->read();
-        spdlog::debug("Client: auth result: type: {}, payload: {}", res.type,
-                      res.payload);
+        spdlog::debug("Client: auth result: type: {}, payload: {}", res.type, res.payload);
         co_return res.type == NetPacket::auth &&res.payload == auth_payload();
     }
     catch (...) {

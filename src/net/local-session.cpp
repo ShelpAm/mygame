@@ -19,9 +19,7 @@ awaitable<void> LocalSession::write(TransportMessage msg)
 {
     auto p = peer_.lock();
     if (!p)
-        throw std::runtime_error(
-            "LocalTransportEndpoint: write to disconnected peer " +
-            remote_info());
+        throw std::runtime_error("LocalTransportEndpoint: write to disconnected peer " + remote_info());
 
     auto &c = p->channel_;
     if (!c.try_send(boost::system::error_code(), msg))
@@ -59,8 +57,7 @@ void LocalSession::close()
     }
 }
 
-std::pair<std::shared_ptr<LocalSession>, std::shared_ptr<LocalSession>>
-create_local_transport_pair()
+std::pair<std::shared_ptr<LocalSession>, std::shared_ptr<LocalSession>> create_local_transport_pair()
 {
     auto a = std::make_shared<LocalSession>();
     auto b = std::make_shared<LocalSession>();

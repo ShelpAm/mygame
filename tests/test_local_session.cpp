@@ -56,8 +56,7 @@ BOOST_AUTO_TEST_CASE(local_transport_write_to_dead_peer_throws)
     auto [a, b] = create_local_transport_pair();
     run_sync([&]() -> asio::awaitable<void> {
         b.reset();
-        BOOST_CHECK_THROW(co_await a->write({NetPacket::chat, {}}),
-                          std::runtime_error);
+        BOOST_CHECK_THROW(co_await a->write({NetPacket::chat, {}}), std::runtime_error);
     }());
 }
 
@@ -96,12 +95,9 @@ BOOST_AUTO_TEST_CASE(local_transport_threaded_send)
         };
 
         co_spawn(Session::io(), reader(), asio::detached);
-        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(1))
-            .async_wait(asio::use_awaitable);
+        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(1)).async_wait(asio::use_awaitable);
         co_await writer();
-        co_await asio::steady_timer(Session::io(),
-                                    std::chrono::milliseconds(10))
-            .async_wait(asio::use_awaitable);
+        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(10)).async_wait(asio::use_awaitable);
     }());
     BOOST_TEST(count == 100);
 }
@@ -127,9 +123,7 @@ BOOST_AUTO_TEST_CASE(close_wakes_read_loop)
         }(std::move(a)),
         asio::detached);
 
-    run_sync([&]() -> asio::awaitable<void> {
-        co_await b->write({NetPacket::chat, {}});
-    }());
+    run_sync([&]() -> asio::awaitable<void> { co_await b->write({NetPacket::chat, {}}); }());
 
     while (msg_count == 0)
         Session::io().poll_one();
@@ -158,15 +152,11 @@ BOOST_AUTO_TEST_CASE(auth_handshake_success_over_local)
             }
         };
         co_spawn(Session::io(), server_auth(), asio::detached);
-        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(1))
-            .async_wait(asio::use_awaitable);
+        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(1)).async_wait(asio::use_awaitable);
         co_await ca->write({NetPacket::auth, auth_payload()});
         auto res = co_await ca->read();
-        client_ok =
-            (res.type == NetPacket::auth && res.payload == auth_payload());
-        co_await asio::steady_timer(Session::io(),
-                                    std::chrono::milliseconds(10))
-            .async_wait(asio::use_awaitable);
+        client_ok = (res.type == NetPacket::auth && res.payload == auth_payload());
+        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(10)).async_wait(asio::use_awaitable);
     }());
     BOOST_TEST(client_ok);
     BOOST_TEST(server_ok);
@@ -187,12 +177,10 @@ BOOST_AUTO_TEST_CASE(full_auth_and_join_local)
             auto join = co_await cb->read();
             BOOST_TEST(join.type == NetPacket::join);
             join_received = true;
-            co_await cb->write(
-                {NetPacket::return_pid, make_return_pid(123, 2)});
+            co_await cb->write({NetPacket::return_pid, make_return_pid(123, 2)});
         };
         co_spawn(Session::io(), server_task(), asio::detached);
-        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(1))
-            .async_wait(asio::use_awaitable);
+        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(1)).async_wait(asio::use_awaitable);
 
         co_await ca->write({NetPacket::auth, auth_payload()});
         auto auth_res = co_await ca->read();
@@ -203,9 +191,7 @@ BOOST_AUTO_TEST_CASE(full_auth_and_join_local)
         BOOST_TEST(pid_res.payload.size() >= 9);
         memcpy(&returned_pid, pid_res.payload.data(), 8);
 
-        co_await asio::steady_timer(Session::io(),
-                                    std::chrono::milliseconds(10))
-            .async_wait(asio::use_awaitable);
+        co_await asio::steady_timer(Session::io(), std::chrono::milliseconds(10)).async_wait(asio::use_awaitable);
     }());
     BOOST_TEST(join_received);
     BOOST_TEST(returned_pid == 123);

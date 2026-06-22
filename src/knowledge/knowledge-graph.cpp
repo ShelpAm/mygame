@@ -34,15 +34,13 @@ bool KnowledgeGraph::has_fact(std::string const &id) const
     return facts_.contains(id);
 }
 
-void KnowledgeGraph::add_relation(std::string const &fact_a,
-                                  std::string const &fact_b)
+void KnowledgeGraph::add_relation(std::string const &fact_a, std::string const &fact_b)
 {
     fact_relations_.emplace(fact_a, fact_b);
     fact_relations_.emplace(fact_b, fact_a);
 }
 
-std::vector<std::string>
-KnowledgeGraph::related_facts(std::string const &id) const
+std::vector<std::string> KnowledgeGraph::related_facts(std::string const &id) const
 {
     std::vector<std::string> result;
     auto range = fact_relations_.equal_range(id);

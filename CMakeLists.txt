@@ -65,6 +65,7 @@ set(SOURCES
     src/knowledge/rumor-propagator.cpp
     src/save/save-manager.cpp
     src/systems/combat-system.cpp
+    src/systems/combat-utils.cpp
     src/systems/collision-system.cpp
     src/systems/quest-manager.cpp
     src/net/server.cpp
@@ -109,6 +110,8 @@ add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
 target_compile_options(${PROJECT_NAME} PRIVATE
     -Wall
+    -Wextra
+    -Wpedantic
     # -Weverything
     -Wno-deprecated-declarations # flecs keeps reporting this warning
 )
@@ -189,6 +192,7 @@ set(TEST_SOURCES
     src/knowledge/rumor-propagator.cpp
     src/save/save-manager.cpp
     src/systems/combat-system.cpp
+    src/systems/combat-utils.cpp
     src/net/session.cpp
     src/net/local-session.cpp
     src/net/network-session.cpp

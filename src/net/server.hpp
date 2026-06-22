@@ -9,13 +9,12 @@
 class GameMode;
 
 class Server {
-    friend class GameMode;
-
   public:
     Server();
     ~Server();
 
     void set_game_mode(GameMode *gm);
+    void set_language(int lang_index);
 
     awaitable<void> listen(std::uint16_t port);
     void stop_listen()
@@ -35,7 +34,7 @@ class Server {
 
     void mark_needs_full_sync(std::string reason)
     {
-        needs_full_sync_ = {true, reason};
+        needs_full_sync_ = {true, std::move(reason)};
     }
     bool check_needs_full_sync()
     {
@@ -46,9 +45,9 @@ class Server {
 
     auto const &sessions() const { return sessions_; }
 
-    auto &messages() { return messages_; }
-
-    auto &player_detachments() { return player_detachments_; }
+    void broadcast_to_all(NetPacket::Type type, std::vector<uint8_t> payload);
+    void poll_messages(GameMode &gm);
+    void broadcast_sync();
 
   private:
     // Only the read_loop in attach_transport may construct this token
@@ -77,7 +76,6 @@ class Server {
     std::shared_ptr<NetworkSession::Acceptor> acceptor_;
     std::vector<std::shared_ptr<Session>> sessions_;
 
-    void broadcast_sync();
     void broadcast_entity_removed(EntityId eid);
     void handle_message(std::shared_ptr<Session> from, TransportMessage msg);
     void send_dialogue_to(std::shared_ptr<Session> to, EntityId pid);

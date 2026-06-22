@@ -26,6 +26,17 @@ struct ProjectileVisual {
     float traveled = 0.f;
 };
 
+struct SnapshotEntity {
+    Vec2f position;
+    uint8_t kind = 0;
+    Vec2f facing{0, -1};
+    SDL_FColor color{0.3f, 0.5f, 0.9f, 1.f};
+    float scale = 1.f;
+    std::string texture_name = "entity";
+    Team team = Team::neutral;
+    bool alive = true;
+};
+
 struct RemoteEntity {
     EntityId id = 0;
     uint8_t kind =
@@ -46,7 +57,7 @@ struct RemoteEntity {
     bool interactable = false;
 
     // Soldier state (synced from SoldierAI component)
-    SoldierStance soldier_stance = SoldierStance::follow;
+    SoldierStance soldier_stance = SoldierStance::defensive;
     SoldierRole soldier_role = SoldierRole::melee;
     int vision_range = 6;
     float vision_arc = 180.f;
@@ -54,9 +65,8 @@ struct RemoteEntity {
     // Visual (derived from kind + team, overridden by synced Sprite)
     SDL_FColor color{0.3f, 0.5f, 0.9f, 1.f};
     float scale = 1.f;
-    char texture_name[32] = "entity";
+    std::string texture_name = "entity";
     bool visible = true;
-    bool snapshot = false;
     bool hit_flash = false;
     AnimationState anim_state;
 };
@@ -88,8 +98,7 @@ class Client {
     void send_chat(std::string const &msg);
     void send_dialogue_action(std::string const &action);
 
-    EntityId local_player() const;
-    Vec2f player_position();
+    Vec2f player_position() const;
     bool is_player_dead();
     CombatStats const *player_stats();
 
@@ -104,7 +113,10 @@ class Client {
         }
     }
 
-    Session *session() const { return session_.get(); }
+    std::string session_remote_info() const
+    {
+        return session_ ? session_->remote_info() : std::string{};
+    }
 
     void interpolate_entities(float dt);
     std::vector<RemoteEntity> &remote_entities() { return remote_entities_; }
@@ -112,6 +124,9 @@ class Client {
     {
         return remote_entities_;
     }
+    // std::vector<SnapshotEntity> &snapshots() { return snapshots_; }
+    // std::vector<SnapshotEntity> const &snapshots() const { return snapshots_;
+    // }
     WorldState &world_state() { return world_state_; }
     WorldState const &world_state() const { return world_state_; }
 
@@ -181,6 +196,7 @@ class Client {
 
     std::shared_ptr<Session> session_;
     std::vector<RemoteEntity> remote_entities_;
+    // std::vector<SnapshotEntity> snapshots_;
     std::vector<CombatEvent> combat_events_;
     std::vector<ProjectileVisual> projectile_visuals_;
     std::vector<std::string> chat_history_;
