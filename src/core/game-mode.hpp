@@ -83,8 +83,7 @@ class GameMode {
     void heal_entity(EntityId entity, int amount);
     void respawn_player(EntityId pid);
 
-    void sync_entity_state(EntityId entity, Vec2f pos, int hp, int max_hp,
-                           bool alive);
+    void sync_entity_state(EntityId entity, Vec2f pos, int hp, int max_hp, bool alive);
 
     struct PlayerSyncPayload {
         std::vector<uint8_t> bytes;
@@ -92,26 +91,21 @@ class GameMode {
     };
 
     bool has_dirty_entities() const;
-    PlayerSyncPayload
-    build_dirty_payload(EntityId player_eid,
-                        std::unordered_set<EntityId> const &prev_sent);
+    PlayerSyncPayload build_dirty_payload(EntityId player_eid,
+                                          std::unordered_set<EntityId> const &prev_sent);
     PlayerSyncPayload build_full_payload(EntityId player_eid) const;
     void mark_frame_clean();
 
     void register_player(EntityId _) {}
     void recompute_player_visibility();
-    bool is_entity_visible_to_player(EntityId player_eid,
-                                     Vec2f world_pos) const;
+    bool is_entity_visible_to_player(EntityId player_eid, Vec2f world_pos) const;
 
     void remove_player(EntityId pid)
     {
         world_.entity(pid).destruct();
         dirty_entities_.erase(pid);
     }
-    bool is_player(EntityId eid) const
-    {
-        return world_.entity(eid).has<PlayerTag>();
-    }
+    bool is_player(EntityId eid) const { return world_.entity(eid).has<PlayerTag>(); }
 
     // World state access
     WorldState const &world_state() const { return world_state_; }
@@ -129,9 +123,9 @@ class GameMode {
     void set_server(Server *s) { server_ = s; }
 
   private:
-    EntityId spawn_soldier(EntityId captain_id, int index, SoldierRole role);
-    EntityId spawn_npc(std::string const &id, std::string const &name, float x,
-                       float y, std::string const &personality,
+    EntityId spawn_soldier(EntityId captain_id, SoldierRole role);
+    EntityId spawn_npc(std::string const &id, std::string const &name, float x, float y,
+                       std::string const &personality,
                        std::vector<NPCKnowledgeEntry> const &known_facts);
     void spawn_guards(EntityId captain_eid, int count);
     /// @brief When a player changes formation or new soldier joins in the
@@ -174,11 +168,8 @@ class GameMode {
     RelationshipTable relationships_;
 
     std::unordered_set<EntityId> dirty_entities_;
-    std::unordered_map<EntityId, std::unordered_set<Vec2i>>
-        player_visible_tiles_;
-    std::unordered_map<EntityId, std::unordered_set<Vec2i>>
-        player_explored_tiles_;
-    int soldier_idx_ = 0;
+    std::unordered_map<EntityId, std::unordered_set<Vec2i>> player_visible_tiles_;
+    std::unordered_map<EntityId, std::unordered_set<Vec2i>> player_explored_tiles_;
     size_t last_event_count_ = 0;
     std::chrono::duration<float> dt_{}; // In seconds
     NavigationSystem const *navigation_ = nullptr;
@@ -187,8 +178,7 @@ class GameMode {
     std::vector<Projectile> projectiles_;
     size_t last_projectile_count_ = 0;
 
-    Formation &formation(EntityId captain_id, SoldierRole role,
-                         EntityId target_id);
+    Formation &formation(EntityId captain_id, SoldierRole role, EntityId target_id);
     std::unordered_map<FormationKey, std::unique_ptr<Formation>> formations_;
 
     void mark_dirty(EntityId eid) { dirty_entities_.insert(eid); }

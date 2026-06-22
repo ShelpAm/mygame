@@ -34,14 +34,17 @@ void App::init()
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS | SDL_INIT_CAMERA))
         throw std::runtime_error("Failed to initialize SDL");
 
-    if (!SDL_CreateWindowAndRenderer(window_title, window_width_, window_height_, SDL_WINDOW_RESIZABLE, &window_,
-                                     &renderer_))
+    if (!SDL_CreateWindowAndRenderer(window_title, window_width_, window_height_,
+                                     SDL_WINDOW_RESIZABLE, &window_, &renderer_))
         throw std::runtime_error("Failed to create window and renderer");
 
     camera_system_.resize(window_width_, window_height_);
     SDL_SetRenderVSync(renderer_, 1);
 
     resources_ = std::make_unique<ResourceManager>();
+
+    FontManager::init();
+    fonts_ = std::make_unique<FontManager>(renderer_);
 
     // Load all knight animation frames
     constexpr std::string_view base = "assets/textures/CHIBI KNIGHT-PNG/CHIBI KNIGHT-PNG";
@@ -73,20 +76,25 @@ void App::init()
 
     resources_->load_texture(renderer_, "entity_dead", "./assets/textures/entity-dead.png");
 
-    render_system_ = std::make_unique<RenderSystem>(renderer_, *resources_, camera_system_);
+    auto *default_font = fonts_->load_font("./assets/fonts/Monaspace Neon Var.ttf", 12.F);
+    render_system_ =
+        std::make_unique<RenderSystem>(renderer_, resources_.get(), &camera_system_, default_font);
 
     navigation_system_ = NavigationSystem{};
     std::vector<Vec2i> const no = {
-        {-2, 1},   {-1, 0},   {-1, 1},   {-1, 2},   {0, -1},   {0, 0},     {0, 1},    {0, 2},    {0, 3},    {1, -1},
-        {1, 0},    {1, 1},    {1, 2},    {2, -2},   {2, -1},   {2, 0},     {2, 1},    {2, 2},    {3, -1},   {3, 0},
-        {3, 1},    {4, 0},    {4, 1},    {8, 6},    {9, 5},    {9, 6},     {9, 7},    {10, 4},   {10, 5},   {10, 6},
-        {10, 7},   {10, 8},   {11, 4},   {11, 5},   {11, 6},   {11, 7},    {12, 5},   {12, 6},   {12, 7},   {13, 5},
-        {13, 6},   {-12, -8}, {-11, -9}, {-11, -8}, {-11, -7}, {-10, -10}, {-10, -9}, {-10, -8}, {-10, -7}, {-10, -6},
-        {-9, -10}, {-9, -9},  {-9, -8},  {-9, -7},  {-8, -10}, {-8, -9},   {-8, -8},  {-8, -7},  {-7, -9},  {-7, -8},
-        {-6, -8},  {15, -10}, {16, -11}, {16, -10}, {16, -9},  {17, -12},  {17, -11}, {17, -10}, {17, -9},  {17, -8},
-        {18, -12}, {18, -11}, {18, -10}, {18, -9},  {19, -11}, {19, -10},  {19, -9},  {20, -10}, {-5, -2},  {-4, -3},
-        {-3, -4},  {4, 3},    {5, 4},    {5, 5},    {6, 4},    {6, 5},     {7, 5},    {13, 0},   {14, -1},  {14, 0},
-        {14, 1},   {15, 0},   {15, 1},   {-5, 4},   {-6, 5},   {-7, 5},    {-8, 6},   {-9, 5},   {-9, 6}};
+        {-2, 1},   {-1, 0},   {-1, 1},   {-1, 2},   {0, -1},   {0, 0},     {0, 1},    {0, 2},
+        {0, 3},    {1, -1},   {1, 0},    {1, 1},    {1, 2},    {2, -2},    {2, -1},   {2, 0},
+        {2, 1},    {2, 2},    {3, -1},   {3, 0},    {3, 1},    {4, 0},     {4, 1},    {8, 6},
+        {9, 5},    {9, 6},    {9, 7},    {10, 4},   {10, 5},   {10, 6},    {10, 7},   {10, 8},
+        {11, 4},   {11, 5},   {11, 6},   {11, 7},   {12, 5},   {12, 6},    {12, 7},   {13, 5},
+        {13, 6},   {-12, -8}, {-11, -9}, {-11, -8}, {-11, -7}, {-10, -10}, {-10, -9}, {-10, -8},
+        {-10, -7}, {-10, -6}, {-9, -10}, {-9, -9},  {-9, -8},  {-9, -7},   {-8, -10}, {-8, -9},
+        {-8, -8},  {-8, -7},  {-7, -9},  {-7, -8},  {-6, -8},  {15, -10},  {16, -11}, {16, -10},
+        {16, -9},  {17, -12}, {17, -11}, {17, -10}, {17, -9},  {17, -8},   {18, -12}, {18, -11},
+        {18, -10}, {18, -9},  {19, -11}, {19, -10}, {19, -9},  {20, -10},  {-5, -2},  {-4, -3},
+        {-3, -4},  {4, 3},    {5, 4},    {5, 5},    {6, 4},    {6, 5},     {7, 5},    {13, 0},
+        {14, -1},  {14, 0},   {14, 1},   {15, 0},   {15, 1},   {-5, 4},    {-6, 5},   {-7, 5},
+        {-8, 6},   {-9, 5},   {-9, 6}};
     for (auto e : no)
         navigation_system_.set_walkable(e, false);
 
@@ -120,7 +128,7 @@ void App::init()
         Stopwatch sw;
         while (!st.stop_requested()) {
             auto dt = sw.tick();
-            // 当客户端模式时，节省计算资源
+            // 只有在客户端模式时才update，节省计算资源
             if (session_mode_ != SessionMode::client)
                 game_mode_->update(dt);
         }
@@ -147,7 +155,8 @@ void App::start_local_session()
     client_->close_current_session();
 
     auto [srv, cli] = create_local_transport_pair();
-    spdlog::info("App: spawned two transports: srv = {}, cli = {}", srv->remote_info(), cli->remote_info());
+    spdlog::info("App: spawned two transports: srv = {}, cli = {}", srv->remote_info(),
+                 cli->remote_info());
 
     auto do_attach = [](App *app, auto srv, auto cli) -> awaitable<void> {
         co_await (app->server_->attach_transport(std::move(srv)) &&
@@ -242,6 +251,7 @@ void App::shutdown()
 
     ui_manager_.reset();
     render_system_.reset();
+    fonts_.reset();
     resources_.reset();
 
     if (renderer_ != nullptr) {
@@ -294,7 +304,8 @@ void App::update(float dt)
     // Logged in to a server
     if (client_->player_id() != invalid_entity) {
         // Handles move
-        float mx = 0, my = 0;
+        float mx = 0;
+        float my = 0;
         bool in_dialogue = dialogue().active;
         if (!ImGui::IsAnyItemActive() && !client_->is_player_dead() && !in_dialogue) {
             if (input_.is_pressed(InputManager::Action::move_up))
@@ -338,6 +349,7 @@ void App::update(float dt)
             trace_on = !trace_on;
             spdlog::set_level(trace_on ? spdlog::level::trace : spdlog::level::debug);
             spdlog::info("Log level: {}", trace_on ? "trace" : "debug");
+            render_system_->toggle_debug_mode();
         }
         if (input_.just_pressed(InputManager::Action::quick_save))
             quick_save();
@@ -361,7 +373,8 @@ void App::render()
         render_system_->render(*client_, navigation_system_);
         client_->combat_events().clear();
     }
-    ui_manager_->render(client_->player_id() == invalid_entity ? nullptr : &client_->world_state(), *this);
+    ui_manager_->render(client_->player_id() == invalid_entity ? nullptr : &client_->world_state(),
+                        *this);
 
     SDL_RenderPresent(renderer_);
 }
@@ -374,8 +387,9 @@ void App::set_ui_language(int lang_index)
 
 void App::start_listen(int port)
 {
-    Session::spawn(
-        [](Server *s, auto port) -> awaitable<void> { co_await s->listen(port); }(server_.get(), port));
+    Session::spawn([](Server *s, auto port) -> awaitable<void> {
+        co_await s->listen(port);
+    }(server_.get(), port));
 }
 
 void App::stop_listen()
@@ -438,7 +452,6 @@ void App::load_from_slot([[maybe_unused]] int slot)
 {
     spdlog::warn("Save/load is currently disabled to prevent exploits and "
                  "bugs. It will be re-enabled in a future update.");
-    return;
 
     // std::string path = "saves/save_" + std::to_string(slot) + ".json";
     // SaveManager::SaveData data;

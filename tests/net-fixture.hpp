@@ -3,10 +3,10 @@
 #include "net/local-session.hpp"
 #include "net/net-packet.hpp"
 #include "net/network-session.hpp"
+#include <atomic>
 #include <boost/asio.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/test/unit_test.hpp>
-#include <atomic>
 #include <chrono>
 #include <future>
 #include <thread>
@@ -65,10 +65,7 @@ template <typename T> static T run_sync(asio::awaitable<T> a)
 // Minimal concrete Session for testing the interface contract
 struct MockSession : Session {
     awaitable<void> write(TransportMessage) override { co_return; }
-    awaitable<TransportMessage> read() override
-    {
-        co_return TransportMessage{};
-    }
+    awaitable<TransportMessage> read() override { co_return TransportMessage{}; }
     bool is_open() const override { return true; }
     void close() override {}
     std::string remote_info() const override { return "mock"; }

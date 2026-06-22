@@ -24,13 +24,21 @@ BOOST_AUTO_TEST_CASE(damage_kills_entity)
 {
     flecs::world world;
     auto e1 = world.entity();
-    e1.set<CombatStats>(CombatStats{
-        .team = Team::player_begin, .max_hp = 10, .hp = 10, .attack = 10, .defense = 1, .attack_range = 100.F});
+    e1.set<CombatStats>(CombatStats{.team = Team::player_begin,
+                                    .max_hp = 10,
+                                    .hp = 10,
+                                    .attack = 10,
+                                    .defense = 1,
+                                    .attack_range = 100.F});
     e1.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
 
     auto e2 = world.entity();
-    e2.set<CombatStats>(
-        CombatStats{.team = Team::enemy, .max_hp = 3, .hp = 3, .attack = 0, .defense = 0, .attack_range = 100.F});
+    e2.set<CombatStats>(CombatStats{.team = Team::enemy,
+                                    .max_hp = 3,
+                                    .hp = 3,
+                                    .attack = 0,
+                                    .defense = 0,
+                                    .attack_range = 100.F});
     e2.set<Transform>(Transform{.world_pos = Vec2f(50.F, 0.F)});
 
     std::vector<CombatEvent> events;
@@ -54,7 +62,8 @@ BOOST_AUTO_TEST_CASE(soldier_ai_follows_leader)
     auto soldier = world.entity().add<Follows>(leader.id());
     soldier.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
     soldier.set<CombatStats>(CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
-    soldier.set<SoldierAI>(SoldierAI{.formation_offset = Vec2f(32.F, -32.F), .follow_distance = 16.F});
+    soldier.set<SoldierAI>(
+        SoldierAI{.formation_offset = Vec2f(32.F, -32.F), .follow_distance = 16.F});
 
     auto const *sPos = soldier.try_get<Transform>();
     BOOST_REQUIRE(sPos != nullptr);
@@ -124,7 +133,8 @@ BOOST_AUTO_TEST_CASE(dead_entity_not_in_combat)
 {
     flecs::world world;
     auto e = world.entity();
-    e.set<CombatStats>(CombatStats{.team = Team::player_begin, .max_hp = 10, .hp = 10, .alive = false});
+    e.set<CombatStats>(
+        CombatStats{.team = Team::player_begin, .max_hp = 10, .hp = 10, .alive = false});
     e.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
 
     CombatSystem csys;
@@ -135,12 +145,13 @@ BOOST_AUTO_TEST_CASE(combat_events_generated)
 {
     flecs::world world;
     auto e1 = world.entity();
-    e1.set<CombatStats>(
-        CombatStats{.team = Team::player_begin, .max_hp = 10, .hp = 10, .attack = 10, .attack_range = 100.F});
+    e1.set<CombatStats>(CombatStats{
+        .team = Team::player_begin, .max_hp = 10, .hp = 10, .attack = 10, .attack_range = 100.F});
     e1.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
 
     auto e2 = world.entity();
-    e2.set<CombatStats>(CombatStats{.team = Team::enemy, .max_hp = 10, .hp = 10, .attack = 3, .attack_range = 100.F});
+    e2.set<CombatStats>(CombatStats{
+        .team = Team::enemy, .max_hp = 10, .hp = 10, .attack = 3, .attack_range = 100.F});
     e2.set<Transform>(Transform{.world_pos = Vec2f(50.F, 0.F)});
 
     std::vector<CombatEvent> events;

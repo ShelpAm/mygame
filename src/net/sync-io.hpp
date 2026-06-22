@@ -37,10 +37,7 @@ class SyncWriter {
 
 class SyncReader {
   public:
-    SyncReader(uint8_t const *data, size_t size)
-        : end_(data + size), cursor_(data)
-    {
-    }
+    SyncReader(uint8_t const *data, size_t size) : end_(data + size), cursor_(data) {}
 
     bool done() const { return cursor_ >= end_; }
     std::ptrdiff_t remaining() const { return end_ - cursor_; }

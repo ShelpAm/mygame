@@ -12,8 +12,9 @@
 #include <string>
 #include <unordered_map>
 
-RenderSystem::RenderSystem(SDL_Renderer *renderer, ResourceManager &resources, CameraSystem &camera)
-    : renderer_(renderer), resources_(resources), camera_(camera)
+RenderSystem::RenderSystem(SDL_Renderer *renderer, ResourceManager *resources, CameraSystem *camera,
+                           Font *font)
+    : renderer_(renderer), resources_(resources), camera_(camera), font_(font)
 {
 }
 
@@ -28,9 +29,9 @@ void RenderSystem::render(Client const &client, NavigationSystem const &nav)
     render_fog_overlay(client.player_visibility());
 }
 
-void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem const &nav)
+void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem const &nav) const
 {
-    auto vp = camera_.viewport();
+    auto vp = camera_->viewport();
     auto left_up = world_to_tile(Vec2f(vp.x, vp.y));
     auto right_down = world_to_tile(Vec2f(vp.x + vp.w, vp.y + vp.h));
 
@@ -57,14 +58,27 @@ void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem
             auto s = std::to_string(idx);
 
             draw_sprite(lu, tile_size, "tile_" + s, max_alpha, false);
-
-            // Debug text
-            // SDL_SetRenderDrawColor(renderer_, 255, 255, 0, 255);
-            // auto c = camera_.world_to_screen(lu);
-            // SDL_RenderDebugText(renderer_, c.x, c.y,
-            //                     std::format("({},{})", x, y).c_str());
         }
     }
+
+    if (debug_mode_) {
+        // Draw debug text
+        SDL_SetRenderDrawColor(renderer_, 255, 0, 0, 100);
+        // Grid lines
+        for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
+            for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
+                auto tile = Vec2i(x, y);
+                auto lu = lu_of_tile(tile);
+                auto c = camera_->world_to_screen(lu);
+                font_->draw({c.x, c.y}, SDL_Color{.r = 255, .g = 0, .b = 0, .a = 150},
+                            std::format("({}, {})", x, y));
+            }
+        }
+    }
+    // for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
+    //     for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
+    //         Vec2i tile(x, y);
+    //         Vec2f screen = camera_.world_to_screen(lu_of_tile(tile));
 
     // Render all tiles in viewport range, layer 2
     // for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
@@ -112,12 +126,12 @@ void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem
     // }
 }
 
-void RenderSystem::render_entities(Client const &client, Vec2f player_pos, EntityId player_id)
+void RenderSystem::render_entities(Client const &client, Vec2f pos, EntityId eid)
 {
     auto const &vis = client.player_visibility();
 
     // --- 1. Live entities ---
-    for (auto &re : client.remote_entities()) {
+    for (auto const &re : client.remote_entities()) {
         // if (!re.alive || !re.visible)
         //     continue;
 
@@ -126,7 +140,7 @@ void RenderSystem::render_entities(Client const &client, Vec2f player_pos, Entit
         if (tv == TileVisibility::Unexplored)
             continue;
 
-        float d = (re.position - player_pos).length();
+        float d = (re.position - pos).length();
 
         char const *tex{};
         if (re.alive) {
@@ -141,15 +155,25 @@ void RenderSystem::render_entities(Client const &client, Vec2f player_pos, Entit
         draw_sprite(re.position, 48.F * re.scale, tex, alpha_for(d), re.anim_state.flip);
 
         // '!' mark (only when clearly visible)
-        if (d == 0 && re.id != player_id && re.interactable) {
-            Vec2f screen = camera_.world_to_screen(re.position);
+        if (d == 0 && re.id != eid && re.interactable) {
+
+            Vec2f screen = camera_->world_to_screen(re.position);
             float size = 24.F * re.scale;
-            float dist2 = std::hypot(re.position.x - player_pos.x, re.position.y - player_pos.y);
+            float dist2 = std::hypot(re.position.x - pos.x, re.position.y - pos.y);
             if (dist2 < tile_size) {
                 SDL_FRect hint{.x = screen.x - 4, .y = screen.y - size - 12, .w = 4, .h = 14};
                 SDL_SetRenderDrawColor(renderer_, 255, 255, 100, 220);
                 SDL_RenderFillRect(renderer_, &hint);
             }
+        }
+
+        if (debug_mode_) {
+            // Draw debug text
+            SDL_SetRenderDrawColor(renderer_, 255, 0, 0, 100);
+            // Grid lines
+            auto c = camera_->world_to_screen(re.position);
+            font_->draw({c.x, c.y}, SDL_Color{.r = 255, .g = 0, .b = 0, .a = 150},
+                        std::format("id={}, team={}, text={}", re.id, re.team, tex));
         }
     }
 
@@ -171,8 +195,8 @@ void RenderSystem::render_entities(Client const &client, Vec2f player_pos, Entit
 
 void RenderSystem::render_projectiles(Client const &client)
 {
-    for (auto &pv : client.projectile_visuals()) {
-        Vec2f screen = camera_.world_to_screen(pv.pos);
+    for (auto const &pv : client.projectile_visuals()) {
+        Vec2f screen = camera_->world_to_screen(pv.pos);
         float size = 6.F;
         SDL_FRect rect{.x = screen.x - size, .y = screen.y - size, .w = size * 2, .h = size * 2};
         SDL_SetRenderDrawColor(renderer_, 200, 180, 100, 255);
@@ -182,16 +206,17 @@ void RenderSystem::render_projectiles(Client const &client)
 
 void RenderSystem::render_health_bars(Client const &client, Vec2f player_pos)
 {
-    for (auto &re : client.remote_entities()) {
+    for (auto const &re : client.remote_entities()) {
         if (!re.alive)
             continue;
         // if
         // (!client.player_visibility().is_visible(world_to_tile(re.position)))
         //     continue;
 
+        // 淡出
         auto alpha = alpha_for((player_pos - re.position).length());
 
-        Vec2f screen = camera_.world_to_screen(re.position);
+        Vec2f screen = camera_->world_to_screen(re.position);
         float barW = 32.F;
         float barH = 4.F;
         float barY = screen.y - 30.F;
@@ -211,7 +236,8 @@ void RenderSystem::render_health_bars(Client const &client, Vec2f player_pos)
     }
 }
 
-void RenderSystem::render_damage_numbers(Client const &client, std::vector<CombatEvent> const &events)
+void RenderSystem::render_damage_numbers(Client const &client,
+                                         std::vector<CombatEvent> const &events)
 {
     for (auto const &ev : events) {
         if (ev.damage <= 0)
@@ -219,11 +245,11 @@ void RenderSystem::render_damage_numbers(Client const &client, std::vector<Comba
         FloatingText ft;
         ft.text = std::to_string(ev.damage);
 
-        Vec2f defPos;
+        Vec2f defPos{};
         if (ev.defender_id == client.player_id())
             defPos = client.player_position();
         else
-            for (auto &re : client.remote_entities())
+            for (auto const &re : client.remote_entities())
                 if (re.id == ev.defender_id) {
                     defPos = re.position;
                     break;
@@ -237,41 +263,38 @@ void RenderSystem::render_damage_numbers(Client const &client, std::vector<Comba
     }
 
     float dt = 1.F / 60.F;
-    for (auto it = floating_texts_.begin(); it != floating_texts_.end();) {
-        it->elapsed += dt;
-        if (it->elapsed >= it->lifetime) {
-            it = floating_texts_.erase(it);
-            continue;
-        }
-        it->world_pos = it->world_pos + it->velocity * dt;
-        float alpha = 1.F - (it->elapsed / it->lifetime);
-        it->color.a = alpha;
-        Vec2f screen = camera_.world_to_screen(it->world_pos);
+    for (auto &text : floating_texts_) {
+        text.elapsed += dt;
+        text.world_pos = text.world_pos + text.velocity * dt;
+        text.color.a = 1.F - (text.elapsed / text.lifetime);
+
+        Vec2f screen = camera_->world_to_screen(text.world_pos);
         SDL_FRect rect{.x = screen.x - 6, .y = screen.y - 6, .w = 12, .h = 12};
-        SDL_SetRenderDrawColor(renderer_, it->color.r * 255, it->color.g * 255, it->color.b * 255,
-                               static_cast<uint8_t>(alpha * 255));
+        SDL_SetRenderDrawColor(renderer_, text.color.r * 255, text.color.g * 255,
+                               255 * text.color.b, static_cast<uint8_t>(text.color.a * 255));
         SDL_RenderFillRect(renderer_, &rect);
-        ++it;
     }
+
+    std::erase_if(floating_texts_, [](auto const &text) { return text.elapsed >= text.lifetime; });
 }
 
 void RenderSystem::render_fog_overlay(PlayerVisibility const &vis)
 {
-    auto vp = camera_.viewport();
+    auto vp = camera_->viewport();
     auto left_up = world_to_tile(Vec2f(vp.x, vp.y));
     auto right_down = world_to_tile(Vec2f(vp.x + vp.w, vp.y + vp.h));
     // Render all tiles in viewport range
     for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
         for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
             Vec2i tile(x, y);
-            Vec2f screen = camera_.world_to_screen(lu_of_tile(tile));
-            auto const zoom = camera_.zoom();
-            // constexpr auto padding = 2.F; // 防止tile之间有缝隙
+            Vec2f screen = camera_->world_to_screen(lu_of_tile(tile));
+            auto const zoom = camera_->zoom();
+            constexpr auto padding = 2.F; // 防止tile之间有缝隙
             SDL_FRect rect{
-                .x = std::round(screen.x),
-                .y = std::round(screen.y),
-                .w = std::round(tile_size * zoom),
-                .h = std::round(tile_size * zoom),
+                .x = screen.x,
+                .y = screen.y,
+                .w = (tile_size * zoom) + padding,
+                .h = (tile_size * zoom) + padding,
             };
 
             switch (vis.query(tile)) {
@@ -285,16 +308,19 @@ void RenderSystem::render_fog_overlay(PlayerVisibility const &vis)
         }
     }
 }
-void RenderSystem::draw_sprite(Vec2f center, float width, std::string const &tex, uint8_t alpha, bool flip)
+
+void RenderSystem::draw_sprite(Vec2f center, float width, std::string const &tex, uint8_t alpha,
+                               bool flip) const
 {
-    auto *texture = resources_.texture(tex);
-    Vec2f screen = camera_.world_to_screen(center);
+    auto *texture = resources_->texture(tex);
+    Vec2f screen = camera_->world_to_screen(center);
     float original_w{};
     float original_h{};
     SDL_GetTextureSize(texture, &original_w, &original_h);
     auto scale = width / original_w;
     auto height = original_h * scale;
-    SDL_FRect dst{.x = screen.x - (width / 2), .y = screen.y - (height / 2), .w = width, .h = height};
+    SDL_FRect dst{
+        .x = screen.x - (width / 2), .y = screen.y - (height / 2), .w = width, .h = height};
     SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_PIXELART);
     SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
     SDL_SetTextureAlphaMod(texture, alpha);

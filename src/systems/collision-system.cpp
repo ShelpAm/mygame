@@ -39,7 +39,8 @@ Vec2f CollisionSystem::resolve_tile_collisions(Vec2f pos, float radius)
                     // neighbouring walkable tile, or nearest edge as fallback
                     float best_push = std::numeric_limits<float>::max();
                     float push_x = 0.f, push_y = 0.f;
-                    Vec2i const neighbors[] = {{tx + 1, ty}, {tx - 1, ty}, {tx, ty + 1}, {tx, ty - 1}};
+                    Vec2i const neighbors[] = {
+                        {tx + 1, ty}, {tx - 1, ty}, {tx, ty + 1}, {tx, ty - 1}};
                     for (auto n : neighbors) {
                         if (!navigation_->is_walkable(n))
                             continue;

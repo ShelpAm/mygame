@@ -56,7 +56,8 @@ void InputManager::update()
         state.pressed = keyboard_state_[bindings_[action]];
     }
 
-    float mx, my;
+    float mx;
+    float my;
     SDL_GetMouseState(&mx, &my);
     mouse_screen_pos_ = {static_cast<int>(mx), static_cast<int>(my)};
     mouse_world_pos_ = {mx, my};

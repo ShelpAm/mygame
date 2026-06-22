@@ -30,13 +30,10 @@ class DialogueEngine {
 
     int discover_languages(std::string const &dir);
     void set_language(int lang_index);
-    void
-    add_template(DialogueTemplate const &tmpl); // For tests/content authoring
+    void add_template(DialogueTemplate const &tmpl); // For tests/content authoring
 
-    DialogueResponse
-    generate_ask_response(NPCState const &npc, std::string const &topic_id,
-                          std::string const &topic_display_name,
-                          int player_trust);
+    DialogueResponse generate_ask_response(NPCState const &npc, std::string const &topic_id,
+                                           std::string const &topic_display_name, int player_trust);
     DialogueResponse generate_greeting(NPCState const &npc, int player_trust);
 
   private:
@@ -44,12 +41,9 @@ class DialogueEngine {
     int current_lang_ = 0;
 
     std::vector<DialogueTemplate> const &active_templates() const;
-    DialogueTemplate const *pick_template(NPCState const &npc,
-                                          bool knows_directly,
-                                          bool knows_indirectly,
-                                          int confidence) const;
-    std::string fill_template(
-        std::string const &pattern,
-        std::unordered_map<std::string, std::string> const &slots) const;
+    DialogueTemplate const *pick_template(NPCState const &npc, bool knows_directly,
+                                          bool knows_indirectly, int confidence) const;
+    std::string fill_template(std::string const &pattern,
+                              std::unordered_map<std::string, std::string> const &slots) const;
     bool would_lie(NPCState const &npc, int player_trust) const;
 };

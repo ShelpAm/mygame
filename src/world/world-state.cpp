@@ -37,8 +37,10 @@ void WorldState::add_location(std::string const &id, LocationState state)
 
 void PlayerVisibility::explore_radius(Vec2f center_world, float radius_world)
 {
-    Vec2i min_tile = world_to_tile(Vec2f(center_world.x - radius_world, center_world.y - radius_world));
-    Vec2i max_tile = world_to_tile(Vec2f(center_world.x + radius_world, center_world.y + radius_world));
+    Vec2i min_tile =
+        world_to_tile(Vec2f(center_world.x - radius_world, center_world.y - radius_world));
+    Vec2i max_tile =
+        world_to_tile(Vec2f(center_world.x + radius_world, center_world.y + radius_world));
 
     for (int y = min_tile.y; y <= max_tile.y; ++y)
         for (int x = min_tile.x; x <= max_tile.x; ++x) {

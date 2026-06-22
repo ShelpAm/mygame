@@ -16,14 +16,8 @@ class CameraSystem {
     Vec2f screen_to_world(Vec2i screen_pos) const;
 
     SDL_FRect viewport() const;
-    Vec2f center() const
-    {
-        return center_;
-    }
-    float zoom() const
-    {
-        return zoom_;
-    }
+    Vec2f center() const { return center_; }
+    float zoom() const { return zoom_; }
 
   private:
     Vec2f center_;

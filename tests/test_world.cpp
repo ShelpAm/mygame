@@ -154,7 +154,8 @@ BOOST_AUTO_TEST_CASE(time_of_day_wraps)
     WorldState ws;
     ws.update(k18Hours); // Start at ~6:00, add 18 hours -> ~0:00 next day
     float tod = ws.time_of_day();
-    bool nearMidnight = (tod < kMidnightThreshold) || (tod >= kAlmostMidnightLow && tod <= kAlmostMidnightHigh);
+    bool nearMidnight =
+        (tod < kMidnightThreshold) || (tod >= kAlmostMidnightLow && tod <= kAlmostMidnightHigh);
     BOOST_TEST(nearMidnight, "time should be around midnight, got: " << tod);
 }
 

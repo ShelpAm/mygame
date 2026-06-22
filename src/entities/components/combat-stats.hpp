@@ -31,8 +31,7 @@ template <> struct std::formatter<Team> : std::formatter<std::string_view> {
             name = "enemy";
             break;
         default:
-            name =
-                "player-team-" + std::to_string(static_cast<std::uint8_t>(t));
+            name = "player-team-" + std::to_string(static_cast<std::uint8_t>(t));
         }
         return std::formatter<std::string_view>::format(name, ctx);
     }

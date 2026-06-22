@@ -32,10 +32,7 @@ class Server {
     void clear_transports();
     void kick(std::shared_ptr<Session> t, std::string const &reason);
 
-    void mark_needs_full_sync(std::string reason)
-    {
-        needs_full_sync_ = {true, std::move(reason)};
-    }
+    void mark_needs_full_sync(std::string reason) { needs_full_sync_ = {true, std::move(reason)}; }
     bool check_needs_full_sync()
     {
         bool v = needs_full_sync_.first;
@@ -63,15 +60,13 @@ class Server {
     std::pair<bool, std::string> needs_full_sync_{false, ""};
     GameMode *game_mode_ = nullptr;
 
-    deferred_concurrent_channel<void(
-        boost::system::error_code, std::shared_ptr<Session>, TransportMessage)>
+    deferred_concurrent_channel<void(boost::system::error_code, std::shared_ptr<Session>,
+                                     TransportMessage)>
         messages_;
-    deferred_concurrent_channel<void(boost::system::error_code, EntityId)>
-        player_detachments_;
+    deferred_concurrent_channel<void(boost::system::error_code, EntityId)> player_detachments_;
 
     std::unordered_map<Session *, EntityId> player_eid_of_session_;
-    std::unordered_map<Session *, std::unordered_set<EntityId>>
-        last_sent_entities_;
+    std::unordered_map<Session *, std::unordered_set<EntityId>> last_sent_entities_;
     std::uint8_t next_player_team_;
     std::shared_ptr<NetworkSession::Acceptor> acceptor_;
     std::vector<std::shared_ptr<Session>> sessions_;

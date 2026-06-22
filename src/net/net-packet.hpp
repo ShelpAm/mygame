@@ -21,8 +21,8 @@ enum Mask : uint16_t {
     movement = 1 << 3,    // MovementComp      (16 bytes: vx,vy,fx,fy)
     soldier_ai = 1 << 4,  // SoldierAIComp     (17 bytes)
     interact = 1 << 5,    // InteractComp      (1 byte)
-    survival = 1 << 6, // SurvivalComp      (16 bytes: food,water,health,energy)
-    vision = 1 << 7,   // VisionComp        (4 bytes: range)
+    survival = 1 << 6,    // SurvivalComp      (16 bytes: food,water,health,energy)
+    vision = 1 << 7,      // VisionComp        (4 bytes: range)
 };
 } // namespace SyncComponent
 
@@ -40,8 +40,7 @@ enum Value : uint8_t {
 inline auto const &auth_payload()
 {
     constexpr std::string_view auth_string = "thesunsetstraits";
-    static std::vector<std::uint8_t> auth_payload(auth_string.begin(),
-                                                  auth_string.end());
+    static std::vector<std::uint8_t> auth_payload(auth_string.begin(), auth_string.end());
     return auth_payload;
 }
 
@@ -74,8 +73,7 @@ struct NetPacket {
     std::vector<uint8_t> payload;
 };
 
-template <>
-struct std::formatter<NetPacket::Type> : std::formatter<std::string_view> {
+template <> struct std::formatter<NetPacket::Type> : std::formatter<std::string_view> {
     auto format(NetPacket::Type t, std::format_context &ctx) const
     {
         using enum NetPacket::Type;
@@ -174,8 +172,7 @@ inline void write_float(std::vector<uint8_t> &out, float val)
 }
 
 // Deserialize helpers
-template <std::integral T>
-T read_bytes(std::vector<uint8_t> const &data, size_t offset)
+template <std::integral T> T read_bytes(std::vector<uint8_t> const &data, size_t offset)
 {
     std::array<uint8_t, sizeof(T)> arr{};
     for (size_t i = 0; i < sizeof(T); ++i)
@@ -187,8 +184,7 @@ T read_bytes(std::vector<uint8_t> const &data, size_t offset)
 
 inline float read_float(std::vector<uint8_t> const &data, size_t offset)
 {
-    std::array<uint8_t, 4> arr{data[offset], data[offset + 1], data[offset + 2],
-                               data[offset + 3]};
+    std::array<uint8_t, 4> arr{data[offset], data[offset + 1], data[offset + 2], data[offset + 3]};
     return std::bit_cast<float>(arr);
 }
 
@@ -203,8 +199,7 @@ struct EntityUpdateData {
 };
 
 // Layout: id(8) + x(4) + y(4) + hp(4) + max_hp(4) + alive(1) = 25 bytes
-inline EntityUpdateData parse_entity_update(std::vector<uint8_t> const &d,
-                                            size_t off = 0)
+inline EntityUpdateData parse_entity_update(std::vector<uint8_t> const &d, size_t off = 0)
 {
     EntityUpdateData r;
     memcpy(&r.id, d.data() + off, 8);
@@ -226,8 +221,7 @@ struct SyncEntityData {
 };
 
 // Layout: id(8)+x(4)+y(4)+hp(4)+max_hp(4)+alive(1)+team(1)+flags(1) = 27 bytes
-inline SyncEntityData parse_sync_entity(std::vector<uint8_t> const &d,
-                                        size_t off = 0)
+inline SyncEntityData parse_sync_entity(std::vector<uint8_t> const &d, size_t off = 0)
 {
     SyncEntityData r;
     memcpy(&r.id, d.data() + off, 8);
@@ -304,8 +298,8 @@ inline std::vector<uint8_t> serialize_packet(NetPacket const &pkt)
 // Each returns the raw payload (no header). ITransport::write()
 // calls serialize_packet() to produce the final wire format.
 
-inline std::vector<uint8_t> make_entity_update(EntityId id, float x, float y,
-                                               int hp, int max_hp, bool alive)
+inline std::vector<uint8_t> make_entity_update(EntityId id, float x, float y, int hp, int max_hp,
+                                               bool alive)
 {
     std::vector<uint8_t> p;
     write_bytes(p, id);
@@ -317,8 +311,8 @@ inline std::vector<uint8_t> make_entity_update(EntityId id, float x, float y,
     return p;
 }
 
-inline std::vector<uint8_t> make_combat_event(EntityId att_id, EntityId def_id,
-                                              int dmg, bool killed)
+inline std::vector<uint8_t> make_combat_event(EntityId att_id, EntityId def_id, int dmg,
+                                              bool killed)
 {
     std::vector<uint8_t> p;
     write_bytes(p, att_id);
@@ -357,8 +351,7 @@ inline std::vector<uint8_t> make_entity_id_payload(EntityId id)
 }
 
 // pid(8) + role_mask(1)
-inline std::vector<uint8_t> make_formation_payload(EntityId id,
-                                                   uint8_t role_mask)
+inline std::vector<uint8_t> make_formation_payload(EntityId id, uint8_t role_mask)
 {
     std::vector<uint8_t> p;
     write_bytes(p, id);
@@ -366,8 +359,7 @@ inline std::vector<uint8_t> make_formation_payload(EntityId id,
     return p;
 }
 
-inline std::vector<uint8_t> make_projectile_fired(float sx, float sy, float tx,
-                                                  float ty)
+inline std::vector<uint8_t> make_projectile_fired(float sx, float sy, float tx, float ty)
 {
     std::vector<uint8_t> p;
     write_float(p, sx);
@@ -440,8 +432,7 @@ inline DialogueSyncData parse_dialogue_sync(std::vector<uint8_t> const &d)
     return r;
 }
 
-inline void serialize_dialogue_sync(std::vector<uint8_t> &out,
-                                    DialogueState const &ds)
+inline void serialize_dialogue_sync(std::vector<uint8_t> &out, DialogueState const &ds)
 {
     if (!ds.active || ds.npc_name.empty()) {
         write_bytes(out, uint32_t{0}); // name_len=0 → client clears dialogue

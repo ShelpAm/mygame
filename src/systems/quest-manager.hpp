@@ -39,10 +39,7 @@ class QuestManager {
     void report_collect(std::string const &item_id, int count = 1);
     void report_timer(int days_passed = 1);
 
-    std::vector<Quest> const &all_quests() const
-    {
-        return quests_;
-    }
+    std::vector<Quest> const &all_quests() const { return quests_; }
     std::vector<Quest const *> active_quests() const;
     std::vector<Quest const *> available_quests() const;
 

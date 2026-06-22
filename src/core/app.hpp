@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/font.hpp"
 #include "core/game-clock.hpp"
 #include "core/game-mode.hpp"
 #include "core/input-manager.hpp"
@@ -25,6 +26,10 @@ enum class SessionMode : std::uint8_t { local, host, client };
 class App {
   public:
     App();
+    App(App const &) = delete;
+    App(App &&) = delete;
+    App &operator=(App const &) = delete;
+    App &operator=(App &&) = delete;
     ~App();
     void init();
     void run();
@@ -60,20 +65,16 @@ class App {
     DialogueState const &dialogue() const { return client_->dialogue(); }
     void end_dialogue() { client_->send_dialogue_action("__end__"); }
     void ask_topic(std::string const &t) { do_dialogue_action(t); }
-    void do_dialogue_action(std::string const &a)
-    {
-        client_->send_dialogue_action(a);
-    }
+    void do_dialogue_action(std::string const &a) { client_->send_dialogue_action(a); }
 
-    void quick_save();
-    void save_to_slot(int slot);
-    void load_from_slot(int slot);
-    std::vector<int> available_save_slots() const;
+    [[deprecated]] void quick_save();
+    [[deprecated]] void save_to_slot(int slot);
+    [[deprecated]] void load_from_slot(int slot);
+    [[deprecated]] std::vector<int> available_save_slots() const;
 
   private:
     void process_events();
-    void update(
-        float dt); // Receives messages from server, and trigger related updates
+    void update(float dt); // Receives messages from server, and trigger related updates
     void render();
 
     void handle_resize(int new_width, int new_height);
@@ -83,7 +84,7 @@ class App {
 
     int window_width_ = 800;
     int window_height_ = 450;
-    static constexpr const char *window_title = "The Sunset Straits";
+    static constexpr char const *window_title = "The Sunset Straits";
 
     Stopwatch stopwatch_;
 
@@ -92,12 +93,12 @@ class App {
     NavigationSystem navigation_system_;
     LocaleManager locale_;
 
+    std::unique_ptr<FontManager> fonts_;
     std::unique_ptr<ResourceManager> resources_;
     std::unique_ptr<RenderSystem> render_system_;
     std::unique_ptr<UIManager> ui_manager_;
     asio::io_context io_;
-    decltype(asio::make_work_guard(io_)) io_workguard_ =
-        asio::make_work_guard(io_);
+    decltype(asio::make_work_guard(io_)) io_workguard_ = asio::make_work_guard(io_);
     std::jthread io_thread_;
 
     GameMode &game_mode()

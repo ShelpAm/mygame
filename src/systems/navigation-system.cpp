@@ -56,7 +56,9 @@ std::vector<Vec2i> NavigationSystem::find_path(Vec2i start, Vec2i goal) const
         return {};
 
     using Node = std::pair<int, Vec2i>;
-    auto heuristic = [](Vec2i a, Vec2i b) -> int { return std::abs(a.x - b.x) + std::abs(a.y - b.y); };
+    auto heuristic = [](Vec2i a, Vec2i b) -> int {
+        return std::abs(a.x - b.x) + std::abs(a.y - b.y);
+    };
 
     std::priority_queue<Node, std::vector<Node>, std::greater<>> openSet;
     std::unordered_map<Vec2i, Vec2i, std::hash<Vec2i>> cameFrom;

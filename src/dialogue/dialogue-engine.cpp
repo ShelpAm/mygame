@@ -101,8 +101,10 @@ DialogueResponse DialogueEngine::generate_greeting(NPCState const &npc, int play
     return resp;
 }
 
-DialogueResponse DialogueEngine::generate_ask_response(NPCState const &npc, std::string const &topic_id,
-                                                       std::string const &topic_display_name, int player_trust)
+DialogueResponse DialogueEngine::generate_ask_response(NPCState const &npc,
+                                                       std::string const &topic_id,
+                                                       std::string const &topic_display_name,
+                                                       int player_trust)
 {
     DialogueResponse resp;
 
@@ -122,7 +124,8 @@ DialogueResponse DialogueEngine::generate_ask_response(NPCState const &npc, std:
                 tmpl = &t;
                 break;
             }
-            if (!lie && t.personality_pref == npc.personality && t.type.find("deny") != std::string::npos) {
+            if (!lie && t.personality_pref == npc.personality &&
+                t.type.find("deny") != std::string::npos) {
                 tmpl = &t;
                 break;
             }
@@ -153,7 +156,8 @@ DialogueResponse DialogueEngine::generate_ask_response(NPCState const &npc, std:
     slots["topic"] = topic_display_name;
     if (knows && !lie) {
         slots["detail"] = it->second.npc_version;
-        slots["person"] = it->second.source_npc_id.empty() ? "a traveler" : it->second.source_npc_id;
+        slots["person"] =
+            it->second.source_npc_id.empty() ? "a traveler" : it->second.source_npc_id;
         resp.fact_id = topic_id;
     }
     else {
@@ -185,8 +189,8 @@ DialogueResponse DialogueEngine::generate_ask_response(NPCState const &npc, std:
     return resp;
 }
 
-DialogueTemplate const *DialogueEngine::pick_template(NPCState const &npc, bool knows_directly, bool knows_indirectly,
-                                                      int confidence) const
+DialogueTemplate const *DialogueEngine::pick_template(NPCState const &npc, bool knows_directly,
+                                                      bool knows_indirectly, int confidence) const
 {
     for (auto const &t : active_templates()) {
         if (t.type == "greeting")
@@ -204,8 +208,9 @@ DialogueTemplate const *DialogueEngine::pick_template(NPCState const &npc, bool 
     return nullptr;
 }
 
-std::string DialogueEngine::fill_template(std::string const &pattern,
-                                          std::unordered_map<std::string, std::string> const &slots) const
+std::string
+DialogueEngine::fill_template(std::string const &pattern,
+                              std::unordered_map<std::string, std::string> const &slots) const
 {
     std::string result = pattern;
     for (auto const &[key, value] : slots) {

@@ -15,10 +15,7 @@ struct SyncEntry {
     uint16_t mask_bit;
     uint16_t wire_size;
 
-    constexpr SyncEntry(uint16_t bit, uint16_t size)
-        : mask_bit(bit), wire_size(size)
-    {
-    }
+    constexpr SyncEntry(uint16_t bit, uint16_t size) : mask_bit(bit), wire_size(size) {}
 };
 
 inline std::vector<SyncEntry> const &kSyncTable()

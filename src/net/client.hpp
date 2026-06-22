@@ -39,8 +39,7 @@ struct SnapshotEntity {
 
 struct RemoteEntity {
     EntityId id = 0;
-    uint8_t kind =
-        0; // EntityKind: 1=player, 2=soldier, 3=npc, 4=enemy, 5=structure
+    uint8_t kind = 0; // EntityKind: 1=player, 2=soldier, 3=npc, 4=enemy, 5=structure
 
     Vec2f position;   // interpolated (for rendering)
     Vec2f target_pos; // server-authoritative target
@@ -77,8 +76,7 @@ class Client {
     ~Client();
 
     void update(float dt);
-    void handle_combat_event(EntityId attacker_id, EntityId defender_id,
-                             int damage, bool killed);
+    void handle_combat_event(EntityId attacker_id, EntityId defender_id, int damage, bool killed);
 
     EntityId player_id() const { return player_id_; }
     Team player_team() const { return player_team_; }
@@ -120,10 +118,7 @@ class Client {
 
     void interpolate_entities(float dt);
     std::vector<RemoteEntity> &remote_entities() { return remote_entities_; }
-    std::vector<RemoteEntity> const &remote_entities() const
-    {
-        return remote_entities_;
-    }
+    std::vector<RemoteEntity> const &remote_entities() const { return remote_entities_; }
     // std::vector<SnapshotEntity> &snapshots() { return snapshots_; }
     // std::vector<SnapshotEntity> const &snapshots() const { return snapshots_;
     // }
@@ -131,31 +126,16 @@ class Client {
     WorldState const &world_state() const { return world_state_; }
 
     PlayerVisibility &player_visibility() { return player_visibility_; }
-    PlayerVisibility const &player_visibility() const
-    {
-        return player_visibility_;
-    }
+    PlayerVisibility const &player_visibility() const { return player_visibility_; }
 
     SurvivalState const &survival() const { return player_survival_; }
     void set_quests(QuestManager const *q) { quests_ = q; }
     QuestManager const &quests() const { return *quests_; }
     std::vector<CombatEvent> &combat_events() { return combat_events_; }
-    std::vector<CombatEvent> const &combat_events() const
-    {
-        return combat_events_;
-    }
-    std::vector<std::string> const &chat_history() const
-    {
-        return chat_history_;
-    }
-    std::vector<ProjectileVisual> &projectile_visuals()
-    {
-        return projectile_visuals_;
-    }
-    std::vector<ProjectileVisual> const &projectile_visuals() const
-    {
-        return projectile_visuals_;
-    }
+    std::vector<CombatEvent> const &combat_events() const { return combat_events_; }
+    std::vector<std::string> const &chat_history() const { return chat_history_; }
+    std::vector<ProjectileVisual> &projectile_visuals() { return projectile_visuals_; }
+    std::vector<ProjectileVisual> const &projectile_visuals() const { return projectile_visuals_; }
     uint8_t selected_roles() const { return selected_roles_; }
     void toggle_selected_role(uint8_t role) { selected_roles_ ^= (1 << role); }
     int formation_idx() const { return formation_idx_; }
@@ -205,8 +185,8 @@ class Client {
     DialogueState dialogue_;
 
     // Deferred sync processing (io_context thread → main thread)
-    deferred_concurrent_channel<void(
-        boost::system::error_code, std::shared_ptr<Session>, TransportMessage)>
+    deferred_concurrent_channel<void(boost::system::error_code, std::shared_ptr<Session>,
+                                     TransportMessage)>
         messages_;
 
     void handle_message(Session &from, TransportMessage msg);

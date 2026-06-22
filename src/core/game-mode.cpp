@@ -215,16 +215,18 @@ void GameMode::init_systems()
 
     soldier_ai_sys_ = world_.system<SoldierAI, Transform, Movement, CombatStats>("SoldierAI")
                           .kind(flecs::PreUpdate)
-                          .each([this](flecs::entity e, SoldierAI &ai, Transform &pos, Movement &mov, CombatStats &cs) {
+                          .each([this](flecs::entity e, SoldierAI &ai, Transform &pos,
+                                       Movement &mov, CombatStats &cs) {
                               run_soldier_ai(world_, e, ai, pos, mov, cs, navigation_, dt_.count(),
                                              [this](EntityId eid) { mark_dirty(eid); });
                           });
     soldier_ai_sys_.depends_on(survival_sys_);
 
-    combat_resolution_sys_ = world_.system<>("CombatResolution").kind(flecs::PreUpdate).run([this](flecs::iter) {
-        run_combat_batch(world_, dt_.count(), pending_combat_events_, projectiles_,
-                         [this](EntityId eid) { mark_dirty(eid); });
-    });
+    combat_resolution_sys_ =
+        world_.system<>("CombatResolution").kind(flecs::PreUpdate).run([this](flecs::iter) {
+            run_combat_batch(world_, dt_.count(), pending_combat_events_, projectiles_,
+                             [this](EntityId eid) { mark_dirty(eid); });
+        });
     combat_resolution_sys_.depends_on(soldier_ai_sys_);
 
     // -- OnUpdate phase: physics --
@@ -259,21 +261,22 @@ void GameMode::init_systems()
                              Vec2f separation_force = {0.F, 0.F};
                              bool const is_player = e.has<PlayerTag>();
 
-                             entity_query_.each([&](flecs::entity other, Transform const &op, Collider const &oc) {
-                                 if (other == e)
-                                     return;
-                                 float const dx = pos.x - op.world_pos.x;
-                                 float const dy = pos.y - op.world_pos.y;
-                                 float const dist = std::hypot(dx, dy);
-                                 float const min_dist = c.radius + oc.radius;
+                             entity_query_.each(
+                                 [&](flecs::entity other, Transform const &op, Collider const &oc) {
+                                     if (other == e)
+                                         return;
+                                     float const dx = pos.x - op.world_pos.x;
+                                     float const dy = pos.y - op.world_pos.y;
+                                     float const dist = std::hypot(dx, dy);
+                                     float const min_dist = c.radius + oc.radius;
 
-                                 if (dist < min_dist && dist > 1e-5F) {
-                                     float force_factor = (min_dist - dist) / min_dist;
-                                     float weight = other.has<PlayerTag>() ? 15.F : 1.F;
-                                     separation_force.x += (dx / dist) * force_factor * weight;
-                                     separation_force.y += (dy / dist) * force_factor * weight;
-                                 }
-                             });
+                                     if (dist < min_dist && dist > 1e-5F) {
+                                         float force_factor = (min_dist - dist) / min_dist;
+                                         float weight = other.has<PlayerTag>() ? 15.F : 1.F;
+                                         separation_force.x += (dx / dist) * force_factor * weight;
+                                         separation_force.y += (dy / dist) * force_factor * weight;
+                                     }
+                                 });
 
                              // Player is immune to separation push
                              if (is_player)
@@ -295,21 +298,23 @@ void GameMode::init_systems()
 
     // -- PostUpdate phase: cleanup --
 
-    death_marker_sys_ =
-        world_.system<CombatStats>("Combat").kind(flecs::PostUpdate).each([this](flecs::entity e, CombatStats &cs) {
-            if (cs.alive && cs.hp <= 0) {
-                cs.alive = false;
-                // e.remove<Collider>();
-                mark_dirty(e.id());
-                for (auto &[pid, ds] : player_dialogues_)
-                    if (ds.active && ds.npc_entity == e.id())
-                        ds = {};
-            }
-        });
+    death_marker_sys_ = world_.system<CombatStats>("Combat")
+                            .kind(flecs::PostUpdate)
+                            .each([this](flecs::entity e, CombatStats &cs) {
+                                if (cs.alive && cs.hp <= 0) {
+                                    cs.alive = false;
+                                    // e.remove<Collider>();
+                                    mark_dirty(e.id());
+                                    for (auto &[pid, ds] : player_dialogues_)
+                                        if (ds.active && ds.npc_entity == e.id())
+                                            ds = {};
+                                }
+                            });
 }
 
 EntityId GameMode::spawn_npc(std::string const &id, std::string const &name, float x, float y,
-                             std::string const &personality, std::vector<NPCKnowledgeEntry> const &known_facts)
+                             std::string const &personality,
+                             std::vector<NPCKnowledgeEntry> const &known_facts)
 {
     auto e = world_.entity();
     auto eid = e.id();
@@ -331,12 +336,12 @@ EntityId GameMode::spawn_npc(std::string const &id, std::string const &name, flo
     e.set(Interactable{.interact_radius = 64.F, .can_talk = true});
     e.set(npc);
     e.set(CombatStats{
-        .team = Team::neutral,
-        .max_hp = 15,
-        .hp = 15,
+        .team = personality == "hostile" ? Team::enemy : Team::neutral,
+        .max_hp = 50,
+        .hp = 50,
         .attack = 2,
-        .defense = 1,
-        .attack_range = 60.F,
+        .defense = 4,
+        .attack_range = 48.F,
     });
     e.set(Collider{14.F});
 
@@ -345,55 +350,54 @@ EntityId GameMode::spawn_npc(std::string const &id, std::string const &name, flo
     return eid;
 }
 
-EntityId GameMode::spawn_soldier(EntityId captain_id, int index, SoldierRole role)
+EntityId GameMode::spawn_soldier(EntityId captain_id, SoldierRole role)
 {
-    auto rs = soldier_role_stats(role);
+    auto defaults = soldier_role_stats(role);
     auto target = world_.entity(captain_id);
 
     // Count how many soldiers share this new soldier's formation
     // (across all roles), so they are laid out as one group.
     auto &new_fm = formation(captain_id, role, captain_id);
-    char const *fm_name = new_fm.name();
-    std::size_t formation_count = 0;
+    std::size_t num_soldiers = 0; // Count of soldiers in this formation
 
-    auto mysoldiers = world_.query_builder<SoldierAI, CombatStats>().with<BelongsTo>(captain_id).build();
+    auto mysoldiers =
+        world_.query_builder<SoldierAI, CombatStats>().with<BelongsTo>(captain_id).build();
     mysoldiers.each([&](flecs::entity, SoldierAI &ai, CombatStats &cs) {
         if (!cs.alive)
             return;
         auto &fm = formation(captain_id, ai.role, target.id());
-        if (std::string_view{fm.name()} == fm_name)
-            ++formation_count;
+        if (std::string_view{fm.name()} == new_fm.name())
+            ++num_soldiers;
     });
     auto target_trans = target.get<Transform>();
     auto offsets = new_fm.compute_offsets({
-        .count = formation_count + 1,
+        .count = num_soldiers + 1,
         .target_facing = target_trans.facing,
         .target_position = target_trans.world_pos,
         .time = elapsed_,
     });
-    auto off = offsets.at(index);
     auto pos = world_.entity(captain_id).get<Transform>().world_pos;
 
     auto e = world_.entity()
                  .add<BelongsTo>(captain_id)
                  .add<Follows>(captain_id)
                  .set(Transform{.world_pos = pos, .facing = target_trans.facing})
-                 .set(Movement{.max_speed = 40.F, .velocity{}})
+                 .set(Movement{.max_speed = defaults.max_speed, .velocity{}})
                  .set(CombatStats{
                      .team = world_.entity(captain_id).get<CombatStats>().team,
-                     .max_hp = rs.max_hp,
-                     .hp = rs.hp,
-                     .attack = rs.attack,
-                     .defense = rs.defense,
-                     .attack_range = rs.attack_range,
+                     .max_hp = defaults.max_hp,
+                     .hp = defaults.hp,
+                     .attack = defaults.attack,
+                     .defense = defaults.defense,
+                     .attack_range = defaults.attack_range,
                  })
-                 .set(Collider{11.F})
+                 .set(Collider{14.F})
                  .set(SoldierAI{
-                     .follow_distance = 8.F,
-                     .formation_offset = off,
-                     .engage_range = rs.engage_range,
+                     .follow_distance = 2.F,
+                     .formation_offset = {}, // Leaves empty, compute in `relayout_formation`.
+                     .engage_range = defaults.engage_range,
                      .role = role,
-                     .stance = rs.stance,
+                     .stance = defaults.stance,
                  });
     mark_dirty(e.id());
     relayout_formation(captain_id);
@@ -402,18 +406,18 @@ EntityId GameMode::spawn_soldier(EntityId captain_id, int index, SoldierRole rol
 
 EntityId GameMode::spawn_recruit(EntityId leader)
 {
-    return spawn_soldier(leader, soldier_idx_++, SoldierRole::melee);
+    return spawn_soldier(leader, SoldierRole::melee);
 }
 
 EntityId GameMode::spawn_recruit_ranged(EntityId leader)
 {
-    return spawn_soldier(leader, soldier_idx_++, SoldierRole::ranged);
+    return spawn_soldier(leader, SoldierRole::ranged);
 }
 
 void GameMode::spawn_guards(EntityId captain_eid, int count)
 {
     for (int g = 0; g < count; ++g) {
-        spawn_soldier(captain_eid, g, SoldierRole::guard);
+        spawn_soldier(captain_eid, SoldierRole::guard);
     }
 }
 
@@ -444,7 +448,8 @@ void GameMode::relayout_formation(EntityId captain_id)
 
     auto captain = world_.entity(captain_id);
 
-    auto squad_query = world_.query_builder<SoldierAI, CombatStats>().with<BelongsTo>(captain).build();
+    auto squad_query =
+        world_.query_builder<SoldierAI, CombatStats>().with<BelongsTo>(captain).build();
 
     std::unordered_map<Formation *, FormationInfo> forminfo;
 
@@ -522,7 +527,8 @@ void GameMode::handle_interaction(EntityId player)
         return;
     auto eid = find_nearest_interactable(player, pp->world_pos);
     if (eid == invalid_entity) {
-        spdlog::debug("No interactable NPC near player {} at ({}, {})", player, pp->world_pos.x, pp->world_pos.y);
+        spdlog::debug("No interactable NPC near player {} at ({}, {})", player, pp->world_pos.x,
+                      pp->world_pos.y);
         return;
     }
     auto const *npc = world_.entity(eid).try_get<NPCState>();
@@ -568,18 +574,19 @@ EntityId GameMode::find_nearest_interactable(EntityId player, Vec2f player_pos)
 {
     EntityId nearest = invalid_entity;
     float nearestDist = 80.f;
-    world_.query<Transform, Interactable>().each([&](flecs::entity e, Transform &pos, Interactable &) {
-        if (e.id() == player)
-            return;
-        auto const *cs = e.try_get<CombatStats>();
-        if (cs && !cs->alive)
-            return;
-        float d = std::hypot(pos.world_pos.x - player_pos.x, pos.world_pos.y - player_pos.y);
-        if (d < nearestDist) {
-            nearestDist = d;
-            nearest = e.id();
-        }
-    });
+    world_.query<Transform, Interactable>().each(
+        [&](flecs::entity e, Transform &pos, Interactable &) {
+            if (e.id() == player)
+                return;
+            auto const *cs = e.try_get<CombatStats>();
+            if (cs && !cs->alive)
+                return;
+            float d = std::hypot(pos.world_pos.x - player_pos.x, pos.world_pos.y - player_pos.y);
+            if (d < nearestDist) {
+                nearestDist = d;
+                nearest = e.id();
+            }
+        });
     return nearest;
 }
 
@@ -598,8 +605,10 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
     if (!npc)
         return;
 
-    auto addHistory = [&](DialogueLine::Speaker s, std::string const &key, std::string const &raw = "",
-                          bool use_raw = false) { dlg.history.push_back({s, key, raw, use_raw, npc->display_name}); };
+    auto addHistory = [&](DialogueLine::Speaker s, std::string const &key,
+                          std::string const &raw = "", bool use_raw = false) {
+        dlg.history.push_back({s, key, raw, use_raw, npc->display_name});
+    };
 
     if (action == "__attack__") {
         auto *cs = npc_entity.try_get_mut<CombatStats>();
@@ -608,7 +617,8 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
             cs->alive = true;
         }
         addHistory(DialogueLine::player, "resp.attack_you");
-        addHistory(DialogueLine::npc, npc->personality == "hostile" ? "resp.attack_hostile" : "resp.attack_neutral");
+        addHistory(DialogueLine::npc,
+                   npc->personality == "hostile" ? "resp.attack_hostile" : "resp.attack_neutral");
         end_dialogue(player);
         return;
     }
@@ -616,15 +626,16 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
         relationships_.modify_trust(npc->npc_id, 8);
         dlg.npc_trust += 8;
         addHistory(DialogueLine::player, "resp.gift_you");
-        addHistory(DialogueLine::npc, npc->personality == "friendly" ? "resp.gift_friendly" : "resp.gift_neutral");
+        addHistory(DialogueLine::npc,
+                   npc->personality == "friendly" ? "resp.gift_friendly" : "resp.gift_neutral");
         return;
     }
     if (action == "__threaten__") {
         relationships_.modify_fear(npc->npc_id, 15);
         dlg.npc_fear += 15;
         addHistory(DialogueLine::player, "resp.threaten_you");
-        addHistory(DialogueLine::npc,
-                   npc->personality == "hostile" ? "resp.threaten_hostile" : "resp.threaten_neutral");
+        addHistory(DialogueLine::npc, npc->personality == "hostile" ? "resp.threaten_hostile"
+                                                                    : "resp.threaten_neutral");
         return;
     }
     if (action == "__quest__") {
@@ -681,7 +692,8 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
     auto *rel = relationships_.get_relation(npc->npc_id);
     int trust = rel ? rel->trust : 0;
     auto &dn = topic_registry_.display_name(action);
-    auto resp = dialogue_engine_.generate_ask_response(*npc, action, dn.empty() ? action : dn, trust);
+    auto resp =
+        dialogue_engine_.generate_ask_response(*npc, action, dn.empty() ? action : dn, trust);
     addHistory(DialogueLine::player, "dialogue.ask_prefix");
     addHistory(DialogueLine::npc, "", resp.text, true);
     quests_.report_talk(npc->npc_id);
@@ -693,8 +705,8 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
         Fact f;
         f.id = action + "_from_" + npc->npc_id;
         f.description = npc->knowledge[action].npc_version;
-        f.origins.push_back({Fact::Origin::Source::npc_testimony, npc->npc_id, "", world_state_.day(),
-                             npc->knowledge[action].confidence});
+        f.origins.push_back({Fact::Origin::Source::npc_testimony, npc->npc_id, "",
+                             world_state_.day(), npc->knowledge[action].confidence});
         knowledge_.add_or_update_fact(f);
     }
 }
@@ -715,14 +727,17 @@ EntityId GameMode::spawn_player(Vec2f pos, Team team)
 {
     auto e = world_.entity()
                  .add<PlayerTag>()
-                 .set<Transform>(Transform{.world_pos = pos})
-                 .set<CombatStats>(CombatStats{
-                     .team = team, .max_hp = 200, .hp = 200, .attack = 4, .defense = 3, .attack_range = 80.F})
-                 .set<Movement>(Movement{.max_speed = 200, .velocity{}})
-                 .set<SurvivalState>(SurvivalState{})
-                 .set<Collider>(Collider{14.F})
-                 .set<Vision>(Vision{});
-
+                 .set(Transform{.world_pos = pos})
+                 .set(CombatStats{.team = team,
+                                  .max_hp = 200,
+                                  .hp = 200,
+                                  .attack = 4,
+                                  .defense = 3,
+                                  .attack_range = 48.F})
+                 .set(Movement{.max_speed = 200, .velocity = {}})
+                 .set(SurvivalState{})
+                 .set(Collider{14.F})
+                 .set(Vision{});
     mark_dirty(e.id());
     return e.id();
 }
@@ -740,7 +755,8 @@ void GameMode::check_event_spawns()
         if (!e.has<PlayerTag>())
             return;
         auto const &latest = events_->triggered_events().back();
-        if (latest.type == GameEvent::Type::battle || latest.type == GameEvent::Type::refugee_wave) {
+        if (latest.type == GameEvent::Type::battle ||
+            latest.type == GameEvent::Type::refugee_wave) {
             std::uniform_int_distribution<int> dist(0, 9);
             spawn_enemy_wave(8 + dist(rng), pp.world_pos, 400.F, Team::enemy);
         }
@@ -799,7 +815,8 @@ void GameMode::update(float dt)
 
 void GameMode::apply_player_input(EntityId entity, Vec2f dir)
 {
-    spdlog::debug("GameMode: applying input for player {}: dir=({:.2f}, {:.2f})", entity, dir.x, dir.y);
+    spdlog::debug("GameMode: applying input for player {}: dir=({:.2f}, {:.2f})", entity, dir.x,
+                  dir.y);
     auto &mov = world_.entity(entity).get_mut<Movement>();
     mov.velocity = dir * mov.max_speed;
     mark_dirty(entity);
@@ -954,8 +971,8 @@ static void write_world_header(std::vector<uint8_t> &out, WorldState const &ws)
     write_float(out, ws.time_of_day());
 }
 
-GameMode::PlayerSyncPayload GameMode::build_dirty_payload(EntityId player_eid,
-                                                          std::unordered_set<EntityId> const &prev_sent)
+GameMode::PlayerSyncPayload
+GameMode::build_dirty_payload(EntityId player_eid, std::unordered_set<EntityId> const &prev_sent)
 {
     PlayerSyncPayload result;
     write_world_header(result.bytes, world_state_);
@@ -963,7 +980,8 @@ GameMode::PlayerSyncPayload GameMode::build_dirty_payload(EntityId player_eid,
     // Explored tiles (server-authoritative, sent every frame for now)
     {
         auto eit = player_explored_tiles_.find(player_eid);
-        auto count = static_cast<uint16_t>(eit != player_explored_tiles_.end() ? eit->second.size() : 0);
+        auto count =
+            static_cast<uint16_t>(eit != player_explored_tiles_.end() ? eit->second.size() : 0);
         write_bytes(result.bytes, count);
         if (eit != player_explored_tiles_.end())
             for (auto const &t : eit->second) {
@@ -974,7 +992,8 @@ GameMode::PlayerSyncPayload GameMode::build_dirty_payload(EntityId player_eid,
 
     auto it = player_visible_tiles_.find(player_eid);
     if (it == player_visible_tiles_.end())
-        throw std::runtime_error("Player visible tiles not found for player_eid: " + std::to_string(player_eid));
+        throw std::runtime_error("Player visible tiles not found for player_eid: " +
+                                 std::to_string(player_eid));
     auto const &visible = it->second;
 
     auto emit = [&](flecs::entity e) {
@@ -993,16 +1012,17 @@ GameMode::PlayerSyncPayload GameMode::build_dirty_payload(EntityId player_eid,
     }
 
     // 2. Newly-visible entities (on visible tiles but not sent last frame)
-    world_.query<Transform, CombatStats>().each([&](flecs::entity e, Transform &pos, CombatStats &) {
-        if (result.entity_ids.contains(e.id()))
-            return;
-        if (e.id() == player_eid)
-            return;
-        if (prev_sent.contains(e.id()))
-            return;
-        if (visible.contains(world_to_tile(pos.world_pos)))
-            emit(e);
-    });
+    world_.query<Transform, CombatStats>().each(
+        [&](flecs::entity e, Transform &pos, CombatStats &) {
+            if (result.entity_ids.contains(e.id()))
+                return;
+            if (e.id() == player_eid)
+                return;
+            if (prev_sent.contains(e.id()))
+                return;
+            if (visible.contains(world_to_tile(pos.world_pos)))
+                emit(e);
+        });
 
     return result;
 }
@@ -1015,7 +1035,8 @@ GameMode::PlayerSyncPayload GameMode::build_full_payload(EntityId player_eid) co
     // Explored tiles (server-authoritative)
     {
         auto eit = player_explored_tiles_.find(player_eid);
-        auto count = static_cast<uint16_t>(eit != player_explored_tiles_.end() ? eit->second.size() : 0);
+        auto count =
+            static_cast<uint16_t>(eit != player_explored_tiles_.end() ? eit->second.size() : 0);
         write_bytes(result.bytes, count);
         if (eit != player_explored_tiles_.end())
             for (auto const &t : eit->second) {
@@ -1027,12 +1048,13 @@ GameMode::PlayerSyncPayload GameMode::build_full_payload(EntityId player_eid) co
     auto it = player_visible_tiles_.find(player_eid);
     auto const &visible = it != player_visible_tiles_.end() ? it->second : decltype(it->second){};
 
-    world_.query<Transform, CombatStats>().each([&](flecs::entity e, Transform &pos, CombatStats &) {
-        if (e.id() == player_eid || visible.contains(world_to_tile(pos.world_pos))) {
-            serialize_entity(e, result.bytes);
-            result.entity_ids.insert(e.id());
-        }
-    });
+    world_.query<Transform, CombatStats>().each(
+        [&](flecs::entity e, Transform &pos, CombatStats &) {
+            if (e.id() == player_eid || visible.contains(world_to_tile(pos.world_pos))) {
+                serialize_entity(e, result.bytes);
+                result.entity_ids.insert(e.id());
+            }
+        });
     return result;
 }
 

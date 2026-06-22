@@ -29,14 +29,7 @@ struct NPCState {
     PlayerOpinion opinion;
 
     // Current agenda
-    enum class Goal {
-        gain_info,
-        spread_misinfo,
-        get_item,
-        form_alliance,
-        harm_player,
-        neutral
-    };
+    enum class Goal { gain_info, spread_misinfo, get_item, form_alliance, harm_player, neutral };
     Goal current_goal = Goal::neutral;
     std::string goal_fact_id;
     int urgency = 0; // 0-100

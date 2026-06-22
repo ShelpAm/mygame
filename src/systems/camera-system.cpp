@@ -36,8 +36,9 @@ Vec2f CameraSystem::world_to_screen(Vec2f world_pos) const
 
 Vec2f CameraSystem::screen_to_world(Vec2i screen_pos) const
 {
-    return {(static_cast<float>(screen_pos.x) - static_cast<float>(width_) / 2.f) / zoom_ + center_.x,
-            (static_cast<float>(screen_pos.y) - static_cast<float>(height_) / 2.f) / zoom_ + center_.y};
+    return {
+        (static_cast<float>(screen_pos.x) - static_cast<float>(width_) / 2.f) / zoom_ + center_.x,
+        (static_cast<float>(screen_pos.y) - static_cast<float>(height_) / 2.f) / zoom_ + center_.y};
 }
 
 // View port of world pos

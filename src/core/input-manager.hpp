@@ -42,18 +42,9 @@ class InputManager {
     bool just_pressed(Action action) const;
     bool just_released(Action action) const;
 
-    Vec2f mouse_world_pos() const
-    {
-        return mouse_world_pos_;
-    }
-    Vec2i mouse_screen_pos() const
-    {
-        return mouse_screen_pos_;
-    }
-    bool mouse_moved() const
-    {
-        return mouse_moved_;
-    }
+    Vec2f mouse_world_pos() const { return mouse_world_pos_; }
+    Vec2i mouse_screen_pos() const { return mouse_screen_pos_; }
+    bool mouse_moved() const { return mouse_moved_; }
 
     void set_key_binding(Action action, SDL_Scancode scancode);
 
@@ -67,8 +58,8 @@ class InputManager {
     std::unordered_map<Action, SDL_Scancode> bindings_;
     bool const *keyboard_state_ = nullptr;
 
-    Vec2f mouse_world_pos_;
-    Vec2i mouse_screen_pos_;
+    Vec2f mouse_world_pos_{};
+    Vec2i mouse_screen_pos_{};
     bool mouse_moved_ = false;
 
     void init_default_bindings();

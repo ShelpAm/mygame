@@ -34,10 +34,7 @@ struct TransportMessage {
     std::vector<uint8_t> payload;
 
     TransportMessage() = default;
-    TransportMessage(Type t, std::vector<uint8_t> p)
-        : type(t), payload(std::move(p))
-    {
-    }
+    TransportMessage(Type t, std::vector<uint8_t> p) : type(t), payload(std::move(p)) {}
 };
 
 // Abstract bidirectional pipe between two endpoints.
@@ -52,8 +49,7 @@ class Session {
     static asio::io_context &io()
     {
         if (!s_io_)
-            throw std::runtime_error(
-                "ITransport: access io_context before set");
+            throw std::runtime_error("ITransport: access io_context before set");
         return *s_io_;
     }
     template <typename T> static void spawn(asio::awaitable<T> awaitable)

@@ -24,12 +24,7 @@ struct Fact {
     };
 
     struct Origin {
-        enum class Source {
-            player_witness,
-            npc_testimony,
-            artifact_read,
-            inference
-        };
+        enum class Source { player_witness, npc_testimony, artifact_read, inference };
         Source source;
         std::string npc_id;
         std::string location_id;
@@ -97,18 +92,12 @@ class KnowledgeGraph {
 
     bool is_topic_known(std::string const &topic) const;
     void mark_topic_known(std::string const &topic);
-    std::unordered_set<std::string> const &known_topics() const
-    {
-        return known_topics_;
-    }
+    std::unordered_set<std::string> const &known_topics() const { return known_topics_; }
 
     std::vector<Fact const *> facts_witnessed() const;
     std::vector<Fact const *> facts_heard() const;
 
-    size_t total_facts() const
-    {
-        return facts_.size();
-    }
+    size_t total_facts() const { return facts_.size(); }
 
   private:
     std::unordered_map<std::string, Fact> facts_;

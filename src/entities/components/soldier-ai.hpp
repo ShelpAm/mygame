@@ -28,6 +28,7 @@ enum class SoldierStance : uint8_t {
 };
 
 struct SoldierRoleDefaults {
+    float max_speed;
     int max_hp;
     int hp;
     int attack;
@@ -41,7 +42,8 @@ inline SoldierRoleDefaults soldier_role_stats(SoldierRole role)
 {
     switch (role) {
     case SoldierRole::ranged:
-        return {.max_hp = 12,
+        return {.max_speed = 200,
+                .max_hp = 12,
                 .hp = 12,
                 .attack = 2,
                 .defense = 1,
@@ -49,7 +51,8 @@ inline SoldierRoleDefaults soldier_role_stats(SoldierRole role)
                 .engage_range = 200.F,
                 .stance = SoldierStance::defensive};
     case SoldierRole::guard:
-        return {.max_hp = 20,
+        return {.max_speed = 180,
+                .max_hp = 20,
                 .hp = 20,
                 .attack = 4,
                 .defense = 3,
@@ -58,7 +61,8 @@ inline SoldierRoleDefaults soldier_role_stats(SoldierRole role)
                 .stance = SoldierStance::offensive};
     case SoldierRole::melee:
     default:
-        return {.max_hp = 12,
+        return {.max_speed = 200,
+                .max_hp = 12,
                 .hp = 12,
                 .attack = 3,
                 .defense = 2,

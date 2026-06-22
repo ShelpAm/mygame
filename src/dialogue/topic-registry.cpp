@@ -1,5 +1,6 @@
 #include "dialogue/topic-registry.hpp"
-void TopicRegistry::register_topic(std::string const &id, std::string const &display_name, std::string const &category)
+void TopicRegistry::register_topic(std::string const &id, std::string const &display_name,
+                                   std::string const &category)
 {
     topics_[id] = {display_name, category};
 }

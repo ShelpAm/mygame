@@ -64,7 +64,8 @@ std::vector<std::string> FactionNetwork::all_faction_ids() const
     return result;
 }
 
-void FactionNetwork::apply_event(std::string const &source_faction, int power_shift, std::string const &target_faction)
+void FactionNetwork::apply_event(std::string const &source_faction, int power_shift,
+                                 std::string const &target_faction)
 {
     modify_power(source_faction, power_shift);
     if (!target_faction.empty()) {

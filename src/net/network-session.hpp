@@ -7,8 +7,7 @@
 using tcp_socket = default_token::as_default_on_t<tcp::socket>;
 using tcp_acceptor = default_token::as_default_on_t<tcp::acceptor>;
 
-class NetworkSession : public Session,
-                       public std::enable_shared_from_this<NetworkSession> {
+class NetworkSession : public Session, public std::enable_shared_from_this<NetworkSession> {
   public:
     class Acceptor : public std::enable_shared_from_this<Acceptor> {
       public:
@@ -32,8 +31,7 @@ class NetworkSession : public Session,
     explicit NetworkSession(tcp::socket sock);
     ~NetworkSession() override;
 
-    static awaitable<std::shared_ptr<NetworkSession>>
-    connect(std::string const &ip, int port);
+    static awaitable<std::shared_ptr<NetworkSession>> connect(std::string const &ip, int port);
 
     awaitable<void> write(TransportMessage msg) override;
     awaitable<TransportMessage> read() override;

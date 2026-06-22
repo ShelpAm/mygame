@@ -42,20 +42,13 @@ struct GameEvent {
 
 class EventSimulator {
   public:
-    EventSimulator(FactionNetwork &factions, KnowledgeGraph &knowledge,
-                   WorldState &world_state);
+    EventSimulator(FactionNetwork &factions, KnowledgeGraph &knowledge, WorldState &world_state);
 
     void add_event(GameEvent event);
     void update(int current_day);
 
-    std::vector<GameEvent> const &all_events() const
-    {
-        return events_;
-    }
-    std::vector<GameEvent> const &triggered_events() const
-    {
-        return triggered_events_;
-    }
+    std::vector<GameEvent> const &all_events() const { return events_; }
+    std::vector<GameEvent> const &triggered_events() const { return triggered_events_; }
 
   private:
     FactionNetwork &factions_;

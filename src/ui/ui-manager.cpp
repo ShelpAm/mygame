@@ -15,7 +15,8 @@
 #include <imgui_impl_sdlrenderer3.h>
 #include <spdlog/spdlog.h>
 
-UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer) : window_(window), renderer_(renderer)
+UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer)
+    : window_(window), renderer_(renderer)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -36,10 +37,12 @@ UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer) : window_(windo
     ImFontConfig cfg;
     cfg.MergeMode = true;
     static ImWchar const cjkRanges[] = {
-        0x0020, 0x00FF, 0x2000, 0x206F, 0x3000, 0x30FF, 0x31F0, 0x31FF, 0xFF00, 0xFFEF, 0x4E00, 0x9FFF, 0,
+        0x0020, 0x00FF, 0x2000, 0x206F, 0x3000, 0x30FF, 0x31F0,
+        0x31FF, 0xFF00, 0xFFEF, 0x4E00, 0x9FFF, 0,
     };
     // Try CJK fonts across platforms
     static char const *cjkPaths[] = {
+        "assets/fonts/Monaspace Neon Var.ttf", // English
 #ifdef _WIN32
         "C:\\Windows\\Fonts\\msyh.ttc",
         "C:\\Windows\\Fonts\\simsun.ttc",
@@ -93,10 +96,10 @@ void UIManager::render(WorldState *world_state, App &app)
         render_hud(*world_state, app);
 
     // clang-format off
-    if (app.dialogue().active)             render_dialogue(app);
-    if (show_journal_)                     render_journal(app);
-    if (show_inventory_)                   render_inventory(app);
-    if (show_map_)                         render_map(app);
+    if (app.dialogue().active)        render_dialogue(app);
+    if (show_journal_)                render_journal(app);
+    if (show_inventory_)              render_inventory(app);
+    if (show_map_)                    render_map(app);
     if (show_help_)                   render_help_panel(app);
     if (show_load_menu_)              render_load_menu(app);
 
@@ -125,8 +128,8 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
 
     ImGui::SetNextWindowPos(ImVec2(10, 10));
     ImGui::Begin("HUD", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize |
-                     ImGuiWindowFlags_NoInputs);
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
+                     ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
 
     ImGui::TextColored(ImVec4(0.8f, 0.7f, 0.4f, 1.0f), "%s", loc.get("game.title").c_str());
     ImGui::SameLine();
@@ -137,7 +140,8 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
 
     ImGui::Separator();
 
-    static constexpr char const *seasonKeys[] = {"season.spring", "season.summer", "season.autumn", "season.winter"};
+    static constexpr char const *seasonKeys[] = {"season.spring", "season.summer", "season.autumn",
+                                                 "season.winter"};
     ImGui::Text("%s: %d | %s: %s | %s: %.0f", loc.get("hud.day").c_str(), world_state.day(),
                 loc.get("hud.season").c_str(), loc.get(seasonKeys[world_state.season()]).c_str(),
                 loc.get("hud.time").c_str(), world_state.time_of_day());
@@ -147,9 +151,9 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
     auto *cs = app.client().player_stats();
     ImGui::Separator();
     assert(cs != nullptr);
-    ImGui::Text("%s: %d/%d | %s: %.0f | %s: %.0f | %s: %.0f", loc.get("hud.hp").c_str(), cs->hp, cs->max_hp,
-                loc.get("hud.food").c_str(), sv.food, loc.get("hud.water").c_str(), sv.water,
-                loc.get("hud.energy").c_str(), sv.energy);
+    ImGui::Text("%s: %d/%d | %s: %.0f | %s: %.0f | %s: %.0f", loc.get("hud.hp").c_str(), cs->hp,
+                cs->max_hp, loc.get("hud.food").c_str(), sv.food, loc.get("hud.water").c_str(),
+                sv.water, loc.get("hud.energy").c_str(), sv.energy);
 
     // Soldier info (only player's own team)
     auto my_team = app.client().player_team();
@@ -176,9 +180,11 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
         auto sel = cli2.selected_roles();
         int n = static_cast<int>(formation_registry().size());
         auto &fm_reg = formation_registry();
-        ImGui::Text("Soldiers: %d | [G] %dF/%dG/%dP", soldier_count, follow_count, guard_count, patrol_count);
-        ImGui::Text("[1] Melee:%d %s [2] Ranged:%d %s | [F4] Formation: %s", melee_count, (sel & 1) ? "*" : " ",
-                    ranged_count, (sel & 2) ? "*" : " ", fm_reg[cli2.formation_idx() % n].first);
+        ImGui::Text("Soldiers: %d | [G] %dF/%dG/%dP", soldier_count, follow_count, guard_count,
+                    patrol_count);
+        ImGui::Text("[1] Melee:%d %s [2] Ranged:%d %s | [F4] Formation: %s", melee_count,
+                    (sel & 1) ? "*" : " ", ranged_count, (sel & 2) ? "*" : " ",
+                    fm_reg[cli2.formation_idx() % n].first);
     }
     else {
         ImGui::TextDisabled("[F2] Melee [F3] Ranged — recruit soldiers");
@@ -187,7 +193,8 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
 
     // Language switcher (top-right, out of HUD way)
     ImGui::SetNextWindowPos(ImVec2(600, 10), ImGuiCond_Always);
-    ImGui::Begin("Lang", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Begin("Lang", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize);
     for (int i = 0; i < app.locale().language_count(); ++i) {
         if (i > 0)
             ImGui::SameLine();
@@ -203,8 +210,10 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
     if ((stat && !stat->alive) || surv.health <= 0.F) {
         ImGui::SetNextWindowPos(ImVec2(440, 300), ImGuiCond_Always);
         ImGui::Begin("DeathOverlay", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
-        ImGui::TextColored(ImVec4(1.f, 0.1f, 0.1f, 1.f), "%s", app.locale().get("resp.dead").c_str());
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                         ImGuiWindowFlags_NoInputs);
+        ImGui::TextColored(ImVec4(1.f, 0.1f, 0.1f, 1.f), "%s",
+                           app.locale().get("resp.dead").c_str());
         ImGui::TextDisabled("%s", app.locale().get("resp.dead_hint").c_str());
         ImGui::End();
     }
@@ -240,7 +249,8 @@ void UIManager::render_dialogue(App const &app)
         }
 
         if (line.speaker == DialogueLine::player) {
-            ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.f), "%s: %s", playerLabel.c_str(), text.c_str());
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.f), "%s: %s", playerLabel.c_str(),
+                               text.c_str());
         }
         else {
             char const *name = line.npc_name.empty() ? ds.npc_name.c_str() : line.npc_name.c_str();
@@ -437,7 +447,8 @@ void UIManager::render_hosting(App &app)
     auto const &loc = app.locale();
     ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s", loc.get("mp.hosting").c_str());
     ImGui::TextDisabled("%s", loc.get("mp.hosting_hint").c_str());
-    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(), app.client().remote_entities().size());
+    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
+                app.client().remote_entities().size());
     ImGui::Separator();
 
     if (ImGui::Button(loc.get("mp.stop_hosting").c_str())) {
@@ -525,7 +536,8 @@ void UIManager::render_client(App &app)
                        "%s Host: %s", // FIXME: i18n
                                       // support
                        loc.get("mp.connected").c_str(), app.client().session_remote_info().c_str());
-    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(), app.client().remote_entities().size());
+    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
+                app.client().remote_entities().size());
     ImGui::Separator();
     render_chat(app);
     if (ImGui::Button(loc.get("mp.disconnect").c_str())) {
@@ -550,9 +562,12 @@ void UIManager::render_client_list(App &app)
         // 表格方式显示
         if (ImGui::BeginTable("client_list", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
 
-            ImGui::TableSetupColumn(loc.get("mp.id").c_str(), ImGuiTableColumnFlags_WidthFixed, 60.0f);
-            ImGui::TableSetupColumn(loc.get("mp.address").c_str(), ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn(loc.get("mp.status").c_str(), ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableSetupColumn(loc.get("mp.id").c_str(), ImGuiTableColumnFlags_WidthFixed,
+                                    60.0f);
+            ImGui::TableSetupColumn(loc.get("mp.address").c_str(),
+                                    ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn(loc.get("mp.status").c_str(), ImGuiTableColumnFlags_WidthFixed,
+                                    80.0f);
             ImGui::TableSetupColumn("Kick", ImGuiTableColumnFlags_WidthFixed, 50.0f);
             ImGui::TableHeadersRow();
 
@@ -570,10 +585,12 @@ void UIManager::render_client_list(App &app)
                 // Status
                 ImGui::TableSetColumnIndex(2);
                 if (tg.get()->is_open()) {
-                    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s", loc.get("mp.connected").c_str());
+                    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s",
+                                       loc.get("mp.connected").c_str());
                 }
                 else {
-                    ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "%s", loc.get("mp.disconnected").c_str());
+                    ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "%s",
+                                       loc.get("mp.disconnected").c_str());
                 }
 
                 // Kick
@@ -602,7 +619,8 @@ void UIManager::render_chat(App &app)
         ImGui::SetScrollHereY(1.f);
     ImGui::EndChild();
     chat_buf_.resize(255);
-    ImGui::InputText("##chat", chat_buf_.data(), chat_buf_.size() + 1, ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::InputText("##chat", chat_buf_.data(), chat_buf_.size() + 1,
+                     ImGuiInputTextFlags_EnterReturnsTrue);
     chat_buf_.resize(std::strlen(chat_buf_.c_str()));
     if (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
         if (!chat_buf_.empty()) {

@@ -20,8 +20,7 @@ class SaveManager {
         int hp = 10;
         int max_hp = 10;
         bool alive = true;
-        std::unordered_map<std::string, std::string>
-            knowledge; // fact_id -> version
+        std::unordered_map<std::string, std::string> knowledge; // fact_id -> version
     };
 
     struct SaveData {
@@ -37,9 +36,8 @@ class SaveManager {
         std::vector<NPCData> npcs;
     };
 
-    static bool save(std::string const &path, WorldState const &ws,
-                     KnowledgeGraph const &kg, RelationshipTable const &rt,
-                     Vec2f player_pos, int player_hp, int player_max_hp,
-                     std::vector<NPCData> const &npcs);
+    static bool save(std::string const &path, WorldState const &ws, KnowledgeGraph const &kg,
+                     RelationshipTable const &rt, Vec2f player_pos, int player_hp,
+                     int player_max_hp, std::vector<NPCData> const &npcs);
     static bool load(std::string const &path, SaveData &out);
 };

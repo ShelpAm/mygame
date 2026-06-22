@@ -75,7 +75,8 @@ awaitable<void> Server::attach_transport(std::shared_ptr<Session> t)
                              msg.type, msg.payload.size(), t->remote_info());
                 if (!s->messages_.try_send(boost::system::error_code{}, t, msg)) {
                     Session::spawn([](Server *s, auto t, auto msg) -> awaitable<void> {
-                        co_await s->messages_.async_send(boost::system::error_code{}, t, std::move(msg));
+                        co_await s->messages_.async_send(boost::system::error_code{}, t,
+                                                         std::move(msg));
                     }(s, t, std::move(msg)));
                 }
             }
@@ -83,7 +84,8 @@ awaitable<void> Server::attach_transport(std::shared_ptr<Session> t)
         catch (boost::system::system_error const &e) {
             s->detach_transport(detach_token{}, t.get());
             if (e.code() == asio::error::operation_aborted || e.code() == asio::error::eof ||
-                e.code() == asio::error::connection_reset || e.code() == asio::experimental::error::channel_closed ||
+                e.code() == asio::error::connection_reset ||
+                e.code() == asio::experimental::error::channel_closed ||
                 e.code() == asio::experimental::error::channel_cancelled) {
                 spdlog::debug("Server: transport {} closed because {}", t->remote_info(), e.what());
                 co_return; // Normal exits
@@ -149,7 +151,8 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
         Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({NetPacket::return_pid, std::move(payload)});
         }(from, std::move(payload)));
-        spdlog::info("Server: new player joined (ID: {}, team: {})", eid, static_cast<std::uint8_t>(team));
+        spdlog::info("Server: new player joined (ID: {}, team: {})", eid,
+                     static_cast<std::uint8_t>(team));
         mark_needs_full_sync("new player joined");
     }
     else if (msg.type == NetPacket::entity_update) {
@@ -266,10 +269,10 @@ void Server::broadcast_sync()
 
         last_sent_entities_[s.get()] = result.entity_ids;
 
-        Session::spawn(
-            [](std::shared_ptr<Session> t, NetPacket::Type pkt_type, std::vector<uint8_t> payload) -> awaitable<void> {
-                co_await t->write({pkt_type, payload});
-            }(s, pkt_type, std::move(result.bytes)));
+        Session::spawn([](std::shared_ptr<Session> t, NetPacket::Type pkt_type,
+                          std::vector<uint8_t> payload) -> awaitable<void> {
+            co_await t->write({pkt_type, payload});
+        }(s, pkt_type, std::move(result.bytes)));
     }
 
     game_mode_->mark_frame_clean();
@@ -288,7 +291,7 @@ void Server::broadcast_to_all(NetPacket::Type type, std::vector<uint8_t> payload
 {
     for (auto &s : sessions_)
         Session::spawn([](std::shared_ptr<Session> t, NetPacket::Type type,
-                           std::vector<uint8_t> payload) -> awaitable<void> {
+                          std::vector<uint8_t> payload) -> awaitable<void> {
             co_await t->write({type, payload});
         }(s, type, payload));
 }
@@ -301,11 +304,10 @@ void Server::poll_messages(GameMode &gm)
         })) {
     }
 
-    while (player_detachments_.try_receive(
-        [this, &gm](boost::system::error_code, EntityId eid) {
-            gm.remove_player(eid);
-            broadcast_entity_removed(eid);
-        })) {
+    while (player_detachments_.try_receive([this, &gm](boost::system::error_code, EntityId eid) {
+        gm.remove_player(eid);
+        broadcast_entity_removed(eid);
+    })) {
     }
 }
 

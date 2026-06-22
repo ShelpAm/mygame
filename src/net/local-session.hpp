@@ -5,8 +5,7 @@
 #include <memory>
 #include <utility>
 
-class LocalSession : public Session,
-                     public std::enable_shared_from_this<LocalSession> {
+class LocalSession : public Session, public std::enable_shared_from_this<LocalSession> {
   public:
     LocalSession();
     ~LocalSession();

@@ -7,8 +7,8 @@
 #include <spdlog/spdlog.h>
 
 bool SaveManager::save(std::string const &path, WorldState const &ws, KnowledgeGraph const &kg,
-                       RelationshipTable const &rt, Vec2f player_pos, int player_hp, int player_max_hp,
-                       std::vector<NPCData> const &npcs)
+                       RelationshipTable const &rt, Vec2f player_pos, int player_hp,
+                       int player_max_hp, std::vector<NPCData> const &npcs)
 {
     boost::json::object root;
     root["day"] = ws.day();
@@ -103,10 +103,11 @@ bool SaveManager::load(std::string const &path, SaveData &out)
 
         if (root.contains("relationships"))
             for (auto const &r : root.at("relationships").as_array())
-                out.relations.push_back({std::string(r.as_object().at("npc_id").as_string()),
-                                         {{static_cast<int>(r.as_object().at("trust").as_int64()),
-                                           static_cast<int>(r.as_object().at("fear").as_int64()),
-                                           static_cast<int>(r.as_object().at("respect").as_int64())}}});
+                out.relations.push_back(
+                    {std::string(r.as_object().at("npc_id").as_string()),
+                     {{static_cast<int>(r.as_object().at("trust").as_int64()),
+                       static_cast<int>(r.as_object().at("fear").as_int64()),
+                       static_cast<int>(r.as_object().at("respect").as_int64())}}});
 
         if (root.contains("npcs"))
             for (auto const &n : root.at("npcs").as_array()) {

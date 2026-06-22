@@ -1,4 +1,5 @@
 #include "systems/combat-utils.hpp"
+#include "world/map-data.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -14,7 +15,8 @@ int calc_damage(int attack, int defense)
     return std::max(1, base + variance);
 }
 
-EntityId find_nearest_enemy(flecs::world &world, EntityId self, std::unordered_map<EntityId, int> const &extra_damage,
+EntityId find_nearest_enemy(flecs::world &world, EntityId self,
+                            std::unordered_map<EntityId, int> const &extra_damage,
                             float detection_range)
 {
     flecs::entity me = world.entity(self);
@@ -24,18 +26,19 @@ EntityId find_nearest_enemy(flecs::world &world, EntityId self, std::unordered_m
     EntityId nearest = 0;
     float nearestDist = detection_range > 0.F ? detection_range : std::numeric_limits<float>::max();
 
-    world.query<CombatStats, Transform>().each([&](flecs::entity e, CombatStats &cs, Transform &pos) {
-        if (e.id() == self || !cs.alive || !is_hostile(my_stats.team, cs.team))
-            return;
-        auto it = extra_damage.find(e.id());
-        if (it != extra_damage.end() && cs.hp - it->second <= 0)
-            return;
-        float d = (pos.world_pos - my_pos.world_pos).length();
-        if (d < nearestDist) {
-            nearestDist = d;
-            nearest = e.id();
-        }
-    });
+    world.query<CombatStats, Transform>().each(
+        [&](flecs::entity e, CombatStats &cs, Transform &pos) {
+            if (e.id() == self || !cs.alive || !is_hostile(my_stats.team, cs.team))
+                return;
+            auto it = extra_damage.find(e.id());
+            if (it != extra_damage.end() && cs.hp - it->second <= 0)
+                return;
+            float d = (pos.world_pos - my_pos.world_pos).length();
+            if (d < nearestDist) {
+                nearestDist = d;
+                nearest = e.id();
+            }
+        });
     return nearest;
 }
 
@@ -55,8 +58,9 @@ void decay_survival(SurvivalState &s, float dt)
     s.energy = std::clamp(s.energy, 0.F, 100.F);
 }
 
-void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transform &pos, Movement &mov, CombatStats &cs,
-                    NavigationSystem const *nav, float dt, std::function<void(EntityId)> const &mark_dirty)
+void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transform &pos,
+                    Movement &mov, CombatStats &cs, NavigationSystem const *nav, float dt,
+                    std::function<void(EntityId)> const &mark_dirty)
 {
     if (!cs.alive) {
         mov.velocity = {0, 0};
@@ -73,7 +77,8 @@ void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transfo
     bool is_in_combat = false;
 
     if (ai.stance == SoldierStance::offensive || ai.stance == SoldierStance::defensive) {
-        float search_range = (ai.stance == SoldierStance::offensive) ? ai.engage_range : cs.attack_range;
+        float search_range =
+            (ai.stance == SoldierStance::offensive) ? ai.engage_range : cs.attack_range;
         auto enemy = find_nearest_enemy(world, e.id(), {}, search_range);
 
         if (enemy != 0) {
@@ -101,9 +106,23 @@ void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transfo
     }
 
     // ==========================================
-    // Phase 2: navigation — how to avoid obstacles? (determine Waypoint)
+    // Phase 2: navigation — A* + path smoothing (determine Waypoint)
     // ==========================================
     Vec2f target_waypoint = goal_pos; // default: go straight to goal
+
+    Vec2i curr_tile = world_to_tile(pos.world_pos);
+    Vec2i goal_tile = world_to_tile(goal_pos);
+    if (curr_tile != goal_tile) {
+        auto path = nav->find_path(curr_tile, goal_tile);
+        // Path smoothing: walk from farthest to nearest, pick the first tile
+        // that has a clear line-of-sight from current position.
+        for (int i = static_cast<int>(path.size()) - 1; i >= 0; --i) {
+            if (nav->walkable_line(curr_tile, path[i])) {
+                target_waypoint = center_of_tile(path[i]);
+                break;
+            }
+        }
+    }
 
     // ==========================================
     // Phase 3: physics — step and turn (output Velocity)
@@ -125,12 +144,14 @@ void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transfo
                   "goal=({:.2f},{:.2f}) goal_reason={} formation_offset=({:.2f},{:.2f}) "
                   "waypoint=({:.2f},{:.2f}) velocity=({:.2f},{:.2f})",
                   e.id(), pos.world_pos.x, pos.world_pos.y, goal_pos.x, goal_pos.y,
-                  is_in_combat ? "combat" : "formation", ai.formation_offset.x, ai.formation_offset.y,
-                  target_waypoint.x, target_waypoint.y, mov.velocity.x, mov.velocity.y);
+                  is_in_combat ? "combat" : "formation", ai.formation_offset.x,
+                  ai.formation_offset.y, target_waypoint.x, target_waypoint.y, mov.velocity.x,
+                  mov.velocity.y);
 }
 
 void run_combat_batch(flecs::world &world, float dt, std::vector<CombatEvent> &out_events,
-                      std::vector<Projectile> &out_projectiles, std::function<void(EntityId)> const &mark_dirty)
+                      std::vector<Projectile> &out_projectiles,
+                      std::function<void(EntityId)> const &mark_dirty)
 {
     std::vector<flecs::entity> combatants;
     world.query<CombatStats, Transform>().each([&](flecs::entity e, CombatStats &cs, Transform &) {
@@ -156,7 +177,8 @@ void run_combat_batch(flecs::world &world, float dt, std::vector<CombatEvent> &o
             continue;
         }
 
-        EntityId targetId = find_nearest_enemy(world, attacker.id(), damage_dealt, atkStats->attack_range);
+        EntityId targetId =
+            find_nearest_enemy(world, attacker.id(), damage_dealt, atkStats->attack_range);
         if (targetId == 0)
             continue;
 
@@ -183,7 +205,8 @@ void run_combat_batch(flecs::world &world, float dt, std::vector<CombatEvent> &o
                 p.damage = dmg;
                 Vec2f d = defPos->world_pos - p.pos;
                 p.total_dist = std::sqrt(d.x * d.x + d.y * d.y);
-                p.direction = p.total_dist > 0.f ? Vec2f{d.x / p.total_dist, d.y / p.total_dist} : Vec2f{1.f, 0.f};
+                p.direction = p.total_dist > 0.f ? Vec2f{d.x / p.total_dist, d.y / p.total_dist}
+                                                 : Vec2f{1.f, 0.f};
                 // Accuracy: farther = less accurate
                 thread_local std::mt19937 hit_rng{std::random_device{}()};
                 float hit_chance = std::clamp(0.9f - p.total_dist * 0.002f, 0.35f, 0.95f);

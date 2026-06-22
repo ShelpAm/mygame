@@ -43,13 +43,15 @@ awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
         try {
             while (true) {
                 auto msg = co_await t->read();
-                spdlog::log((msg.type == NetPacket::state_delta ? spdlog::level::trace : spdlog::level::debug),
+                spdlog::log((msg.type == NetPacket::state_delta ? spdlog::level::trace
+                                                                : spdlog::level::debug),
                             "Client: received message {} with payload size {} "
                             "from transport {}",
                             msg.type, msg.payload.size(), t->remote_info());
                 if (!c->messages_.try_send(boost::system::error_code{}, t, msg))
                     Session::spawn([](Client *c, auto t, auto msg) -> awaitable<void> {
-                        co_await c->messages_.async_send(boost::system::error_code{}, t, std::move(msg));
+                        co_await c->messages_.async_send(boost::system::error_code{}, t,
+                                                         std::move(msg));
                     }(c, t, std::move(msg)));
             }
         }
@@ -205,7 +207,8 @@ void Client::handle_message(Session &from, TransportMessage msg)
         assert(msg.payload.size() >= 9);
         memcpy(&player_id_, msg.payload.data(), 8);
         player_team_ = static_cast<Team>(msg.payload[8]);
-        spdlog::info("Client: Returned player ID from server: {} team: {}", player_id_, player_team_);
+        spdlog::info("Client: Returned player ID from server: {} team: {}", player_id_,
+                     player_team_);
         return;
     }
     if (msg.type == NetPacket::chat) {
@@ -255,7 +258,8 @@ void Client::handle_message(Session &from, TransportMessage msg)
             memcpy(&pv.dst.y, msg.payload.data() + 12, 4);
             Vec2f d = pv.dst - pv.pos;
             pv.total_dist = std::sqrt(d.x * d.x + d.y * d.y);
-            pv.dir = pv.total_dist > 0.f ? Vec2f{d.x / pv.total_dist, d.y / pv.total_dist} : Vec2f{1.f, 0.f};
+            pv.dir = pv.total_dist > 0.f ? Vec2f{d.x / pv.total_dist, d.y / pv.total_dist}
+                                         : Vec2f{1.f, 0.f};
             projectile_visuals_.push_back(pv);
         }
         break;
@@ -291,15 +295,16 @@ void Client::handle_entity_update(NetPacket const &pkt)
 
 void Client::update(float dt)
 {
-    while (messages_.try_receive([this](boost::system::error_code, std::shared_ptr<Session> t, TransportMessage msg) {
-        handle_message(*t, std::move(msg));
-    })) {
+    while (messages_.try_receive(
+        [this](boost::system::error_code, std::shared_ptr<Session> t, TransportMessage msg) {
+            handle_message(*t, std::move(msg));
+        })) {
     }
 
     if (player_id_ != invalid_entity) {
         interpolate_entities(dt);
-        player_visibility_.set_visible_arc(world_to_tile(player_pos_), player_vision_range_, player_facing_,
-                                           player_vision_arc_);
+        player_visibility_.set_visible_arc(world_to_tile(player_pos_), player_vision_range_,
+                                           player_facing_, player_vision_arc_);
 
         // Manage snapshots based on tile visibility
         // auto const &visible = player_visibility_.visible;
@@ -398,7 +403,8 @@ static void set_visual_from_kind(RemoteEntity &re)
         re.texture_name = "player";
         break;
     case EntityKind::soldier:
-        re.color = re.team == Team::enemy ? SDL_FColor{0.8f, 0.3f, 0.1f, 1.f} : SDL_FColor{0.3f, 0.5f, 0.9f, 1.f};
+        re.color = re.team == Team::enemy ? SDL_FColor{0.8f, 0.3f, 0.1f, 1.f}
+                                          : SDL_FColor{0.3f, 0.5f, 0.9f, 1.f};
         re.scale = 0.8f;
         re.texture_name = re.team == Team::enemy ? "enemy_soldier" : "soldier";
         break;
@@ -627,7 +633,8 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
     }
 }
 
-void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int damage, bool killed)
+void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int damage,
+                                 bool killed)
 {
     EntityId target = (defender_id == 0) ? player_id_ : defender_id;
     if (target == invalid_entity) {
@@ -692,8 +699,9 @@ void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
     dialogue_.can_threaten = s.can_threaten;
     dialogue_.history.clear();
     for (auto &l : s.lines) {
-        dialogue_.history.push_back({l.speaker == 0 ? DialogueLine::player : DialogueLine::npc, l.use_raw ? "" : l.text,
-                                     l.use_raw ? l.text : "", l.use_raw, std::move(l.npc_name)});
+        dialogue_.history.push_back({l.speaker == 0 ? DialogueLine::player : DialogueLine::npc,
+                                     l.use_raw ? "" : l.text, l.use_raw ? l.text : "", l.use_raw,
+                                     std::move(l.npc_name)});
     }
     dialogue_.available_topics = std::move(s.topics);
     dialogue_.available_actions = std::move(s.actions);

@@ -21,21 +21,14 @@ class LocaleManager {
     int discover_languages(std::string const &locale_dir);
 
     void set_language(int lang_index);
-    int current_language_index() const
-    {
-        return current_;
-    }
+    int current_language_index() const { return current_; }
     std::string language_name() const;
 
     std::string const &get(std::string const &key) const;
     std::string fmt(std::string const &key, std::string const &arg0 = "",
-                    std::string const &arg1 = "",
-                    std::string const &arg2 = "") const;
+                    std::string const &arg1 = "", std::string const &arg2 = "") const;
 
-    int language_count() const
-    {
-        return static_cast<int>(language_names_.size());
-    }
+    int language_count() const { return static_cast<int>(language_names_.size()); }
     std::string const &language_name(int idx) const;
 
   private:

@@ -6,8 +6,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
-inline std::unordered_set<Vec2i>
-compute_visible_arc(Vec2i center, int radius, Vec2f facing, float arc_deg)
+inline std::unordered_set<Vec2i> compute_visible_arc(Vec2i center, int radius, Vec2f facing,
+                                                     float arc_deg)
 {
     std::unordered_set<Vec2i> result;
     double half = arc_deg * 0.5 * std::numbers::pi / 180.0;

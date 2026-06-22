@@ -135,7 +135,8 @@ BOOST_AUTO_TEST_CASE(dialogue_ask_known_topic)
     NPCState npc;
     npc.npc_id = "merchant";
     npc.personality = "friendly";
-    npc.knowledge["ugarit_sack"] = {"ugarit_sack", "I saw the ships coming at dusk. Dozens of them.", 80, true, ""};
+    npc.knowledge["ugarit_sack"] = {
+        "ugarit_sack", "I saw the ships coming at dusk. Dozens of them.", 80, true, ""};
 
     auto resp = de.generate_ask_response(npc, "ugarit_sack", "the Sack of Ugarit", 20);
     BOOST_TEST(!resp.text.empty());
@@ -165,7 +166,8 @@ BOOST_AUTO_TEST_CASE(dialogue_hostile_lies)
     npc.npc_id = "pirate";
     npc.personality = "hostile";
     npc.current_goal = NPCState::Goal::spread_misinfo;
-    npc.knowledge["secret"] = {"secret", "The real treasure is buried near the temple.", 90, true, ""};
+    npc.knowledge["secret"] = {"secret", "The real treasure is buried near the temple.", 90, true,
+                               ""};
 
     auto resp = de.generate_ask_response(npc, "secret", "the Secret", -40);
     BOOST_TEST(!resp.text.empty());
@@ -177,14 +179,16 @@ BOOST_AUTO_TEST_CASE(dialogue_hostile_lies)
 BOOST_AUTO_TEST_CASE(dialogue_heard_rumor)
 {
     DialogueEngine de;
-    addTestTemplate(de, "heard_rumor_guarded", "Maybe I heard something about [topic]...", "guarded");
+    addTestTemplate(de, "heard_rumor_guarded", "Maybe I heard something about [topic]...",
+                    "guarded");
     addTestTemplate(de, "heard_rumor", "[topic]: [detail]");
     addTestTemplate(de, "deny_knowledge", "Nothing about [topic].");
     NPCState npc;
     npc.npc_id = "guard";
     npc.personality = "guarded";
-    npc.knowledge["byblos_king"] = {"byblos_king", "A merchant from Sidon told me the King is preparing for war.", 40,
-                                    false, "merchant from Sidon"};
+    npc.knowledge["byblos_king"] = {"byblos_king",
+                                    "A merchant from Sidon told me the King is preparing for war.",
+                                    40, false, "merchant from Sidon"};
 
     auto resp = de.generate_ask_response(npc, "byblos_king", "the King of Byblos", 0);
     BOOST_TEST(!resp.text.empty());

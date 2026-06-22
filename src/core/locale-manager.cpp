@@ -94,11 +94,12 @@ std::string const &LocaleManager::get(std::string const &key) const
             return it0->second;
     }
 
-    throw std::runtime_error("LocaleManager: missing key '" + key + "' in language '" + language_name() + "'");
+    throw std::runtime_error("LocaleManager: missing key '" + key + "' in language '" +
+                             language_name() + "'");
 }
 
-std::string LocaleManager::fmt(std::string const &key, std::string const &arg0, std::string const &arg1,
-                               std::string const &arg2) const
+std::string LocaleManager::fmt(std::string const &key, std::string const &arg0,
+                               std::string const &arg1, std::string const &arg2) const
 {
     std::string text = get(key);
     if (text.empty())

@@ -13,7 +13,8 @@ static void init_knight_clips()
         return;
     knight_clips_init = true;
 
-    auto idle = AnimationClip{.name = "idle", .frame_duration = 0.12f, .loop = true, .faces_right = false};
+    auto idle =
+        AnimationClip{.name = "idle", .frame_duration = 0.12f, .loop = true, .faces_right = false};
     for (int i = 0; i < 8; ++i)
         idle.frame_names.push_back("knight_idle_" + std::to_string(i));
 
@@ -33,7 +34,8 @@ static void init_knight_clips()
     for (int i = 0; i < 8; ++i)
         die.frame_names.push_back("knight_die_" + std::to_string(i));
 
-    knight_clips = {std::move(idle), std::move(run), std::move(attack), std::move(hurt), std::move(die)};
+    knight_clips = {std::move(idle), std::move(run), std::move(attack), std::move(hurt),
+                    std::move(die)};
 }
 
 static std::vector<AnimationClip> empty_clips;
@@ -61,8 +63,8 @@ AnimationClip const *find_clip(std::vector<AnimationClip> const &clips, std::str
     return nullptr;
 }
 
-AnimationClip const *determine_clip(std::vector<AnimationClip> const &clips, AnimationState &state, Vec2f velocity,
-                                    bool alive, float dt)
+AnimationClip const *determine_clip(std::vector<AnimationClip> const &clips, AnimationState &state,
+                                    Vec2f velocity, bool alive, float dt)
 {
     // Tick down transient triggers
     state.hurt_timer = std::max(0.f, state.hurt_timer - dt);

@@ -29,10 +29,9 @@ int calc_damage(int attack, int defense);
 /// time-complexity: O(n)
 /// detection_range overrides attack_range as the max search radius (0 = use
 /// attack_range).
-EntityId
-find_nearest_enemy(flecs::world &world, EntityId self,
-                   std::unordered_map<EntityId, int> const &extra_damage = {},
-                   float detection_range = 0.F);
+EntityId find_nearest_enemy(flecs::world &world, EntityId self,
+                            std::unordered_map<EntityId, int> const &extra_damage = {},
+                            float detection_range = 0.F);
 
 // Shared survival decay logic — used by SurvivalDecay system + testable
 // standalone.
@@ -46,17 +45,14 @@ void decay_survival(SurvivalState &s, float dt);
 //   defensive — follow formation, attack enemies within attack_range
 //   offensive — hunt enemies within engage_range, fall back to formation
 /// Note that this function depends on the value of `ai.formation_offset`
-void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai,
-                    Transform &pos, Movement &mov, CombatStats &cs,
-                    NavigationSystem const *nav, float dt,
+void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transform &pos,
+                    Movement &mov, CombatStats &cs, NavigationSystem const *nav, float dt,
                     std::function<void(EntityId)> const &mark_dirty);
 
 // Shared combat batch — used by CombatResolution system + testable standalone.
-void run_combat_batch(flecs::world &world, float dt,
-                      std::vector<CombatEvent> &out_events,
+void run_combat_batch(flecs::world &world, float dt, std::vector<CombatEvent> &out_events,
                       std::vector<Projectile> &out_projectiles,
                       std::function<void(EntityId)> const &mark_dirty);
 
-void update_projectiles(flecs::world &world,
-                        std::vector<Projectile> &projectiles, float dt,
+void update_projectiles(flecs::world &world, std::vector<Projectile> &projectiles, float dt,
                         std::vector<CombatEvent> &out_events);
