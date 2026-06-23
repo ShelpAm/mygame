@@ -230,6 +230,17 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
         hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200},
                         loc.get("hud.recruit_hint"));
     }
+
+    // Network stats (bottom of HUD block)
+    auto rtt = app.client().rtt_ms();
+    auto age = app.client().last_sync_age();
+    auto color = SDL_Color{100, 255, 100, 200};
+    if (age > 100)  color = SDL_Color{255, 255, 100, 200};
+    if (age > 300)  color = SDL_Color{255, 200, 50, 200};
+    if (age > 1000) color = SDL_Color{255, 80, 80, 200};
+    y += line_h;
+    hud_font_->draw({x, y}, color,
+                    std::format("RTT: {}ms  (last sync: {}ms ago)", rtt, age));
 }
 
 void UIManager::render_dialogue(App const &app)
