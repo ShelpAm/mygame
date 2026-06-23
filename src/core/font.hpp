@@ -51,6 +51,8 @@ class Font {
             TTF_DestroyText(text_);
     }
 
+    void patch_fallback(Font const &f) { TTF_AddFallbackFont(font_, f.font_); }
+
     void draw(Vec2f pos, SDL_Color c, std::string_view str)
     {
         TTF_SetTextColor(text_, c.r, c.g, c.b, c.a);

@@ -17,14 +17,18 @@ struct CombatEvent;
 
 class RenderSystem {
   public:
-    RenderSystem(SDL_Renderer *renderer, ResourceManager *resources, CameraSystem *camera,
-                 Font *font);
+    RenderSystem(SDL_Window *window, SDL_Renderer *renderer, ResourceManager *resources,
+                 CameraSystem *camera, Font *font);
 
     void render(Client const &client, NavigationSystem const &nav);
     void toggle_debug_mode() { debug_mode_ = !debug_mode_; }
 
+    SDL_Window *window() const { return window_; }
+    SDL_Renderer *renderer() const { return renderer_; }
+
   private:
     static constexpr auto max_alpha = 255;
+    SDL_Window *window_;
     SDL_Renderer *renderer_;
     ResourceManager *resources_;
     CameraSystem *camera_;

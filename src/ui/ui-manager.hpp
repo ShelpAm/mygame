@@ -5,13 +5,18 @@
 #include <string>
 #include <vector>
 
-class WorldState;
 class App;
+class WorldState;
 class LocaleManager;
+class RenderSystem;
 
 class UIManager {
   public:
-    UIManager(SDL_Window *window, SDL_Renderer *renderer, Font *hud_font);
+    UIManager(UIManager const &) = default;
+    UIManager(UIManager &&) = delete;
+    UIManager &operator=(UIManager const &) = default;
+    UIManager &operator=(UIManager &&) = delete;
+    UIManager(RenderSystem *rs, Font *hud_font);
     ~UIManager();
 
     /// @return If recognized and handled
@@ -19,16 +24,12 @@ class UIManager {
     void update(float dt);
     void render(WorldState *world_state, App &app);
 
-    bool show_help() const { return show_help_; }
     void toggle_help() { show_help_ = !show_help_; }
-    bool show_load_menu() const { return show_load_menu_; }
     void toggle_load_menu() { show_load_menu_ = !show_load_menu_; }
-    bool show_multiplayer() const { return show_multiplayer_; }
     void toggle_multiplayer() { show_multiplayer_ = !show_multiplayer_; }
 
   private:
-    [[maybe_unused]] SDL_Window *window_;
-    SDL_Renderer *renderer_;
+    RenderSystem *render_system_;
     Font *hud_font_;
     bool show_journal_ = false;
     bool show_inventory_ = false;
@@ -37,7 +38,7 @@ class UIManager {
     bool show_help_ = false;
     bool show_multiplayer_ = false;
 
-    void render_hud(WorldState const &world_state, App &app);
+    void render_hud_window(WorldState const &world_state, App &app);
     void render_hud_text(WorldState const &world_state, App &app);
     void render_journal(App const &app);
     void render_inventory(App const &app);

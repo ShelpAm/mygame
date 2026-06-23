@@ -5,6 +5,7 @@
 #include "entities/components/soldier-ai.hpp"
 #include "net/session.hpp"
 #include "systems/formation.hpp"
+#include "systems/render-system.hpp"
 #include "world/world-state.hpp"
 #include <algorithm>
 #include <cstring>
@@ -15,8 +16,7 @@
 #include <imgui_impl_sdlrenderer3.h>
 #include <spdlog/spdlog.h>
 
-UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer, Font *hud_font)
-    : window_(window), renderer_(renderer), hud_font_(hud_font)
+UIManager::UIManager(RenderSystem *rs, Font *hud_font) : render_system_(rs), hud_font_(hud_font)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -24,6 +24,8 @@ UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer, Font *hud_font)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
 
+    auto *window = render_system_->window();
+    auto *renderer = render_system_->renderer();
     ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
     ImGui_ImplSDLRenderer3_Init(renderer);
     SDL_StartTextInput(window);
@@ -36,35 +38,13 @@ UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer, Font *hud_font)
     // Try Noto Sans Mono CJK as a regular font (includes CJK)
     ImFontConfig cfg;
     cfg.MergeMode = true;
-    static ImWchar const cjkRanges[] = {
+    static std::vector<ImWchar> const cjkRanges = {
         0x0020, 0x00FF, 0x2000, 0x206F, 0x3000, 0x30FF, 0x31F0,
         0x31FF, 0xFF00, 0xFFEF, 0x4E00, 0x9FFF, 0,
     };
     // Try CJK fonts across platforms
-    static char const *cjkPaths[] = {
-        "assets/fonts/Monaspace Neon Var.ttf", // English
-#ifdef _WIN32
-        "C:\\Windows\\Fonts\\msyh.ttc",
-        "C:\\Windows\\Fonts\\simsun.ttc",
-        "C:\\Windows\\Fonts\\msgothic.ttc",
-#elif __APPLE__
-        "/System/Library/Fonts/PingFang.ttc",
-        "/System/Library/Fonts/STHeiti Light.ttc",
-#else
-        "/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf",
-        "/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc",
-        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-#endif
-    };
-    for (char const *path : cjkPaths) {
-        if (std::filesystem::exists(path)) {
-            spdlog::info("Loading font in {}", path);
-            auto *f = fonts.AddFontFromFileTTF(path, 16.f, &cfg, cjkRanges);
-            assert(f != nullptr);
-            break;
-        }
-    }
+    fonts.AddFontFromFileTTF("./assets/fonts/SourceHanSansCN-Regular.otf", 16, &cfg,
+                             cjkRanges.data());
     fonts.Build();
 
     load_server_list();
@@ -93,7 +73,7 @@ void UIManager::render(WorldState *world_state, App &app)
     ImGui::NewFrame();
 
     if (world_state)
-        render_hud(*world_state, app);
+        render_hud_window(*world_state, app);
 
     // clang-format off
     if (app.dialogue().active)        render_dialogue(app);
@@ -119,16 +99,16 @@ void UIManager::render(WorldState *world_state, App &app)
     // clang-format on
 
     ImGui::Render();
-    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
+    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), render_system_->renderer());
 
     // HUD text rendered with game font on top of everything
-    if (world_state)
+    if (app.client().player_id() != invalid_entity && world_state)
         render_hud_text(*world_state, app);
 }
 
-void UIManager::render_hud(WorldState const &world_state, App &app)
+void UIManager::render_hud_window([[maybe_unused]] WorldState const &world_state, App &app)
 {
-    auto const &loc = app.locale();
+    // auto const &loc = app.locale();
 
     // Language switcher (top-right, needs buttons, stays in ImGui)
     ImGui::SetNextWindowPos(ImVec2(600, 10), ImGuiCond_Always);
@@ -167,13 +147,13 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     // Line 1: Title | Language | FPS
     hud_font_->draw({x, y}, SDL_Color{204, 178, 102, 255},
                     std::format("{} | {}: {} | {}: {:.0f}", loc.get("game.title"),
-                                loc.get("menu.language"), loc.language_name(),
-                                loc.get("hud.fps"), app.stopwatch().fps()));
+                                loc.get("menu.language"), loc.language_name(), loc.get("hud.fps"),
+                                app.stopwatch().fps()));
 
     // Line 2: Day | Season | Time
     y += line_h;
-    static constexpr char const *seasonKeys[] = {"season.spring", "season.summer",
-                                                  "season.autumn", "season.winter"};
+    static constexpr char const *seasonKeys[] = {"season.spring", "season.summer", "season.autumn",
+                                                 "season.winter"};
     hud_font_->draw({x, y}, SDL_Color{200, 200, 200, 230},
                     std::format("{}: {} | {}: {} | {}: {:.0f}", loc.get("hud.day"),
                                 world_state.day(), loc.get("hud.season"),
@@ -182,8 +162,7 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
 
     // Line 3: Keys hint
     y += line_h;
-    hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200},
-                    std::string(loc.get("hud.keys")));
+    hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200}, std::string(loc.get("hud.keys")));
 
     // Line 4: HP | Food | Water | Energy
     y += line_h;
@@ -192,9 +171,8 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     assert(cs != nullptr);
     hud_font_->draw({x, y}, SDL_Color{200, 200, 200, 230},
                     std::format("{}: {}/{} | {}: {:.0f} | {}: {:.0f} | {}: {:.0f}",
-                                loc.get("hud.hp"), cs->hp, cs->max_hp, loc.get("hud.food"),
-                                sv.food, loc.get("hud.water"), sv.water, loc.get("hud.energy"),
-                                sv.energy));
+                                loc.get("hud.hp"), cs->hp, cs->max_hp, loc.get("hud.food"), sv.food,
+                                loc.get("hud.water"), sv.water, loc.get("hud.energy"), sv.energy));
 
     // Soldier info (lines 5+)
     auto my_team = app.client().player_team();
@@ -203,11 +181,16 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     for (auto &re : app.client().remote_entities()) {
         if (re.kind == EntityKind::soldier && re.alive && re.team == my_team) {
             ++soldier_count;
-            if (re.soldier_stance == SoldierStance::defensive) ++follow_count;
-            else if (re.soldier_stance == SoldierStance::offensive) ++guard_count;
-            else if (re.soldier_stance == SoldierStance::passive) ++patrol_count;
-            if (re.soldier_role == SoldierRole::melee) ++melee_count;
-            else if (re.soldier_role == SoldierRole::ranged) ++ranged_count;
+            if (re.soldier_stance == SoldierStance::defensive)
+                ++follow_count;
+            else if (re.soldier_stance == SoldierStance::offensive)
+                ++guard_count;
+            else if (re.soldier_stance == SoldierStance::passive)
+                ++patrol_count;
+            if (re.soldier_role == SoldierRole::melee)
+                ++melee_count;
+            else if (re.soldier_role == SoldierRole::ranged)
+                ++ranged_count;
         }
     }
     if (soldier_count > 0) {
@@ -227,20 +210,21 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     }
     else {
         y += line_h;
-        hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200},
-                        loc.get("hud.recruit_hint"));
+        hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200}, loc.get("hud.recruit_hint"));
     }
 
     // Network stats (bottom of HUD block)
     auto rtt = app.client().rtt_ms();
     auto age = app.client().last_sync_age();
     auto color = SDL_Color{100, 255, 100, 200};
-    if (age > 100)  color = SDL_Color{255, 255, 100, 200};
-    if (age > 300)  color = SDL_Color{255, 200, 50, 200};
-    if (age > 1000) color = SDL_Color{255, 80, 80, 200};
+    if (age > 100)
+        color = SDL_Color{255, 255, 100, 200};
+    if (age > 300)
+        color = SDL_Color{255, 200, 50, 200};
+    if (age > 1000)
+        color = SDL_Color{255, 80, 80, 200};
     y += line_h;
-    hud_font_->draw({x, y}, color,
-                    std::format("RTT: {}ms  (last sync: {}ms ago)", rtt, age));
+    hud_font_->draw({x, y}, color, std::format("RTT: {}ms  (last sync: {}ms ago)", rtt, age));
 }
 
 void UIManager::render_dialogue(App const &app)
@@ -551,9 +535,8 @@ void UIManager::render_local(App &app)
 void UIManager::render_client(App &app)
 {
     auto const &loc = app.locale();
-    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f),
-                       "%s Host: %s",
-                       loc.get("mp.connected").c_str(), app.client().session_remote_info().c_str());
+    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s Host: %s", loc.get("mp.connected").c_str(),
+                       app.client().session_remote_info().c_str());
     ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
                 app.client().remote_entities().size());
     ImGui::Separator();
@@ -586,7 +569,8 @@ void UIManager::render_client_list(App &app)
                                     ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn(loc.get("mp.status").c_str(), ImGuiTableColumnFlags_WidthFixed,
                                     80.0f);
-            ImGui::TableSetupColumn(loc.get("mp.kick").c_str(), ImGuiTableColumnFlags_WidthFixed, 50.0f);
+            ImGui::TableSetupColumn(loc.get("mp.kick").c_str(), ImGuiTableColumnFlags_WidthFixed,
+                                    50.0f);
             ImGui::TableHeadersRow();
 
             int idx = 1;

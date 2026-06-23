@@ -678,7 +678,7 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
     if (action.starts_with("tell:")) {
         std::string tid = action.substr(5);
         auto &dn = topic_registry_.display_name(tid);
-        addHistory(DialogueLine::player, "dialogue.tell_prefix");
+        addHistory(DialogueLine::player, "", dn.empty() ? tid : "Let me tell you about " + dn, true);
         bool known = npc->knowledge.contains(tid);
         addHistory(DialogueLine::npc, known ? "resp.already_known" : "resp.learned");
         if (!known) {
@@ -694,7 +694,7 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
     auto &dn = topic_registry_.display_name(action);
     auto resp =
         dialogue_engine_.generate_ask_response(*npc, action, dn.empty() ? action : dn, trust);
-    addHistory(DialogueLine::player, "dialogue.ask_prefix");
+    addHistory(DialogueLine::player, "", dn.empty() ? action : "What about " + dn + "?", true);
     addHistory(DialogueLine::npc, "", resp.text, true);
     quests_.report_talk(npc->npc_id);
     if (resp.trust_delta != 0) {

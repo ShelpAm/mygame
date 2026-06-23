@@ -78,8 +78,10 @@ void App::init()
     resources_->load_texture(renderer_, "entity_dead", "./assets/textures/entity-dead.png");
 
     auto *default_font = fonts_->load_font("./assets/fonts/Monaspace Neon Var.ttf", 12.F);
-    render_system_ =
-        std::make_unique<RenderSystem>(renderer_, resources_.get(), &camera_system_, default_font);
+    auto *cjk_font = fonts_->load_font("./assets/fonts/SourceHanSansCN-Regular.otf", 12.F);
+    default_font->patch_fallback(*cjk_font);
+    render_system_ = std::make_unique<RenderSystem>(window_, renderer_, resources_.get(),
+                                                    &camera_system_, default_font);
 
     navigation_system_ = NavigationSystem{};
     std::vector<Vec2i> const no = {
@@ -99,7 +101,7 @@ void App::init()
     for (auto e : no)
         navigation_system_.set_walkable(e, false);
 
-    ui_manager_ = std::make_unique<UIManager>(window_, renderer_, default_font);
+    ui_manager_ = std::make_unique<UIManager>(render_system_.get(), default_font);
 
     locale_.discover_languages("assets/locale");
     locale_.set_language(0);

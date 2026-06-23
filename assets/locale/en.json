@@ -41,8 +41,6 @@
     "dialogue.gift": "Give Gift",
     "dialogue.threaten": "Threaten",
     "dialogue.attack": "[ATTACK!]",
-    "dialogue.tell_prefix": "Let me tell you about {0}",
-    "dialogue.ask_prefix": "What about {0}?",
 
     "resp.attack_you": "[Attack!]",
     "resp.attack_hostile": "So be it! You will regret this!",

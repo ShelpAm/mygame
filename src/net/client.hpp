@@ -179,9 +179,9 @@ class Client {
     bool player_alive_ = true;
 
     // Network diagnostics
-    mutable std::chrono::steady_clock::time_point last_sync_recv_tick_{};
-    mutable std::uint64_t estimated_rtt_ms_ = 0;
-    mutable std::chrono::steady_clock::time_point last_active_send_tick_{};
+    std::chrono::steady_clock::time_point last_sync_recv_tick_{};
+    std::uint64_t estimated_rtt_ms_ = 0;
+    std::chrono::steady_clock::time_point last_active_send_tick_{};
 
     // std::queue<TransportGuard> transport_guards_; // Because there could be
     // some connections keeping unclosed, we set a queue here to wait them.

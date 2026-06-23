@@ -12,9 +12,9 @@
 #include <string>
 #include <unordered_map>
 
-RenderSystem::RenderSystem(SDL_Renderer *renderer, ResourceManager *resources, CameraSystem *camera,
-                           Font *font)
-    : renderer_(renderer), resources_(resources), camera_(camera), font_(font)
+RenderSystem::RenderSystem(SDL_Window *window, SDL_Renderer *renderer, ResourceManager *resources,
+                           CameraSystem *camera, Font *font)
+    : window_(window), renderer_(renderer), resources_(resources), camera_(camera), font_(font)
 {
 }
 
@@ -140,8 +140,6 @@ void RenderSystem::render_entities(Client const &client, Vec2f pos, EntityId eid
         if (tv == TileVisibility::Unexplored)
             continue;
 
-        float d = (re.position - pos).length();
-
         char const *tex{};
         if (re.alive) {
             if (re.anim_state.clip)
@@ -152,19 +150,16 @@ void RenderSystem::render_entities(Client const &client, Vec2f pos, EntityId eid
         else {
             tex = "entity_dead";
         }
-        draw_sprite(re.position, 48.F * re.scale, tex, alpha_for(d), re.anim_state.flip);
+        float dist = (re.position - pos).length();
+        draw_sprite(re.position, 48.F * re.scale, tex, alpha_for(dist), re.anim_state.flip);
 
         // '!' mark (only when clearly visible)
-        if (d == 0 && re.id != eid && re.interactable) {
-
+        if (re.id != eid && re.interactable && dist < 48) { // character width
             Vec2f screen = camera_->world_to_screen(re.position);
             float size = 24.F * re.scale;
-            float dist2 = std::hypot(re.position.x - pos.x, re.position.y - pos.y);
-            if (dist2 < tile_size) {
-                SDL_FRect hint{.x = screen.x - 4, .y = screen.y - size - 12, .w = 4, .h = 14};
-                SDL_SetRenderDrawColor(renderer_, 255, 255, 100, 220);
-                SDL_RenderFillRect(renderer_, &hint);
-            }
+            SDL_FRect hint{.x = screen.x - 4, .y = screen.y - size - 12, .w = 4, .h = 14};
+            SDL_SetRenderDrawColor(renderer_, 255, 255, 100, 220);
+            SDL_RenderFillRect(renderer_, &hint);
         }
 
         if (debug_mode_) {

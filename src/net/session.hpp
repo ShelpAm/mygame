@@ -58,17 +58,17 @@ class Session {
         co_spawn(io(), std::move(awaitable), [](std::exception_ptr ep) {
             if (ep)
                 try {
-                    std::rethrow_exception(ep);
+                    std::rethrow_exception(std::move(ep));
                 }
                 catch (std::exception const &e) {
-                    spdlog::error("ITransport: unhandled exception in spawned "
+                    spdlog::error("Session: unhandled exception in spawned "
                                   "coroutine: {}",
                                   e.what());
                     // spdlog::error("ITransport: stacktrace: {}",
                     //               std::stacktrace::current());
                 }
                 catch (...) {
-                    spdlog::error("ITransport: unhandled unknown exception in "
+                    spdlog::error("Session: unhandled unknown exception in "
                                   "spawned coroutine");
                     // spdlog::error("ITransport: stacktrace: {}",
                     //               std::stacktrace::current());
@@ -76,7 +76,12 @@ class Session {
         });
     }
 
-  public:
+    Session() = default;
+    Session(Session const &) = delete;
+    Session(Session &&) = delete;
+    Session &operator=(Session const &) = delete;
+    Session &operator=(Session &&) = delete;
+
     virtual ~Session() = default;
 
     // Push a message to the peer. Non-blocking.

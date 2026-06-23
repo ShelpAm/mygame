@@ -201,7 +201,7 @@ void Client::send_dialogue_action(std::string const &action)
     }(session_, std::vector<uint8_t>(action.begin(), action.end())));
 }
 
-void Client::handle_message(Session &from, TransportMessage msg)
+void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg)
 {
     // Quick handlers: tiny writes that don't touch remote_entities_
     if (msg.type == NetPacket::return_pid) {
@@ -232,7 +232,7 @@ void Client::handle_message(Session &from, TransportMessage msg)
         break;
     case NetPacket::entity_removed:
         if (msg.payload.size() >= 8) {
-            EntityId eid;
+            EntityId eid{};
             memcpy(&eid, msg.payload.data(), 8);
             std::erase_if(remote_entities_, [eid](RemoteEntity const &re) { return re.id == eid; });
         }
@@ -678,9 +678,11 @@ void Client::record_sync_received()
     auto now = steady_clock::now();
     last_sync_recv_tick_ = now;
     if (last_active_send_tick_.time_since_epoch().count() > 0) {
-        auto rtt = static_cast<uint32_t>(duration_cast<milliseconds>(now - last_active_send_tick_).count());
+        auto rtt = static_cast<uint32_t>(
+            duration_cast<milliseconds>(now - last_active_send_tick_).count());
         // Exponentially smoothed average (alpha ≈ 0.3)
-        estimated_rtt_ms_ = estimated_rtt_ms_ == 0 ? rtt : estimated_rtt_ms_ * 7 / 10 + rtt * 3 / 10;
+        estimated_rtt_ms_ =
+            estimated_rtt_ms_ == 0 ? rtt : estimated_rtt_ms_ * 7 / 10 + rtt * 3 / 10;
         last_active_send_tick_ = {};
     }
 }

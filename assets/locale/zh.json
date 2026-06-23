@@ -41,8 +41,6 @@
     "dialogue.gift": "送礼",
     "dialogue.threaten": "威胁",
     "dialogue.attack": "[攻击！]",
-    "dialogue.tell_prefix": "让我告诉你关于{0}的事",
-    "dialogue.ask_prefix": "{0}是怎么回事？",
 
     "resp.attack_you": "[攻击！]",
     "resp.attack_hostile": "来吧！你会后悔的！",
