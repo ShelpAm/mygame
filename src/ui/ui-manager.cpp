@@ -3,7 +3,7 @@
 #include "core/locale-manager.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/soldier-ai.hpp"
-#include "net/server.hpp"
+#include "net/session.hpp"
 #include "systems/formation.hpp"
 #include "world/world-state.hpp"
 #include <algorithm>
@@ -374,25 +374,25 @@ void UIManager::render_help_panel(App const &app)
 
 void UIManager::render_load_menu(App const &app)
 {
+    auto const &loc = app.locale();
     ImGui::SetNextWindowSize(ImVec2(250, 300), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImVec2(500, 200), ImGuiCond_Appearing);
     ImGui::Begin("Load Game", nullptr, ImGuiWindowFlags_NoResize);
 
     auto slots = const_cast<App &>(app).available_save_slots();
     if (slots.empty()) {
-        ImGui::TextDisabled("No save files found.");
+        ImGui::TextDisabled("%s", loc.get("resp.no_save").c_str());
     }
     else {
         for (int slot : slots) {
-            std::string label = "Slot " + std::to_string(slot);
-            if (ImGui::Selectable(label.c_str())) {
+            if (ImGui::Selectable(std::to_string(slot).c_str())) {
                 const_cast<App &>(app).load_from_slot(slot);
             }
         }
     }
 
     ImGui::Separator();
-    if (ImGui::Button("Close")) {
+    if (ImGui::Button(loc.get("mp.close").c_str())) {
         show_load_menu_ = false;
     }
     ImGui::End();
@@ -466,15 +466,10 @@ void UIManager::render_hosting(App &app)
 
     if (ImGui::Button(loc.get("mp.stop_hosting").c_str())) {
         app.stop_listen();
-        // app.start_local_session();
         app.set_session_mode(SessionMode::local);
     }
 
     render_client_list(app);
-
-    render_chat(app);
-    // if (ImGui::Button(loc.get("mp.disconnect").c_str()))
-    //     app.stop_session();
 }
 
 void UIManager::render_local(App &app)
@@ -483,7 +478,7 @@ void UIManager::render_local(App &app)
 
     ImGui::Text("%s", loc.get("mp.host").c_str());
     ImGui::SetNextItemWidth(80);
-    ImGui::InputInt("Port", &host_port_);
+    ImGui::InputInt(loc.get("mp.port").c_str(), &host_port_);
     host_port_ = std::clamp(host_port_, 1, 65535);
     if (ImGui::Button(loc.get("mp.host_btn").c_str())) {
         app.start_host_session(host_port_);
@@ -546,8 +541,7 @@ void UIManager::render_client(App &app)
 {
     auto const &loc = app.locale();
     ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f),
-                       "%s Host: %s", // FIXME: i18n
-                                      // support
+                       "%s Host: %s",
                        loc.get("mp.connected").c_str(), app.client().session_remote_info().c_str());
     ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
                 app.client().remote_entities().size());
@@ -581,19 +575,20 @@ void UIManager::render_client_list(App &app)
                                     ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn(loc.get("mp.status").c_str(), ImGuiTableColumnFlags_WidthFixed,
                                     80.0f);
-            ImGui::TableSetupColumn("Kick", ImGuiTableColumnFlags_WidthFixed, 50.0f);
+            ImGui::TableSetupColumn(loc.get("mp.kick").c_str(), ImGuiTableColumnFlags_WidthFixed, 50.0f);
             ImGui::TableHeadersRow();
 
+            int idx = 1;
             for (auto const &tg : sessions) {
                 ImGui::TableNextRow();
 
                 // ID
                 ImGui::TableSetColumnIndex(0);
-                ImGui::Text("%s", typeid(tg.get()).name());
+                ImGui::Text("%d", idx++);
 
                 // Address
                 ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%p", tg.get());
+                ImGui::Text("%s", tg->remote_info().c_str());
 
                 // Status
                 ImGui::TableSetColumnIndex(2);

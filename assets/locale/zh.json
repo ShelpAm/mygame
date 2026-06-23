@@ -123,5 +123,7 @@
     "mp.address": "地址",
     "mp.status": "状态",
     "mp.disconnected": "已断开",
-    "ui.font_size": "16"
+    "mp.kick": "踢出",
+    "mp.port": "端口",
+    "mp.no_saves": "没有存档文件。"
 }

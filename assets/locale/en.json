@@ -123,5 +123,8 @@
     "mp.id": "ID",
     "mp.address": "Address",
     "mp.status": "Status",
-    "mp.disconnected": "Disconnected"
+    "mp.disconnected": "Disconnected",
+    "mp.kick": "Kick",
+    "mp.port": "Port",
+    "mp.no_saves": "No save files found."
 }
