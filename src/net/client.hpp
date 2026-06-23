@@ -98,7 +98,11 @@ class Client {
 
     Vec2f player_position() const;
     std::uint64_t rtt_ms() const { return estimated_rtt_ms_; }
-    std::uint64_t last_sync_age() const { return SDL_GetTicks() - last_sync_recv_tick_; }
+    std::uint64_t last_sync_age() const
+    {
+        using namespace std::chrono;
+        return duration_cast<milliseconds>(steady_clock::now() - last_sync_recv_tick_).count();
+    }
     bool is_player_dead();
     CombatStats const *player_stats();
 
@@ -175,9 +179,9 @@ class Client {
     bool player_alive_ = true;
 
     // Network diagnostics
-    mutable std::uint64_t last_sync_recv_tick_ = 0;
+    mutable std::chrono::steady_clock::time_point last_sync_recv_tick_{};
     mutable std::uint64_t estimated_rtt_ms_ = 0;
-    mutable std::uint64_t last_active_send_tick_ = 0;
+    mutable std::chrono::steady_clock::time_point last_active_send_tick_{};
 
     // std::queue<TransportGuard> transport_guards_; // Because there could be
     // some connections keeping unclosed, we set a queue here to wait them.

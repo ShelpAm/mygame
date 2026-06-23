@@ -250,8 +250,15 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
 void Server::broadcast_sync()
 {
     bool needs_full = check_needs_full_sync();
-    if (!needs_full && !game_mode_->has_dirty_entities())
+
+    // Force a keepalive sync at least every 500ms so clients can track
+    // connection health even when nothing is changing.
+    auto now = std::chrono::steady_clock::now();
+    bool force = now - last_sync_time_ >= std::chrono::milliseconds(500);
+
+    if (!needs_full && !game_mode_->has_dirty_entities() && !force)
         return;
+    last_sync_time_ = now;
 
     if (needs_full)
         spdlog::debug("Server: full sync reason: {}", needs_full_sync_.second);

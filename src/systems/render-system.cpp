@@ -339,14 +339,14 @@ void RenderSystem::render_network_stats(Client const &client)
     int32_t rtt = static_cast<int32_t>(client.rtt_ms());
     int32_t age = static_cast<int32_t>(client.last_sync_age());
 
-    // White when healthy, yellow/orange/red as lag increases
-    auto color = SDL_Color{255, 255, 255, 200};
+    // Green when healthy, yellow/orange/red as lag increases
+    auto color = SDL_Color{100, 255, 100, 230};
     if (age > 100)
-        color = SDL_Color{255, 255, 100, 200};
+        color = SDL_Color{255, 255, 100, 230};
     if (age > 300)
-        color = SDL_Color{255, 200, 50, 200};
+        color = SDL_Color{255, 200, 50, 230};
     if (age > 1000)
-        color = SDL_Color{255, 80, 80, 200};
+        color = SDL_Color{255, 80, 80, 230};
 
     font_->draw({10.F, 10.F}, color,
                 std::format("RTT: {}ms  (last sync: {}ms ago)", rtt, age));

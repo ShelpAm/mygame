@@ -2,6 +2,7 @@
 
 #include "net/network-session.hpp"
 #include "net/session.hpp"
+#include <chrono>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -58,6 +59,7 @@ class Server {
 
     std::unordered_map<EntityId, bool> sent_initial_sync_;
     std::pair<bool, std::string> needs_full_sync_{false, ""};
+    std::chrono::steady_clock::time_point last_sync_time_{};
     GameMode *game_mode_ = nullptr;
 
     deferred_concurrent_channel<void(boost::system::error_code, std::shared_ptr<Session>,
