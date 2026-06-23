@@ -66,11 +66,12 @@ BOOST_AUTO_TEST_CASE(make_chat_preserves_text)
 
 BOOST_AUTO_TEST_CASE(make_and_parse_player_input)
 {
-    auto payload = make_player_input(42, 1.5f, -3.0f);
+    auto payload = make_player_input(42, 1.5f, -3.0f, 1234u);
     auto in = parse_player_input(payload);
     BOOST_TEST(in.pid == 42);
     BOOST_TEST(in.mx == 1.5f);
     BOOST_TEST(in.my == -3.0f);
+    BOOST_TEST(in.client_ms == 1234u);
 }
 
 BOOST_AUTO_TEST_CASE(make_and_parse_entity_removed)

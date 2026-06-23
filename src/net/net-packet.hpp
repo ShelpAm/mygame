@@ -255,15 +255,17 @@ inline CombatEventData parse_combat_event(std::vector<uint8_t> const &d)
 struct PlayerInputData {
     EntityId pid;
     float mx, my;
+    uint32_t client_ms;
 };
 
-// Layout: pid(8)+mx(4)+my(4) = 16 bytes
+// Layout: pid(8)+mx(4)+my(4)+client_ms(4) = 20 bytes
 inline PlayerInputData parse_player_input(std::vector<uint8_t> const &d)
 {
     PlayerInputData r;
     memcpy(&r.pid, d.data(), 8);
     memcpy(&r.mx, d.data() + 8, 4);
     memcpy(&r.my, d.data() + 12, 4);
+    memcpy(&r.client_ms, d.data() + 16, 4);
     return r;
 }
 
@@ -334,12 +336,13 @@ inline std::vector<uint8_t> make_entity_removed(EntityId eid)
     return p;
 }
 
-inline std::vector<uint8_t> make_player_input(EntityId pid, float mx, float my)
+inline std::vector<uint8_t> make_player_input(EntityId pid, float mx, float my, uint32_t client_ms)
 {
     std::vector<uint8_t> p;
     write_bytes(p, pid);
     write_float(p, mx);
     write_float(p, my);
+    write_bytes(p, client_ms);
     return p;
 }
 

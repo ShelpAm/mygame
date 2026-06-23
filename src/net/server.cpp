@@ -3,6 +3,7 @@
 #include "net/net-packet.hpp"
 #include <cassert>
 #include <cstring>
+#include <SDL3/SDL_timer.h>
 #include <spdlog/spdlog.h>
 
 Server::Server()
@@ -200,6 +201,10 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
     }
     else if (msg.type == NetPacket::player_input) {
         auto in = parse_player_input(msg.payload);
+        spdlog::debug("Server: player_input pid={} dir=({:.2f},{:.2f}) "
+                      "client_tick={} server_tick={} delay={}ms",
+                      in.pid, in.mx, in.my, in.client_ms, SDL_GetTicks(),
+                      static_cast<int32_t>(SDL_GetTicks() - in.client_ms));
         game_mode_->apply_player_input(in.pid, {in.mx, in.my});
     }
     else if (msg.type == NetPacket::interact) {
