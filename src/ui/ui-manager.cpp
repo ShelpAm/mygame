@@ -166,9 +166,9 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
 
     // Line 1: Title | Language | FPS
     hud_font_->draw({x, y}, SDL_Color{204, 178, 102, 255},
-                    std::format("{} | {}: {} | FPS: {:.0f}", loc.get("game.title"),
+                    std::format("{} | {}: {} | {}: {:.0f}", loc.get("game.title"),
                                 loc.get("menu.language"), loc.language_name(),
-                                app.stopwatch().fps()));
+                                loc.get("hud.fps"), app.stopwatch().fps()));
 
     // Line 2: Day | Season | Time
     y += line_h;
@@ -228,7 +228,7 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     else {
         y += line_h;
         hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200},
-                        "[F2] Melee [F3] Ranged — recruit soldiers");
+                        loc.get("hud.recruit_hint"));
     }
 }
 
