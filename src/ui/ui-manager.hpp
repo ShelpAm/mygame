@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/font.hpp"
 #include <SDL3/SDL.h>
 #include <string>
 #include <vector>
@@ -10,7 +11,7 @@ class LocaleManager;
 
 class UIManager {
   public:
-    UIManager(SDL_Window *window, SDL_Renderer *renderer);
+    UIManager(SDL_Window *window, SDL_Renderer *renderer, Font *hud_font);
     ~UIManager();
 
     /// @return If recognized and handled
@@ -28,6 +29,7 @@ class UIManager {
   private:
     [[maybe_unused]] SDL_Window *window_;
     SDL_Renderer *renderer_;
+    Font *hud_font_;
     bool show_journal_ = false;
     bool show_inventory_ = false;
     bool show_map_ = false;
@@ -36,6 +38,7 @@ class UIManager {
     bool show_multiplayer_ = false;
 
     void render_hud(WorldState const &world_state, App &app);
+    void render_hud_text(WorldState const &world_state, App &app);
     void render_journal(App const &app);
     void render_inventory(App const &app);
     void render_map(App const &app);

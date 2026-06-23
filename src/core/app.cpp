@@ -99,7 +99,7 @@ void App::init()
     for (auto e : no)
         navigation_system_.set_walkable(e, false);
 
-    ui_manager_ = std::make_unique<UIManager>(window_, renderer_);
+    ui_manager_ = std::make_unique<UIManager>(window_, renderer_, default_font);
 
     locale_.discover_languages("assets/locale");
     locale_.set_language(0);

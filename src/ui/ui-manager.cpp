@@ -15,8 +15,8 @@
 #include <imgui_impl_sdlrenderer3.h>
 #include <spdlog/spdlog.h>
 
-UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer)
-    : window_(window), renderer_(renderer)
+UIManager::UIManager(SDL_Window *window, SDL_Renderer *renderer, Font *hud_font)
+    : window_(window), renderer_(renderer), hud_font_(hud_font)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -120,78 +120,17 @@ void UIManager::render(WorldState *world_state, App &app)
 
     ImGui::Render();
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
+
+    // HUD text rendered with game font on top of everything
+    if (world_state)
+        render_hud_text(*world_state, app);
 }
 
 void UIManager::render_hud(WorldState const &world_state, App &app)
 {
     auto const &loc = app.locale();
 
-    ImGui::SetNextWindowPos(ImVec2(10, 10));
-    ImGui::Begin("HUD", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
-                     ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
-
-    ImGui::TextColored(ImVec4(0.8f, 0.7f, 0.4f, 1.0f), "%s", loc.get("game.title").c_str());
-    ImGui::SameLine();
-    ImGui::Text(" | %s: %s", loc.get("menu.language").c_str(), loc.language_name().c_str());
-
-    ImGui::SameLine();
-    ImGui::Text(" | %s: %.02f", "FPS", app.stopwatch().fps());
-
-    ImGui::Separator();
-
-    static constexpr char const *seasonKeys[] = {"season.spring", "season.summer", "season.autumn",
-                                                 "season.winter"};
-    ImGui::Text("%s: %d | %s: %s | %s: %.0f", loc.get("hud.day").c_str(), world_state.day(),
-                loc.get("hud.season").c_str(), loc.get(seasonKeys[world_state.season()]).c_str(),
-                loc.get("hud.time").c_str(), world_state.time_of_day());
-    ImGui::TextDisabled("%s", loc.get("hud.keys").c_str());
-
-    auto const &sv = app.client().survival();
-    auto *cs = app.client().player_stats();
-    ImGui::Separator();
-    assert(cs != nullptr);
-    ImGui::Text("%s: %d/%d | %s: %.0f | %s: %.0f | %s: %.0f", loc.get("hud.hp").c_str(), cs->hp,
-                cs->max_hp, loc.get("hud.food").c_str(), sv.food, loc.get("hud.water").c_str(),
-                sv.water, loc.get("hud.energy").c_str(), sv.energy);
-
-    // Soldier info (only player's own team)
-    auto my_team = app.client().player_team();
-    int soldier_count = 0;
-    int follow_count = 0, guard_count = 0, patrol_count = 0;
-    int melee_count = 0, ranged_count = 0;
-    for (auto &re : app.client().remote_entities()) {
-        if (re.kind == EntityKind::soldier && re.alive && re.team == my_team) {
-            ++soldier_count;
-            if (re.soldier_stance == SoldierStance::defensive)
-                ++follow_count;
-            else if (re.soldier_stance == SoldierStance::offensive)
-                ++guard_count;
-            else if (re.soldier_stance == SoldierStance::passive)
-                ++patrol_count;
-            if (re.soldier_role == SoldierRole::melee)
-                ++melee_count;
-            else if (re.soldier_role == SoldierRole::ranged)
-                ++ranged_count;
-        }
-    }
-    if (soldier_count > 0) {
-        auto &cli2 = app.client();
-        auto sel = cli2.selected_roles();
-        int n = static_cast<int>(formation_registry().size());
-        auto &fm_reg = formation_registry();
-        ImGui::Text("Soldiers: %d | [G] %dF/%dG/%dP", soldier_count, follow_count, guard_count,
-                    patrol_count);
-        ImGui::Text("[1] Melee:%d %s [2] Ranged:%d %s | [F4] Formation: %s", melee_count,
-                    (sel & 1) ? "*" : " ", ranged_count, (sel & 2) ? "*" : " ",
-                    fm_reg[cli2.formation_idx() % n].first);
-    }
-    else {
-        ImGui::TextDisabled("[F2] Melee [F3] Ranged — recruit soldiers");
-    }
-    ImGui::End();
-
-    // Language switcher (top-right, out of HUD way)
+    // Language switcher (top-right, needs buttons, stays in ImGui)
     ImGui::SetNextWindowPos(ImVec2(600, 10), ImGuiCond_Always);
     ImGui::Begin("Lang", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize);
@@ -204,7 +143,7 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
     }
     ImGui::End();
 
-    // Death overlay
+    // Death overlay (stays ImGui for simplicity)
     auto const &surv = app.client().survival();
     auto const *stat = app.client().player_stats();
     if ((stat && !stat->alive) || surv.health <= 0.F) {
@@ -216,6 +155,80 @@ void UIManager::render_hud(WorldState const &world_state, App &app)
                            app.locale().get("resp.dead").c_str());
         ImGui::TextDisabled("%s", app.locale().get("resp.dead_hint").c_str());
         ImGui::End();
+    }
+}
+
+void UIManager::render_hud_text(WorldState const &world_state, App &app)
+{
+    auto const &loc = app.locale();
+    constexpr float x = 10.F, line_h = 14.F;
+    float y = 10.F;
+
+    // Line 1: Title | Language | FPS
+    hud_font_->draw({x, y}, SDL_Color{204, 178, 102, 255},
+                    std::format("{} | {}: {} | FPS: {:.0f}", loc.get("game.title"),
+                                loc.get("menu.language"), loc.language_name(),
+                                app.stopwatch().fps()));
+
+    // Line 2: Day | Season | Time
+    y += line_h;
+    static constexpr char const *seasonKeys[] = {"season.spring", "season.summer",
+                                                  "season.autumn", "season.winter"};
+    hud_font_->draw({x, y}, SDL_Color{200, 200, 200, 230},
+                    std::format("{}: {} | {}: {} | {}: {:.0f}", loc.get("hud.day"),
+                                world_state.day(), loc.get("hud.season"),
+                                loc.get(seasonKeys[world_state.season()]), loc.get("hud.time"),
+                                world_state.time_of_day()));
+
+    // Line 3: Keys hint
+    y += line_h;
+    hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200},
+                    std::string(loc.get("hud.keys")));
+
+    // Line 4: HP | Food | Water | Energy
+    y += line_h;
+    auto const &sv = app.client().survival();
+    auto *cs = app.client().player_stats();
+    assert(cs != nullptr);
+    hud_font_->draw({x, y}, SDL_Color{200, 200, 200, 230},
+                    std::format("{}: {}/{} | {}: {:.0f} | {}: {:.0f} | {}: {:.0f}",
+                                loc.get("hud.hp"), cs->hp, cs->max_hp, loc.get("hud.food"),
+                                sv.food, loc.get("hud.water"), sv.water, loc.get("hud.energy"),
+                                sv.energy));
+
+    // Soldier info (lines 5+)
+    auto my_team = app.client().player_team();
+    int soldier_count = 0, follow_count = 0, guard_count = 0, patrol_count = 0;
+    int melee_count = 0, ranged_count = 0;
+    for (auto &re : app.client().remote_entities()) {
+        if (re.kind == EntityKind::soldier && re.alive && re.team == my_team) {
+            ++soldier_count;
+            if (re.soldier_stance == SoldierStance::defensive) ++follow_count;
+            else if (re.soldier_stance == SoldierStance::offensive) ++guard_count;
+            else if (re.soldier_stance == SoldierStance::passive) ++patrol_count;
+            if (re.soldier_role == SoldierRole::melee) ++melee_count;
+            else if (re.soldier_role == SoldierRole::ranged) ++ranged_count;
+        }
+    }
+    if (soldier_count > 0) {
+        y += line_h;
+        auto &cli2 = app.client();
+        auto sel = cli2.selected_roles();
+        auto &fm_reg = formation_registry();
+        hud_font_->draw({x, y}, SDL_Color{200, 200, 200, 230},
+                        std::format("Soldiers: {} | [G] {}F/{}G/{}P", soldier_count, follow_count,
+                                    guard_count, patrol_count));
+        y += line_h;
+        hud_font_->draw({x, y}, SDL_Color{200, 200, 200, 230},
+                        std::format("[1] Melee:{} {} [2] Ranged:{} {} | [F4] Formation: {}",
+                                    melee_count, (sel & 1) ? "*" : " ", ranged_count,
+                                    (sel & 2) ? "*" : " ",
+                                    fm_reg[cli2.formation_idx() % fm_reg.size()].first));
+    }
+    else {
+        y += line_h;
+        hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200},
+                        "[F2] Melee [F3] Ranged — recruit soldiers");
     }
 }
 
