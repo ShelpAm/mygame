@@ -1,0 +1,143 @@
+{
+    "templates": [
+        {
+            "type": "greeting_friendly",
+            "texts": ["幸会，朋友！路上一切安好吧？",
+                       "熟悉的面孔！来，说说你旅途上的见闻。",
+                       "欢迎欢迎！歇歇脚吧。你带来了什么消息？"],
+            "personalityPref": "friendly"
+        },
+        {
+            "type": "greeting_guarded",
+            "texts": ["我不认识你。说明你的来意。",
+                       "旅人总是带来麻烦。你想干什么？",
+                       "快点说。这年头可不太平。"],
+            "personalityPref": "guarded"
+        },
+        {
+            "type": "greeting_hostile",
+            "texts": ["又一只在废墟里钻来钻去的老鼠。你想干什么？",
+                       "我不跟陌生人白说话。"],
+            "personalityPref": "hostile"
+        },
+        {
+            "type": "greeting_fearful",
+            "texts": ["求你...我没有恶意。你...你是他们的人吗？",
+                       "你看到他们了吗？掠夺者？他们近吗？"],
+            "personalityPref": "fearful"
+        },
+        {
+            "type": "greeting",
+            "texts": ["啊，一位旅者。什么风把你吹来了？",
+                       "你好，朋友。我能为你做些什么？",
+                       "哼，又一个过路的陌生人。",
+                       "欢迎。我在这一带见过你。"]
+        },
+        {
+            "type": "knows_directly_friendly",
+            "texts": ["啊，[topic]！我可以告诉你到底发生了什么。[detail]",
+                       "你问对人了。[topic]的事我全看到了。[detail]",
+                       "坐下吧，朋友。你想知道[topic]的话，听好了。[detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60,
+            "personalityPref": "friendly"
+        },
+        {
+            "type": "knows_directly_guarded",
+            "texts": ["你想知道[topic]？行。[detail]",
+                       "我告诉你[topic]的事，但别说是我说的。[detail]",
+                       "[topic]不是什么秘密。我亲眼所见。[detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60,
+            "personalityPref": "guarded"
+        },
+        {
+            "type": "knows_directly_hostile",
+            "texts": ["你觉得你配知道[topic]的事？[detail]不过知道了又能怎样。",
+                       "[topic]的时候我就在场。跟你说也没用。[detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60,
+            "personalityPref": "hostile"
+        },
+        {
+            "type": "knows_directly_fearful",
+            "texts": ["[topic]？我不敢去想。[detail]",
+                       "求你，别问[topic]的事。那会让我想起不好的回忆。[detail]",
+                       "我看到了[topic]发生的事。至今无法释怀。[detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60,
+            "personalityPref": "fearful"
+        },
+        {
+            "type": "knows_directly",
+            "texts": ["[topic]发生的时候，我就在场。[detail]",
+                       "我亲眼所见——[topic]。[detail]",
+                       "是的，[topic]。事发时我就在附近。[detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60
+        },
+        {
+            "type": "heard_rumor_friendly",
+            "texts": ["让我告诉你我听到的关于[topic]的事。[detail]",
+                       "哦，[topic]？我刚跟人聊过这个。[detail]"],
+            "requiresHeard": true,
+            "minConfidence": 30,
+            "personalityPref": "friendly"
+        },
+        {
+            "type": "heard_rumor_guarded",
+            "texts": ["我可能听说过一些关于[topic]的事，但我不该说的。",
+                       "有些事还是不说为好。尤其是关于[topic]的事。",
+                       "你为什么问[topic]？这可是掉脑袋的话。"],
+            "requiresHeard": true,
+            "minConfidence": 0,
+            "personalityPref": "guarded"
+        },
+        {
+            "type": "heard_rumor",
+            "texts": ["我听说过一些关于[topic]的传言。[detail]",
+                       "人们都说[topic]。不过我自己没法确认。",
+                       "[person]跟我说过[topic]的事。[detail]"],
+            "requiresHeard": true,
+            "minConfidence": 30
+        },
+        {
+            "type": "share_rumor_version",
+            "texts": ["据我所知，[topic]。[detail]不过你知道传言这东西不可靠。",
+                       "我听到的版本是[topic]。[detail]信不信由你。"],
+            "requiresHeard": true,
+            "minConfidence": 20
+        },
+        {
+            "type": "deny_knowledge_hostile",
+            "texts": ["就算我知道[topic]，也不会告诉你。",
+                       "跟你没关系，陌生人。",
+                       "去问在乎的人吧。我不在乎。"],
+            "personalityPref": "hostile"
+        },
+        {
+            "type": "deny_knowledge_fearful",
+            "texts": ["我...我不能谈论[topic]。请让我一个人待着。",
+                       "谈论[topic]会招来危险。我已经说太多了。"],
+            "personalityPref": "fearful"
+        },
+        {
+            "type": "deny_knowledge_friendly",
+            "texts": ["我希望我能帮你了解[topic]，但我对此一无所知。",
+                       "对不起，朋友。[topic]的事不在我的了解范围内。"],
+            "personalityPref": "friendly"
+        },
+        {
+            "type": "deny_knowledge",
+            "texts": ["恐怕我对[topic]一无所知。",
+                       "这你得去问别人。",
+                       "[topic]？从没听说过。"]
+        },
+        {
+            "type": "lead_to_npc",
+            "texts": ["你应该去找[person]问[topic]的事。他们比我清楚。",
+                       "[person]才是你要找的人。去问他们[topic]的事。",
+                       "我不是合适的人。但[person]？他们什么都知道。关于[topic]。"]
+        }
+    ]
+}

@@ -1,0 +1,151 @@
+{
+    "templates": [
+        {
+            "type": "greeting_friendly",
+            "texts": ["Well met, friend! The road has been kind to you, I hope?",
+                       "A familiar face! Come, share news of your travels.",
+                       "Welcome, welcome! Rest your feet. What tidings do you bring?"],
+            "personalityPref": "friendly"
+        },
+        {
+            "type": "greeting_guarded",
+            "texts": ["I do not know you. State your business.",
+                       "Travelers bring trouble. What do you want?",
+                       "Be quick with your words. These are dangerous times."],
+            "personalityPref": "guarded"
+        },
+        {
+            "type": "greeting_hostile",
+            "texts": ["Another rat scurrying through the ruins. What do you want?",
+                       "I do not talk to strangers for free."],
+            "personalityPref": "hostile"
+        },
+        {
+            "type": "greeting_fearful",
+            "texts": ["Please... I mean no harm. Are you... are you one of them?",
+                       "Have you seen them? The raiders? Are they close?"],
+            "personalityPref": "fearful"
+        },
+        {
+            "type": "greeting",
+            "texts": ["Ah, a traveler. What brings you here?",
+                       "Greetings, friend. What can I do for you?",
+                       "Hmm. Another stranger passing through.",
+                       "Welcome. I have seen you around these parts."]
+        },
+        {
+            "type": "knows_directly_friendly",
+            "texts": ["Ah, [topic]! I can tell you exactly what happened. [detail]",
+                       "You have come to the right person about [topic]. I saw it all. [detail]",
+                       "Sit down, friend. If you want to know about [topic], listen well. [detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60,
+            "personalityPref": "friendly"
+        },
+        {
+            "type": "knows_directly_guarded",
+            "texts": ["You want to know about [topic], do you? Fine. [detail]",
+                       "I will tell you about [topic], but you did not hear it from me. [detail]",
+                       "[topic] is no secret. I saw it happen. [detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60,
+            "personalityPref": "guarded"
+        },
+        {
+            "type": "knows_directly_hostile",
+            "texts": ["You think you deserve to know about [topic]? [detail] But it changes nothing.",
+                       "I was there for [topic]. Not that it matters to the likes of you. [detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60,
+            "personalityPref": "hostile"
+        },
+        {
+            "type": "knows_directly_fearful",
+            "texts": ["[topic]? I try not to think about it. But... [detail]",
+                       "Please, do not ask about [topic]. It brings back bad memories. [detail]",
+                       "I saw what happened with [topic]. It haunts me still. [detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60,
+            "personalityPref": "fearful"
+        },
+        {
+            "type": "knows_directly",
+            "texts": ["I was there when [topic] happened. [detail]",
+                       "I saw it with my own eyes — [topic]. [detail]",
+                       "Yes, [topic]. I was nearby when it occurred. [detail]"],
+            "requiresWitnessed": true,
+            "minConfidence": 60
+        },
+        {
+            "type": "heard_rumor_friendly",
+            "texts": ["Let me tell you what I have heard about [topic]. [detail]",
+                       "Oh, [topic]? I just spoke with someone about it. [detail]"],
+            "requiresHeard": true,
+            "minConfidence": 30,
+            "personalityPref": "friendly"
+        },
+        {
+            "type": "heard_rumor_guarded",
+            "texts": ["I may have heard something about [topic], but I should not speak of it.",
+                       "Some things are better left unsaid. Even about [topic].",
+                       "Why do you ask about [topic]? That is dangerous talk."],
+            "requiresHeard": true,
+            "minConfidence": 0,
+            "personalityPref": "guarded"
+        },
+        {
+            "type": "heard_rumor_hostile",
+            "texts": ["[topic]? Why would I tell you what I know? [detail]",
+                       "You want rumors about [topic]? Fine. Laugh when it is wrong. [detail]"],
+            "requiresHeard": true,
+            "minConfidence": 30,
+            "personalityPref": "hostile"
+        },
+        {
+            "type": "heard_rumor",
+            "texts": ["I have heard rumors about [topic]. [detail]",
+                       "People say that [topic]. Though I cannot confirm it myself.",
+                       "[person] told me about [topic]. [detail]"],
+            "requiresHeard": true,
+            "minConfidence": 30
+        },
+        {
+            "type": "share_rumor_version",
+            "texts": ["From what I hear, [topic]. [detail] But you know how rumors spread.",
+                       "The version I got is that [topic]. [detail] Make of it what you will."],
+            "requiresHeard": true,
+            "minConfidence": 20
+        },
+        {
+            "type": "deny_knowledge_hostile",
+            "texts": ["Even if I knew about [topic], I would not tell you.",
+                       "That is none of your concern, stranger.",
+                       "Ask someone who cares. I do not."],
+            "personalityPref": "hostile"
+        },
+        {
+            "type": "deny_knowledge_fearful",
+            "texts": ["I... I cannot talk about [topic]. Please leave me alone.",
+                       "Speaking of [topic] brings danger. I have said too much already."],
+            "personalityPref": "fearful"
+        },
+        {
+            "type": "deny_knowledge_friendly",
+            "texts": ["I wish I could help you with [topic], but I know nothing of it.",
+                       "Apologies, friend. [topic] is beyond my knowledge."],
+            "personalityPref": "friendly"
+        },
+        {
+            "type": "deny_knowledge",
+            "texts": ["I am afraid I know nothing of [topic].",
+                       "You would have to ask someone else about that.",
+                       "[topic]? Never heard of it."]
+        },
+        {
+            "type": "lead_to_npc",
+            "texts": ["You should speak to [person] about [topic]. They know more than I do.",
+                       "[person] is the one you need. Ask them about [topic].",
+                       "I am not the right person. But [person]? They know everything about [topic]."]
+        }
+    ]
+}
