@@ -37,6 +37,7 @@ class RenderSystem {
     void render_health_bars(Client const &client, Vec2f player_pos);
     void render_damage_numbers(Client const &client, std::vector<CombatEvent> const &events);
     void render_fog_overlay(PlayerVisibility const &vis);
+    void render_network_stats(Client const &client);
 
     void draw_sprite(Vec2f center, float width, std::string const &tex, uint8_t alpha,
                      bool flip) const;

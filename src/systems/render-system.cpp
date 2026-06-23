@@ -27,6 +27,7 @@ void RenderSystem::render(Client const &client, NavigationSystem const &nav)
     render_health_bars(client, client.player_position());
     render_damage_numbers(client, client.combat_events());
     render_fog_overlay(client.player_visibility());
+    render_network_stats(client);
 }
 
 void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem const &nav) const
@@ -327,4 +328,26 @@ void RenderSystem::draw_sprite(Vec2f center, float width, std::string const &tex
     SDL_RenderTextureRotated(renderer_, texture, nullptr, &dst, 0.0, nullptr,
                              flip ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE);
     SDL_SetTextureAlphaMod(texture, max_alpha);
+}
+
+void RenderSystem::render_network_stats(Client const &client)
+{
+    // If the client hasn't connected yet, skip
+    if (client.player_id() == invalid_entity)
+        return;
+
+    int32_t rtt = static_cast<int32_t>(client.rtt_ms());
+    int32_t age = static_cast<int32_t>(client.last_sync_age());
+
+    // White when healthy, yellow/orange/red as lag increases
+    auto color = SDL_Color{255, 255, 255, 200};
+    if (age > 100)
+        color = SDL_Color{255, 255, 100, 200};
+    if (age > 300)
+        color = SDL_Color{255, 200, 50, 200};
+    if (age > 1000)
+        color = SDL_Color{255, 80, 80, 200};
+
+    font_->draw({10.F, 10.F}, color,
+                std::format("RTT: {}ms  (last sync: {}ms ago)", rtt, age));
 }

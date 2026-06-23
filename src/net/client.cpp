@@ -98,6 +98,7 @@ void Client::send_player_direction(Vec2f dir)
         throw std::runtime_error("send_player_direction: transport not attached or closed");
     }
     spdlog::trace("Client: sending move dir: {}, {} (tick={})", dir.x, dir.y, SDL_GetTicks());
+    last_active_send_tick_ = SDL_GetTicks();
     Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
         co_await t->write({NetPacket::player_input, payload});
     }(session_, make_player_input(player_id_, dir.x, dir.y, SDL_GetTicks())));
@@ -223,9 +224,11 @@ void Client::handle_message(Session &from, TransportMessage msg)
     switch (msg.type) {
     case NetPacket::state_full:
         apply_sync_full(msg.payload);
+        record_sync_received();
         break;
     case NetPacket::state_delta:
         apply_sync_delta(msg.payload);
+        record_sync_received();
         break;
     case NetPacket::entity_removed:
         if (msg.payload.size() >= 8) {
@@ -667,6 +670,18 @@ void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int
     }
 
     combat_events_.push_back({attacker_id, defender_id, damage, killed});
+}
+
+void Client::record_sync_received()
+{
+    auto now = SDL_GetTicks();
+    last_sync_recv_tick_ = now;
+    if (last_active_send_tick_ > 0) {
+        auto rtt = static_cast<uint32_t>(now - last_active_send_tick_);
+        // Exponentially smoothed average (alpha = 0.3)
+        estimated_rtt_ms_ = estimated_rtt_ms_ == 0 ? rtt : estimated_rtt_ms_ * 7 / 10 + rtt * 3 / 10;
+        last_active_send_tick_ = 0;
+    }
 }
 
 void Client::interpolate_entities(float dt)

@@ -97,6 +97,8 @@ class Client {
     void send_dialogue_action(std::string const &action);
 
     Vec2f player_position() const;
+    std::uint64_t rtt_ms() const { return estimated_rtt_ms_; }
+    std::uint64_t last_sync_age() const { return SDL_GetTicks() - last_sync_recv_tick_; }
     bool is_player_dead();
     CombatStats const *player_stats();
 
@@ -117,6 +119,7 @@ class Client {
     }
 
     void interpolate_entities(float dt);
+    void record_sync_received();
     std::vector<RemoteEntity> &remote_entities() { return remote_entities_; }
     std::vector<RemoteEntity> const &remote_entities() const { return remote_entities_; }
     // std::vector<SnapshotEntity> &snapshots() { return snapshots_; }
@@ -170,6 +173,11 @@ class Client {
     int player_vision_range_ = 6;
     float player_vision_arc_ = 180.f;
     bool player_alive_ = true;
+
+    // Network diagnostics
+    mutable std::uint64_t last_sync_recv_tick_ = 0;
+    mutable std::uint64_t estimated_rtt_ms_ = 0;
+    mutable std::uint64_t last_active_send_tick_ = 0;
 
     // std::queue<TransportGuard> transport_guards_; // Because there could be
     // some connections keeping unclosed, we set a queue here to wait them.
