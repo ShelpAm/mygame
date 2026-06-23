@@ -27,6 +27,7 @@ App::~App()
 void App::init()
 {
     spdlog::set_level(spdlog::level::debug);
+    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%-8l%$] %v");
     // spdlog::flush_on(spdlog::level::trace);
 
     SDL_SetAppMetadata("The Sunset Straits App name", "1.0", "com.example.app-identifier");
@@ -159,10 +160,15 @@ void App::start_local_session()
                  cli->remote_info());
 
     auto do_attach = [](App *app, auto srv, auto cli) -> awaitable<void> {
-        co_await (app->server_->attach_transport(std::move(srv)) &&
-                  app->client_->attach_transport(std::move(cli)));
-        app->client_->send_join_request();
-        app->session_mode_ = SessionMode::local;
+        try {
+            co_await (app->server_->attach_transport(std::move(srv)) &&
+                      app->client_->attach_transport(std::move(cli)));
+            app->client_->send_join_request();
+            app->session_mode_ = SessionMode::local;
+        }
+        catch (std::exception const &e) {
+            spdlog::error("App: failed to attach local transports: {}", e.what());
+        }
     };
     Session::spawn(do_attach(this, srv, cli));
 }
@@ -192,18 +198,19 @@ void App::start_client_session(std::string const &host, int port)
         }
     }
 
-    try {
-        auto attach = [](App *app, std::string resolved_ip, auto port) -> awaitable<void> {
+    auto attach = [](App *app, std::string resolved_ip, auto port) -> awaitable<void> {
+        try {
             auto t = co_await NetworkSession::connect(resolved_ip, port);
             co_await app->client_->attach_transport(std::move(t));
             app->client_->send_join_request();
             app->session_mode_ = SessionMode::client;
-        };
-        Session::spawn(attach(this, resolved_ip, port));
-    }
-    catch (std::exception &e) {
-        spdlog::error("Connect failed: {}, aborting", e.what());
-    }
+        }
+        catch (std::exception &e) {
+            spdlog::error("{}, falling back to local session", e.what());
+            app->start_local_session();
+        }
+    };
+    Session::spawn(attach(this, resolved_ip, port));
 }
 
 void App::run()

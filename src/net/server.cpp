@@ -70,9 +70,9 @@ awaitable<void> Server::attach_transport(std::shared_ptr<Session> t)
                 // Subtle: if it runs normally, it indicates that this
                 // transport hasn't been detached yet, thus transport is
                 // still alive. We don't need to check `self`.
-                spdlog::info("Server: received message \"{}\" with payload size "
-                             "{} from transport {}",
-                             msg.type, msg.payload.size(), t->remote_info());
+                spdlog::trace("Server: received message \"{}\" with payload size "
+                              "{} from transport {}",
+                              msg.type, msg.payload.size(), t->remote_info());
                 if (!s->messages_.try_send(boost::system::error_code{}, t, msg)) {
                     Session::spawn([](Server *s, auto t, auto msg) -> awaitable<void> {
                         co_await s->messages_.async_send(boost::system::error_code{}, t,
@@ -140,7 +140,6 @@ void Server::clear_transports()
 
 void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
 {
-    spdlog::debug("Server: handling message '{}'", msg.type);
     if (msg.type == NetPacket::join) {
         assert(msg.payload.empty());
         Team team = static_cast<Team>(next_player_team_++);
@@ -169,12 +168,14 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
         assert(pid != invalid_entity);
+        spdlog::debug("Server: recruit soldier for player {}", pid);
         game_mode_->spawn_recruit(pid);
     }
     else if (msg.type == NetPacket::recruit_ranged) {
         assert(msg.payload.size() >= 8);
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
+        spdlog::debug("Server: recruit ranged for player {}", pid);
         game_mode_->spawn_recruit_ranged(pid);
     }
     else if (msg.type == NetPacket::soldier_command) {
@@ -187,6 +188,7 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
         assert(msg.payload.size() >= 8);
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
+        spdlog::debug("Server: respawn player {}", pid);
         game_mode_->respawn_player(pid);
     }
     else if (msg.type == NetPacket::formation) {
@@ -219,11 +221,14 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
         assert(msg.payload.size() >= 8);
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
+        spdlog::debug("Server: player {} rests", pid);
         game_mode_->heal_entity(pid, 5);
         mark_needs_full_sync("player rest");
     }
     else if (msg.type == NetPacket::combat_event) {
         auto ev = parse_combat_event(msg.payload);
+        spdlog::debug("Server: combat event: attacker={}, defender={}, dmg={}", ev.attacker_id,
+                      ev.defender_id, ev.damage);
         game_mode_->apply_damage(ev.defender_id, ev.damage, ev.killed);
     }
     else if (msg.type == NetPacket::chat) {

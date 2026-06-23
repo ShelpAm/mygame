@@ -63,7 +63,7 @@ BOOST_AUTO_TEST_CASE(soldier_ai_follows_leader)
     soldier.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
     soldier.set<CombatStats>(CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
     soldier.set<SoldierAI>(
-        SoldierAI{.formation_offset = Vec2f(32.F, -32.F), .follow_distance = 16.F});
+        SoldierAI{.follow_distance = 16.F, .formation_offset = Vec2f(32.F, -32.F)});
 
     auto const *sPos = soldier.try_get<Transform>();
     BOOST_REQUIRE(sPos != nullptr);
@@ -85,9 +85,9 @@ BOOST_AUTO_TEST_CASE(soldier_ai_moves_toward_leader)
     auto soldier = world.entity();
     soldier.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
     soldier.set<CombatStats>(CombatStats{.team = leader_team, .max_hp = 10, .hp = 10});
-    soldier.set<Movement>(Movement{.velocity = {}, .max_speed = 200.F});
+    soldier.set<Movement>(Movement{.max_speed = 200.F, .velocity = {}});
     soldier.add<Follows>(leader.id());
-    soldier.set<SoldierAI>(SoldierAI{.formation_offset = Vec2f(0.F, 0.F), .follow_distance = 16.F});
+    soldier.set<SoldierAI>(SoldierAI{.follow_distance = 16.F, .formation_offset = Vec2f(0.F, 0.F)});
 
     auto noop = [](EntityId) {};
     auto *ai = soldier.try_get_mut<SoldierAI>();

@@ -97,7 +97,7 @@ void Client::send_player_direction(Vec2f dir)
     if (!session_ || !session_->is_open()) {
         throw std::runtime_error("send_player_direction: transport not attached or closed");
     }
-    spdlog::debug("Client: sending move dir: {}, {}", dir.x, dir.y);
+    spdlog::trace("Client: sending move dir: {}, {}", dir.x, dir.y);
     Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
         co_await t->write({NetPacket::player_input, payload});
     }(session_, make_player_input(player_id_, dir.x, dir.y)));

@@ -82,8 +82,8 @@ BOOST_AUTO_TEST_CASE(multiple_component_types)
                          .scale = 1.F,
                          .visible = true});
     e.set<Movement>(Movement{
-        .velocity = {},
         .max_speed = 150.F,
+        .velocity = {},
     });
 
     BOOST_TEST(e.has<Transform>());
@@ -119,8 +119,8 @@ BOOST_AUTO_TEST_CASE(type_erased_pools_dont_cross_contaminate)
 
     e.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
     e.set<Movement>(Movement{
-        .velocity = {},
         .max_speed = 200.F,
+        .velocity = {},
     });
 
     BOOST_TEST(e.try_get<Movement>()->max_speed == 200.F);

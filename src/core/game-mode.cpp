@@ -481,7 +481,7 @@ void GameMode::relayout_formation(EntityId captain_id)
         auto &form = formation(captain_id, ai.role, e.target<Follows>());
         int idx = indices[&form]++;
         ai.formation_offset = forminfo[&form].offsets.at(idx);
-        spdlog::debug("GameMode::relayout_formation: entity {} role {} formation {} idx "
+        spdlog::trace("GameMode: relayout_formation: entity {} role {} formation {} idx "
                       "{} offset ({:.2f}, "
                       "{:.2f})",
                       e.id(), static_cast<int>(ai.role), form.name(), idx, ai.formation_offset.x,

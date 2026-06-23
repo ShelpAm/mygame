@@ -22,7 +22,9 @@ class Font {
     Font &operator=(Font &&) = delete;
 
     Font(SDL_Renderer *renderer, std::filesystem::path const &path, float size)
-        : font_(TTF_OpenFont(path.c_str(), size)), engine_(TTF_CreateRendererTextEngine(renderer)),
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        : font_(TTF_OpenFont(reinterpret_cast<char const *>(path.u8string().c_str()), size)),
+          engine_(TTF_CreateRendererTextEngine(renderer)),
           text_(TTF_CreateText(engine_, font_, "", 0))
     {
         if (!font_)
