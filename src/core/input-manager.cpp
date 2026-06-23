@@ -15,24 +15,24 @@ void InputManager::init_default_bindings()
     set_key_binding(Action::move_right, SDL_SCANCODE_D);
     set_key_binding(Action::interact, SDL_SCANCODE_E);
     set_key_binding(Action::rest, SDL_SCANCODE_R);
-    set_key_binding(Action::recruit, SDL_SCANCODE_F2);
-    set_key_binding(Action::recruit_ranged, SDL_SCANCODE_F3);
     set_key_binding(Action::guard, SDL_SCANCODE_G);
-    set_key_binding(Action::quick_save, SDL_SCANCODE_F5);
-    set_key_binding(Action::load_menu, SDL_SCANCODE_F9);
-    set_key_binding(Action::help, SDL_SCANCODE_F1);
-    set_key_binding(Action::multiplayer, SDL_SCANCODE_F10);
     // set_key_binding(Action::open_journal, SDL_SCANCODE_J);
     // set_key_binding(Action::open_inventory, SDL_SCANCODE_I);
     // set_key_binding(Action::open_map, SDL_SCANCODE_M);
     // set_key_binding(Action::pause, SDL_SCANCODE_P);
     // set_key_binding(Action::escape, SDL_SCANCODE_ESCAPE);
     // set_key_binding(Action::confirm, SDL_SCANCODE_RETURN);
-    set_key_binding(Action::debug_toggle, SDL_SCANCODE_F12);
-    set_key_binding(Action::respawn, SDL_SCANCODE_F8);
-    set_key_binding(Action::cycle_formation, SDL_SCANCODE_F4);
     set_key_binding(Action::select_melee, SDL_SCANCODE_1);
     set_key_binding(Action::select_ranged, SDL_SCANCODE_2);
+    set_key_binding(Action::help, SDL_SCANCODE_F1);
+    set_key_binding(Action::recruit, SDL_SCANCODE_F2);
+    set_key_binding(Action::recruit_ranged, SDL_SCANCODE_F3);
+    set_key_binding(Action::cycle_formation, SDL_SCANCODE_F4);
+    set_key_binding(Action::quick_save, SDL_SCANCODE_F5);
+    set_key_binding(Action::respawn, SDL_SCANCODE_F8);
+    set_key_binding(Action::load_menu, SDL_SCANCODE_F9);
+    set_key_binding(Action::multiplayer, SDL_SCANCODE_F10);
+    set_key_binding(Action::debug_toggle, SDL_SCANCODE_F12);
     // set_key_binding(Action::cancel, SDL_SCANCODE_BACKSPACE);
 }
 

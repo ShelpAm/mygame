@@ -31,7 +31,7 @@ package: build
 	tar czf $(TARBALL) -C $(BUILD_DIR) $(TARGET) -C $(PWD) assets
 
 # Phony targets (not actual files)
-.PHONY: all clean conan configure build package
+.PHONY: all configure build package
 
 # Help target
 help:

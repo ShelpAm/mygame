@@ -315,7 +315,8 @@ struct LivingBuzzsaw : Formation {
         if (cycle > 2.5f && cycle < 3.0f) {
             // 超载扩张：向外锯开
             float const t = (cycle - 2.5f) / 0.5f;
-            radius_mod = std::sin(t * M_PI * 0.5f) * 40.f; // 额外向外扩张40像素
+            radius_mod =
+                std::sin(t * std::numbers::pi_v<float> * 0.5f) * 40.f; // 额外向外扩张40像素
         }
         else if (cycle >= 3.0f) {
             // 缩回锯片
@@ -338,7 +339,8 @@ struct LivingBuzzsaw : Formation {
 
             // 内外圈逆向旋转，绞肉感直接翻倍
             float const direction = (layer == 0) ? 1.f : -1.f;
-            float const angle = (2.f * M_PI * i) / ctx.count + (current_rot * direction);
+            float const angle =
+                (2.f * std::numbers::pi_v<float> * i) / ctx.count + (current_rot * direction);
 
             result[i] = {final_radius * std::cos(angle), final_radius * std::sin(angle)};
         }
@@ -369,7 +371,7 @@ struct SafeLivingGreatsword : Formation {
         float const swing_speed = std::min(4.5f, max_omega * 0.85f);
 
         // 3. 基于安全速度计算旋转周期
-        float const period = (2.f * M_PI) / (swing_speed + 0.1f);
+        float const period = (2.f * std::numbers::pi_v<float>) / (swing_speed + 0.1f);
         float const local_time = std::fmod(ctx.time, period);
         float angle_offset = 0.f;
 

@@ -4,9 +4,7 @@
 #include <fstream>
 #include <spdlog/spdlog.h>
 
-LocaleManager::LocaleManager()
-{
-}
+LocaleManager::LocaleManager() = default;
 
 int LocaleManager::discover_languages(std::string const &locale_dir)
 {

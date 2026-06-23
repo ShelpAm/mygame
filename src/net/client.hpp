@@ -82,7 +82,7 @@ class Client {
     Team player_team() const { return player_team_; }
 
     // Verifies authority of server
-    awaitable<bool> authenticate_transport(std::shared_ptr<Session> t);
+    static awaitable<bool> authenticate_transport(std::shared_ptr<Session> t);
 
     void send_join_request();
     void send_player_direction(Vec2f dir);
