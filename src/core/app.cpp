@@ -9,7 +9,10 @@
 #include "net/session.hpp"
 #include "systems/render-system.hpp"
 #include "ui/ui-manager.hpp"
+#include "world/terrain-generator.hpp"
 #include <boost/asio.hpp>
+#include <boost/json.hpp>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <imgui.h>
@@ -84,27 +87,23 @@ void App::init()
                                                     &camera_system_, default_font);
 
     navigation_system_ = NavigationSystem{};
-    std::vector<Vec2i> const no = {
-        {-2, 1},   {-1, 0},   {-1, 1},   {-1, 2},   {0, -1},   {0, 0},     {0, 1},    {0, 2},
-        {0, 3},    {1, -1},   {1, 0},    {1, 1},    {1, 2},    {2, -2},    {2, -1},   {2, 0},
-        {2, 1},    {2, 2},    {3, -1},   {3, 0},    {3, 1},    {4, 0},     {4, 1},    {8, 6},
-        {9, 5},    {9, 6},    {9, 7},    {10, 4},   {10, 5},   {10, 6},    {10, 7},   {10, 8},
-        {11, 4},   {11, 5},   {11, 6},   {11, 7},   {12, 5},   {12, 6},    {12, 7},   {13, 5},
-        {13, 6},   {-12, -8}, {-11, -9}, {-11, -8}, {-11, -7}, {-10, -10}, {-10, -9}, {-10, -8},
-        {-10, -7}, {-10, -6}, {-9, -10}, {-9, -9},  {-9, -8},  {-9, -7},   {-8, -10}, {-8, -9},
-        {-8, -8},  {-8, -7},  {-7, -9},  {-7, -8},  {-6, -8},  {15, -10},  {16, -11}, {16, -10},
-        {16, -9},  {17, -12}, {17, -11}, {17, -10}, {17, -9},  {17, -8},   {18, -12}, {18, -11},
-        {18, -10}, {18, -9},  {19, -11}, {19, -10}, {19, -9},  {20, -10},  {-5, -2},  {-4, -3},
-        {-3, -4},  {4, 3},    {5, 4},    {5, 5},    {6, 4},    {6, 5},     {7, 5},    {13, 0},
-        {14, -1},  {14, 0},   {14, 1},   {15, 0},   {15, 1},   {-5, 4},    {-6, 5},   {-7, 5},
-        {-8, 6},   {-9, 5},   {-9, 6}};
-    for (auto e : no)
-        navigation_system_.set_walkable(e, false);
+
+    // ---- Load terrain features from file ----
+    load_terrain_from_json("assets/data/terrain.json", map_data_, navigation_system_);
+
+    // ---- Load locations and generate terrain ----
+    auto loc_data = load_locations_from_json("assets/data/locations.json");
+    location_defs_ = std::move(loc_data.locations);
+    generate_town_footprints(map_data_, navigation_system_, location_defs_, loc_data.routes);
+    render_system_->set_map_data(&map_data_);
+    render_system_->set_location_defs(&location_defs_);
 
     ui_manager_ = std::make_unique<UIManager>(render_system_.get(), default_font);
+    ui_manager_->set_location_defs(&location_defs_);
 
     locale_.discover_languages("assets/locale");
-    locale_.set_language(0);
+    locale_.set_language("en");
+    load_dialogue_templates();
 
     // Start IO thread
     io_thread_ = std::jthread([this]() {
@@ -123,6 +122,7 @@ void App::init()
 
     game_mode_ = std::make_unique<GameMode>();
     game_mode_->init_world();
+    game_mode_->set_location_defs(location_defs_);
     game_mode_->set_navigation(&navigation_system_);
     game_mode_->set_server(server_.get());
     server_->set_game_mode(game_mode_.get());
@@ -138,6 +138,7 @@ void App::init()
     });
 
     client_ = std::make_unique<Client>(this);
+    client_->set_location_defs(&location_defs_);
 
     start_local_session();
 
@@ -388,12 +389,6 @@ void App::render()
     SDL_RenderPresent(renderer_);
 }
 
-void App::set_ui_language(int lang_index)
-{
-    locale_.set_language(lang_index);
-    server_->set_language(lang_index);
-}
-
 void App::start_listen(int port)
 {
     Session::spawn([](Server *s, auto port) -> awaitable<void> {
@@ -484,4 +479,76 @@ void App::handle_resize(int new_width, int new_height)
     window_height_ = new_height;
     // TODO: Camera should keep unchanged, it's logical
     camera_system_.resize(window_width_, window_height_);
+}
+
+void App::load_dialogue_templates()
+{
+    try {
+        for (auto const &entry : std::filesystem::directory_iterator("assets/dialogue")) {
+            if (!entry.is_regular_file() || entry.path().extension() != ".json")
+                continue;
+
+            std::ifstream file(entry.path().string());
+            if (!file)
+                continue;
+
+            std::string content{std::istreambuf_iterator<char>(file), {}};
+            auto parsed = boost::json::parse(content);
+            auto &arr = parsed.as_object().at("templates").as_array();
+
+            DialogueTemplateSet dts;
+            for (auto const &item : arr) {
+                auto const &obj = item.as_object();
+                std::string type = std::string(obj.at("type").as_string());
+                std::vector<std::string> texts;
+                for (auto const &txt : obj.at("texts").as_array())
+                    texts.push_back(std::string(txt.as_string()));
+                dts.by_type.emplace(std::move(type), std::move(texts));
+            }
+            dialogue_template_sets_.push_back(std::move(dts));
+        }
+    }
+    catch (std::exception const &e) {
+        spdlog::error("Failed to load dialogue templates: {}", e.what());
+    }
+}
+
+std::string
+App::resolve_dialogue_text(std::string const &template_type, int variant_index,
+                           std::unordered_map<std::string, std::string> const &slots) const
+{
+    // Get the current template set
+    int lang = dialogue_template_lang_;
+    if (lang < 0 || lang >= static_cast<int>(dialogue_template_sets_.size()))
+        lang = 0;
+
+    auto const &dts = dialogue_template_sets_[lang];
+    auto it = dts.by_type.find(template_type);
+    if (it == dts.by_type.end()) {
+        spdlog::warn("Dialogue template type '{}' not found for language {}", template_type, lang);
+        return "[missing template: " + template_type + "]";
+    }
+
+    auto const &texts = it->second;
+    if (variant_index < 0 || variant_index >= static_cast<int>(texts.size()))
+        variant_index = 0;
+
+    // Resolve slot values — locale-key prefixed values are looked up
+    std::unordered_map<std::string, std::string> resolved;
+    for (auto const &[key, val] : slots) {
+        if (val.empty()) {
+            resolved[key] = "";
+        }
+        else if (val.starts_with("topic.") || val.starts_with("fact.")) {
+            // Locale key: look up the localized string
+            resolved[key] = locale_.get(val);
+        }
+        else {
+            // Raw string (e.g., person name)
+            resolved[key] = val;
+        }
+    }
+
+    std::string pattern = texts[variant_index];
+    return fill_template(pattern, resolved);
 }

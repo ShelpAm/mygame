@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/game-types.hpp"
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <concepts>
@@ -44,115 +45,159 @@ inline auto const &auth_payload()
     return auth_payload;
 }
 
+enum class ClientMsgType : std::uint32_t {
+    auth = -1U,
+    join = 0,
+    entity_update = 2,
+    chat = 3,
+    combat_event = 5,
+    recruit_soldier = 6,
+    player_input = 8,
+    interact = 9,
+    rest = 10,
+    dialogue_action = 13,
+    soldier_command = 17,
+    recruit_ranged = 18,
+    respawn = 20,
+    formation = 21,
+};
+
+enum class ServerMsgType : std::uint32_t {
+    auth = -1U,
+    state_full = 1,
+    entity_update = 2,
+    chat = 3,
+    combat_event = 5,
+    return_pid = 11,
+    dialogue_sync = 12,
+    entity_removed = 14,
+    state_delta = 15,
+    kicked = 16,
+    projectile_fired = 19,
+    town_discovered = 22,
+    town_left = 23,
+};
+
 struct NetPacket {
-    enum Type : uint32_t {
-        auth = -1U,
-        join = 0,
-        state_full = 1,
-        entity_update = 2,
-        chat = 3,
-        disconnect = 4,
-        combat_event = 5,
-        recruit_soldier = 6,
-        player_input = 8,
-        interact = 9,
-        rest = 10,
-        return_pid,
-        dialogue_sync,
-        dialogue_action,
-        entity_removed,
-        state_delta,
-        kicked,
-        soldier_command,
-        recruit_ranged,
-        projectile_fired,
-        respawn,
-        formation,
-    };
-    Type type;
+    std::uint32_t type;
     std::vector<uint8_t> payload;
 };
 
-template <> struct std::formatter<NetPacket::Type> : std::formatter<std::string_view> {
-    auto format(NetPacket::Type t, std::format_context &ctx) const
+template <> struct std::formatter<ClientMsgType> {
+    constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
+    auto format(ClientMsgType t, std::format_context &ctx) const
     {
-        using enum NetPacket::Type;
         std::string_view name = "unknown";
         switch (t) {
-        case join:
+        case ClientMsgType::join:
             name = "join";
             break;
-        case state_full:
-            name = "state_full";
-            break;
-        case entity_update:
+        case ClientMsgType::entity_update:
             name = "entity_update";
             break;
-        case chat:
+        case ClientMsgType::chat:
             name = "chat";
             break;
-        case disconnect:
-            name = "disconnect";
-            break;
-        case combat_event:
+        case ClientMsgType::combat_event:
             name = "combat_event";
             break;
-        case recruit_soldier:
+        case ClientMsgType::recruit_soldier:
             name = "recruit_soldier";
             break;
-        case player_input:
+        case ClientMsgType::player_input:
             name = "player_input";
             break;
-        case interact:
+        case ClientMsgType::interact:
             name = "interact";
             break;
-        case rest:
+        case ClientMsgType::rest:
             name = "rest";
             break;
-        case return_pid:
-            name = "return_pid";
-            break;
-        case dialogue_sync:
-            name = "dialogue_sync";
-            break;
-        case dialogue_action:
+        case ClientMsgType::dialogue_action:
             name = "dialogue_action";
             break;
-        case entity_removed:
-            name = "entity_removed";
-            break;
-        case state_delta:
-            name = "state_delta";
-            break;
-        case kicked:
-            name = "kicked";
-            break;
-        case soldier_command:
+        case ClientMsgType::soldier_command:
             name = "soldier_command";
             break;
-        case recruit_ranged:
+        case ClientMsgType::recruit_ranged:
             name = "recruit_ranged";
             break;
-        case projectile_fired:
-            name = "projectile_fired";
-            break;
-        case respawn:
+        case ClientMsgType::respawn:
             name = "respawn";
             break;
-        case formation:
+        case ClientMsgType::formation:
             name = "formation";
             break;
-        case auth:
+        case ClientMsgType::auth:
             name = "auth";
             break;
         }
-        return std::formatter<std::string_view>::format(name, ctx);
+        return std::copy(name.begin(), name.end(), ctx.out());
     }
 };
 
+template <> struct std::formatter<ServerMsgType> {
+    constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
+    auto format(ServerMsgType t, std::format_context &ctx) const
+    {
+        std::string_view name = "unknown";
+        switch (t) {
+        case ServerMsgType::state_full:
+            name = "state_full";
+            break;
+        case ServerMsgType::entity_update:
+            name = "entity_update";
+            break;
+        case ServerMsgType::chat:
+            name = "chat";
+            break;
+        case ServerMsgType::combat_event:
+            name = "combat_event";
+            break;
+        case ServerMsgType::return_pid:
+            name = "return_pid";
+            break;
+        case ServerMsgType::dialogue_sync:
+            name = "dialogue_sync";
+            break;
+        case ServerMsgType::entity_removed:
+            name = "entity_removed";
+            break;
+        case ServerMsgType::state_delta:
+            name = "state_delta";
+            break;
+        case ServerMsgType::kicked:
+            name = "kicked";
+            break;
+        case ServerMsgType::projectile_fired:
+            name = "projectile_fired";
+            break;
+        case ServerMsgType::town_discovered:
+            name = "town_discovered";
+            break;
+        case ServerMsgType::town_left:
+            name = "town_left";
+            break;
+        case ServerMsgType::auth:
+            name = "auth";
+            break;
+        }
+        return std::copy(name.begin(), name.end(), ctx.out());
+    }
+};
+
+// Streaming operators for Boost.Test and logging
+inline std::ostream &operator<<(std::ostream &os, ClientMsgType t)
+{
+    return os << std::format("{}", t);
+}
+inline std::ostream &operator<<(std::ostream &os, ServerMsgType t)
+{
+    return os << std::format("{}", t);
+}
+
 struct NetHead {
-    using Type = NetPacket::Type;
-    Type type;
+    std::uint32_t type;
     std::uint32_t size;
 };
 
@@ -380,12 +425,56 @@ inline std::vector<uint8_t> make_return_pid(EntityId eid, uint8_t team)
     return p;
 }
 
+// --- Town discovery data ---
+
+struct TownDiscoveredData {
+    std::string loc_id;
+    std::string locale_key;
+};
+
+inline TownDiscoveredData parse_town_discovered(std::vector<uint8_t> const &d, size_t off = 0)
+{
+    TownDiscoveredData r;
+    uint16_t id_len;
+    memcpy(&id_len, d.data() + off, 2);
+    off += 2;
+    r.loc_id.assign(d.begin() + static_cast<std::ptrdiff_t>(off),
+                     d.begin() + static_cast<std::ptrdiff_t>(off) + id_len);
+    off += id_len;
+    uint16_t key_len;
+    memcpy(&key_len, d.data() + off, 2);
+    off += 2;
+    r.locale_key.assign(d.begin() + static_cast<std::ptrdiff_t>(off),
+                         d.begin() + static_cast<std::ptrdiff_t>(off) + key_len);
+    return r;
+}
+
+inline std::vector<uint8_t> make_town_discovered(std::string const &loc_id,
+                                                  std::string const &locale_key)
+{
+    std::vector<uint8_t> p;
+    uint16_t id_len = static_cast<uint16_t>(loc_id.size());
+    write_bytes(p, id_len);
+    p.insert(p.end(), loc_id.begin(), loc_id.end());
+    uint16_t key_len = static_cast<uint16_t>(locale_key.size());
+    write_bytes(p, key_len);
+    p.insert(p.end(), locale_key.begin(), locale_key.end());
+    return p;
+}
+
 // --- Dialogue sync parsing ---
 
 struct DialogueLineData {
     uint8_t speaker;
+    bool use_template = false;
+    // For template-based lines (use_template=true)
+    std::string template_type;
+    int variant_index = 0;
+    std::vector<std::pair<std::string, std::string>> slots;
+    // For non-template lines (use_template=false)
     std::string text;
-    bool use_raw;
+    bool use_raw = false;
+    // Always present
     std::string npc_name;
 };
 
@@ -418,8 +507,25 @@ inline DialogueSyncData parse_dialogue_sync(std::vector<uint8_t> const &d)
     for (uint8_t i = 0; i < line_count; ++i) {
         DialogueLineData l;
         l.speaker = d[off++];
-        l.text = rstr();
-        l.use_raw = d[off++];
+        uint8_t flags = d[off++];
+        l.use_template = flags & 1;
+        if (l.use_template) {
+            l.template_type = rstr();
+            memcpy(&l.variant_index, d.data() + off, 4);
+            off += 4;
+            uint16_t slot_count;
+            memcpy(&slot_count, d.data() + off, 2);
+            off += 2;
+            for (uint16_t j = 0; j < slot_count; ++j) {
+                auto key = rstr();
+                auto val = rstr();
+                l.slots.emplace_back(std::move(key), std::move(val));
+            }
+        }
+        else {
+            l.text = rstr();
+            l.use_raw = flags & 2;
+        }
         l.npc_name = rstr();
         r.lines.push_back(std::move(l));
     }
@@ -451,11 +557,35 @@ inline void serialize_dialogue_sync(std::vector<uint8_t> &out, DialogueState con
     out.push_back(static_cast<uint8_t>(ds.history.size()));
     for (auto const &line : ds.history) {
         out.push_back(static_cast<uint8_t>(line.speaker));
-        auto const &text = line.use_raw ? line.raw_text : line.text_key;
-        uint16_t tlen = static_cast<uint16_t>(text.size());
-        write_bytes(out, tlen);
-        out.insert(out.end(), text.begin(), text.end());
-        out.push_back(line.use_raw ? 1 : 0);
+        uint8_t flags = (line.use_template ? 1 : 0) | (line.use_raw ? 2 : 0);
+        out.push_back(flags);
+        if (line.use_template) {
+            // template_type
+            uint16_t ttlen = static_cast<uint16_t>(line.template_type.size());
+            write_bytes(out, ttlen);
+            out.insert(out.end(), line.template_type.begin(), line.template_type.end());
+            // variant_index
+            write_bytes(out, line.variant_index);
+            // slots
+            uint16_t sc = static_cast<uint16_t>(line.slots.size());
+            write_bytes(out, sc);
+            for (auto const &[key, val] : line.slots) {
+                uint16_t klen = static_cast<uint16_t>(key.size());
+                write_bytes(out, klen);
+                out.insert(out.end(), key.begin(), key.end());
+                uint16_t vlen = static_cast<uint16_t>(val.size());
+                write_bytes(out, vlen);
+                out.insert(out.end(), val.begin(), val.end());
+            }
+        }
+        else {
+            auto const &text = line.use_raw ? line.raw_text : line.text_key;
+            uint16_t tlen = static_cast<uint16_t>(text.size());
+            write_bytes(out, tlen);
+            out.insert(out.end(), text.begin(), text.end());
+            // Note: use_raw flag was already sent in the flags byte
+        }
+        // npc_name (always)
         uint16_t nlen = static_cast<uint16_t>(line.npc_name.size());
         write_bytes(out, nlen);
         out.insert(out.end(), line.npc_name.begin(), line.npc_name.end());

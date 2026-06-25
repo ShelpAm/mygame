@@ -4,6 +4,7 @@
 #include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "entities/components/visual-fx.hpp"
+#include "world/location-store.hpp"
 #include <SDL3/SDL.h>
 #include <vector>
 class ResourceManager;
@@ -12,6 +13,7 @@ struct PlayerVisibility;
 class Client;
 class WorldState;
 class NavigationSystem;
+class MapData;
 
 struct CombatEvent;
 
@@ -23,6 +25,9 @@ class RenderSystem {
     void render(Client const &client, NavigationSystem const &nav);
     void toggle_debug_mode() { debug_mode_ = !debug_mode_; }
 
+    void set_map_data(MapData const *md) { map_data_ = md; }
+    void set_location_defs(std::vector<LocationDefinition> const *defs) { location_defs_ = defs; }
+
     SDL_Window *window() const { return window_; }
     SDL_Renderer *renderer() const { return renderer_; }
 
@@ -33,9 +38,12 @@ class RenderSystem {
     ResourceManager *resources_;
     CameraSystem *camera_;
     Font *font_;
+    MapData const *map_data_ = nullptr;
+    std::vector<LocationDefinition> const *location_defs_ = nullptr;
     bool debug_mode_ = false;
 
     void render_tile_map(PlayerVisibility const &vis, NavigationSystem const &nav) const;
+    void render_town_labels(Client const &client) const;
     void render_entities(Client const &client, Vec2f pos, EntityId eid);
     void render_projectiles(Client const &client);
     void render_health_bars(Client const &client, Vec2f player_pos);

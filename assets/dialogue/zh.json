@@ -138,6 +138,21 @@
             "texts": ["你应该去找[person]问[topic]的事。他们比我清楚。",
                        "[person]才是你要找的人。去问他们[topic]的事。",
                        "我不是合适的人。但[person]？他们什么都知道。关于[topic]。"]
+        },
+        {
+            "type": "tell_about_topic",
+            "texts": ["让我告诉你关于[topic]的事。我听到了一些消息。",
+                       "我对[topic]略知一二。听好了。",
+                       "你想知道[topic]？我可以告诉你我所知道的。",
+                       "我前几天刚听说了一些关于[topic]的事。",
+                       "让我分享一下我了解到的关于[topic]的事。"]
+        },
+        {
+            "type": "ask_about_topic",
+            "texts": ["[topic]是怎么回事？",
+                       "给我讲讲[topic]。",
+                       "我想知道[topic]的事。",
+                       "你知道关于[topic]的事吗？"]
         }
     ]
 }

@@ -1,8 +1,10 @@
 #pragma once
 
 #include "core/font.hpp"
+#include "world/location-store.hpp"
 #include <SDL3/SDL.h>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 class App;
@@ -27,6 +29,8 @@ class UIManager {
     void toggle_help() { show_help_ = !show_help_; }
     void toggle_load_menu() { show_load_menu_ = !show_load_menu_; }
     void toggle_multiplayer() { show_multiplayer_ = !show_multiplayer_; }
+
+    void set_location_defs(std::vector<LocationDefinition> const *defs) { location_defs_ = defs; }
 
   private:
     RenderSystem *render_system_;
@@ -59,6 +63,15 @@ class UIManager {
     std::string chat_buf_;
     bool chat_active_ = false;
     std::vector<std::string> server_list_;
+
+    struct DiscoveryNotification {
+        std::string locale_key;
+        float timer = 0.f;
+    };
+    std::vector<DiscoveryNotification> discovery_queue_;
+    std::vector<LocationDefinition> const *location_defs_ = nullptr;
+    std::unordered_set<std::string> notified_town_ids_;
+
     void load_server_list();
     void save_server_list();
 };

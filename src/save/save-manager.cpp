@@ -3,6 +3,7 @@
 #include "knowledge/knowledge-graph.hpp"
 #include "world/world-state.hpp"
 #include <boost/json.hpp>
+#include <cassert>
 #include <fstream>
 #include <spdlog/spdlog.h>
 
@@ -33,8 +34,7 @@ bool SaveManager::save(std::string const &path, WorldState const &ws, KnowledgeG
     boost::json::array relArr;
     for (auto const &npc_id : rt.all_npc_ids()) {
         auto *rel = rt.get_relation(npc_id);
-        if (!rel)
-            continue;
+        assert(rel);
         boost::json::object ro;
         ro["npc_id"] = npc_id;
         ro["trust"] = rel->trust;

@@ -4,8 +4,8 @@
 #include <ostream>
 
 struct Vec2f {
-    float x;
-    float y;
+    float x{};
+    float y{};
 
     constexpr Vec2f() = default;
     constexpr Vec2f(float x, float y) : x(x), y(y) {}
@@ -42,8 +42,8 @@ struct Vec2f {
 };
 
 struct Vec2i {
-    int x;
-    int y;
+    int x{};
+    int y{};
 
     constexpr Vec2i() = default;
     constexpr Vec2i(int x, int y) : x(x), y(y) {}

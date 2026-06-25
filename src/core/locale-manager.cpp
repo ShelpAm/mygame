@@ -2,122 +2,102 @@
 #include <boost/json.hpp>
 #include <filesystem>
 #include <fstream>
+#include <ranges>
 #include <spdlog/spdlog.h>
 
 LocaleManager::LocaleManager() = default;
 
-int LocaleManager::discover_languages(std::string const &locale_dir)
+std::size_t LocaleManager::discover_languages(std::string const &locale_dir)
 {
-    language_names_.clear();
-    strings_.clear();
+    std::size_t num{};
+    for (auto const &entry : std::filesystem::directory_iterator(locale_dir)) {
+        if (!entry.is_regular_file())
+            continue;
+        auto ext = entry.path().extension().string();
+        if (ext != ".json")
+            continue;
 
-    try {
-        for (auto const &entry : std::filesystem::directory_iterator(locale_dir)) {
-            if (!entry.is_regular_file())
+        auto stem = entry.path().stem().string();
+        try {
+            if (strings_.contains(stem)) {
+                spdlog::warn("LocaleManager: duplicate locale {} found, skipping", stem);
                 continue;
-            auto ext = entry.path().extension().string();
-            if (ext != ".json")
-                continue;
-
-            auto stem = entry.path().stem().string();
-            if (load_language_file(entry.path().string(), stem)) {
-                language_names_.push_back(stem);
             }
+            load_language_file(entry.path().string(), stem);
+            ++num;
+        }
+        catch (std::exception const &e) {
+            spdlog::error("LocaleManager: failed to load locale {}: {}", entry.path().string(),
+                          e.what());
         }
     }
-    catch (std::exception const &e) {
-        spdlog::error("Failed to discover locales: {}", e.what());
-    }
-    return static_cast<int>(language_names_.size());
+    return num;
 }
 
-bool LocaleManager::load_language_file(std::string const &path, std::string const &name)
+std::vector<std::string> LocaleManager::available_languages() const
+{
+    return strings_ | std::views::keys | std::ranges::to<std::vector>();
+}
+
+void LocaleManager::load_language_file(std::string const &path, std::string const &name)
 {
     std::ifstream file(path);
     if (!file.is_open())
-        return false;
+        throw std::runtime_error("LocaleManager: failed to open locale file " + path);
 
-    try {
-        std::string content{std::istreambuf_iterator<char>(file), {}};
-        auto root = boost::json::parse(content).as_object();
+    std::string content{std::istreambuf_iterator<char>(file), {}};
+    auto root = boost::json::parse(content).as_object();
 
-        std::unordered_map<std::string, std::string> strings;
-        for (auto const &[key, value] : root) {
-            strings[std::string(key)] = std::string(value.as_string());
-        }
-        strings_.push_back(std::move(strings));
-        return true;
+    std::unordered_map<std::string, std::string> strings;
+    for (auto const &[key, value] : root) {
+        strings[std::string(key)] = std::string(value.as_string());
     }
-    catch (std::exception const &e) {
-        spdlog::error("Failed to load locale {}: {}", path, e.what());
-        return false;
+    strings_.insert({name, std::move(strings)});
+}
+
+void LocaleManager::set_language(std::string const &name)
+{
+    if (!strings_.contains(name)) {
+        throw std::runtime_error("LocaleManager: language '" + std::string(name) + "' not found");
     }
-}
-
-void LocaleManager::set_language(int lang_index)
-{
-    if (lang_index >= 0 && lang_index < static_cast<int>(strings_.size()))
-        current_ = lang_index;
-}
-
-std::string LocaleManager::language_name() const
-{
-    if (current_ >= 0 && current_ < static_cast<int>(language_names_.size()))
-        return language_names_[current_];
-    return "?";
-}
-
-std::string const &LocaleManager::language_name(int idx) const
-{
-    static std::string const empty;
-    if (idx >= 0 && idx < static_cast<int>(language_names_.size()))
-        return language_names_[idx];
-    return empty;
+    current_ = name;
 }
 
 std::string const &LocaleManager::get(std::string const &key) const
 {
-    if (current_ < 0 || current_ >= static_cast<int>(strings_.size())) {
-        throw std::runtime_error("LocaleManager: current language index is out of range");
-    }
     auto const &strings = current_strings();
     auto it = strings.find(key);
     if (it != strings.end())
         return it->second;
-
-    // Fallback to first language (usually English)
-    if (current_ != 0 && !strings_.empty()) {
-        auto it0 = strings_[0].find(key);
-        if (it0 != strings_[0].end())
-            return it0->second;
-    }
-
-    throw std::runtime_error("LocaleManager: missing key '" + key + "' in language '" +
-                             language_name() + "'");
+    throw std::runtime_error("LocaleManager: missing key '" + key + "' in language '" + current_ +
+                             "'");
 }
 
-std::string LocaleManager::fmt(std::string const &key, std::string const &arg0,
-                               std::string const &arg1, std::string const &arg2) const
-{
-    std::string text = get(key);
-    if (text.empty())
-        return key;
-
-    auto replace = [&](std::string const &from, std::string const &to) {
-        size_t pos = text.find(from);
-        if (pos != std::string::npos)
-            text.replace(pos, from.length(), to);
-    };
-    if (!arg0.empty())
-        replace("{0}", arg0);
-    if (!arg1.empty())
-        replace("{1}", arg1);
-    if (!arg2.empty())
-        replace("{2}", arg2);
-    return text;
-}
+// std::string LocaleManager::fmt(std::string const &key, std::string const &arg0,
+//                                std::string const &arg1, std::string const &arg2) const
+// {
+//     std::string text = get(key);
+//     if (text.empty())
+//         return key;
+//
+//     auto replace = [&](std::string const &from, std::string const &to) {
+//         size_t pos = text.find(from);
+//         if (pos != std::string::npos)
+//             text.replace(pos, from.length(), to);
+//     };
+//     if (!arg0.empty())
+//         replace("{0}", arg0);
+//     if (!arg1.empty())
+//         replace("{1}", arg1);
+//     if (!arg2.empty())
+//         replace("{2}", arg2);
+//     return text;
+// }
 
 std::unordered_map<std::string, std::string> const &LocaleManager::current_strings() const
 {
-    return strings_[current_];
+    if (!strings_.contains(current_))
+        throw std::runtime_error(
+            std::format("LocaleManager: current language '{}' not found", current_));
+    return strings_.at(current_);
 }

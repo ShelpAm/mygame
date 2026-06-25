@@ -6,6 +6,7 @@
 #include "systems/navigation-system.hpp"
 #include "world/map-data.hpp"
 #include "world/world-state.hpp"
+#include <cassert>
 #include <cmath>
 #include <deque>
 #include <ranges>
@@ -22,6 +23,7 @@ void RenderSystem::render(Client const &client, NavigationSystem const &nav)
 {
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     render_tile_map(client.player_visibility(), nav);
+    render_town_labels(client);
     render_entities(client, client.player_position(), client.player_id());
     render_projectiles(client);
     render_health_bars(client, client.player_position());
@@ -31,17 +33,46 @@ void RenderSystem::render(Client const &client, NavigationSystem const &nav)
 
 void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem const &nav) const
 {
+    assert(map_data_);
     auto vp = camera_->viewport();
     auto left_up = world_to_tile(Vec2f(vp.x, vp.y));
     auto right_down = world_to_tile(Vec2f(vp.x + vp.w, vp.y + vp.h));
 
-    // Dual-grid tile
     for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
         for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
-            auto tile = Vec2i(x, y);
+            Vec2i tile(x, y);
             auto lu = lu_of_tile(tile);
+            auto const zoom = camera_->zoom();
+
+            // Check MapData for building/road tiles
+            if (map_data_->in_bounds(x, y)) {
+                int type = map_data_->tile(x, y).type;
+                if (type == 4) {
+                    Vec2f screen = camera_->world_to_screen(lu);
+                    SDL_FRect rect{.x = screen.x,
+                                   .y = screen.y,
+                                   .w = tile_size * zoom + 2.F,
+                                   .h = tile_size * zoom + 2.F};
+                    SDL_SetRenderDrawColor(renderer_, 120, 70, 30, 240);
+                    SDL_RenderFillRect(renderer_, &rect);
+                    SDL_SetRenderDrawColor(renderer_, 160, 110, 50, 255);
+                    SDL_RenderRect(renderer_, &rect);
+                    continue;
+                }
+                if (type == 3) {
+                    Vec2f screen = camera_->world_to_screen(lu);
+                    SDL_FRect rect{.x = screen.x,
+                                   .y = screen.y,
+                                   .w = tile_size * zoom + 2.F,
+                                   .h = tile_size * zoom + 2.F};
+                    SDL_SetRenderDrawColor(renderer_, 180, 160, 110, 200);
+                    SDL_RenderFillRect(renderer_, &rect);
+                    continue;
+                }
+            }
+
+            // Default auto-tiling for grass/water/mountain
             int idx{};
-            // dy, dx, w
             std::vector<std::pair<int, int>> const surround{
                 {-1, -1},
                 {-1, 0},
@@ -55,9 +86,7 @@ void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem
                 if (nav.is_walkable({nx, ny}))
                     idx += 1 << i;
             }
-            auto s = std::to_string(idx);
-
-            draw_sprite(lu, tile_size, "tile_" + s, max_alpha, false);
+            draw_sprite(lu, tile_size, "tile_" + std::to_string(idx), max_alpha, false);
         }
     }
 
@@ -124,6 +153,34 @@ void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem
     //         }
     //     }
     // }
+}
+
+void RenderSystem::render_town_labels(Client const &client) const
+{
+    assert(location_defs_);
+
+    auto const &discovered = client.discovered_towns();
+    if (discovered.empty())
+        return;
+
+    for (auto const &def : *location_defs_) {
+        bool found = false;
+        for (auto const &dt : discovered) {
+            if (dt.loc_id == def.id) {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            continue;
+
+        Vec2f center = center_of_tile(def.tile_center);
+        Vec2f screen = camera_->world_to_screen(center);
+        float label_y = screen.y - tile_size;
+
+        font_->draw({screen.x, label_y}, SDL_Color{.r = 255, .g = 240, .b = 200, .a = 255},
+                    def.display_name_en);
+    }
 }
 
 void RenderSystem::render_entities(Client const &client, Vec2f pos, EntityId eid)

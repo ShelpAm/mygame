@@ -12,7 +12,7 @@ bool QuestManager::load_from_json(std::string const &json_path)
         std::string content{std::istreambuf_iterator<char>(file), {}};
         auto json = boost::json::parse(content);
         for (auto const &item : json.as_object().at("quests").as_array()) {
-            auto &obj = item.as_object();
+            auto const &obj = item.as_object();
             Quest q;
             q.id = std::string(obj.at("id").as_string());
             q.title_key = std::string(obj.at("title").as_string());

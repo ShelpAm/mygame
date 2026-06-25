@@ -16,6 +16,7 @@
 #include "systems/combat-system.hpp"
 #include "systems/combat-utils.hpp"
 #include "systems/quest-manager.hpp"
+#include "world/location-store.hpp"
 #include "world/world-state.hpp"
 #include <chrono>
 #include <cstdint>
@@ -97,7 +98,6 @@ class GameMode {
     void mark_frame_clean();
 
     void register_player(EntityId _) {}
-    void recompute_player_visibility();
     bool is_entity_visible_to_player(EntityId player_eid, Vec2f world_pos) const;
 
     void remove_player(EntityId pid)
@@ -121,6 +121,8 @@ class GameMode {
 
     void set_navigation(NavigationSystem const *nav);
     void set_server(Server *s) { server_ = s; }
+
+    void set_location_defs(std::vector<LocationDefinition> const &defs) { location_defs_ = &defs; }
 
   private:
     EntityId spawn_soldier(EntityId captain_id, SoldierRole role);
@@ -159,6 +161,8 @@ class GameMode {
     flecs::entity movement_sys_;
     flecs::entity collision_sys_;
     flecs::entity death_marker_sys_;
+    flecs::entity town_proximity_sys_;
+    flecs::entity player_visibility_sys_;
 
     std::unique_ptr<CollisionSystem> collision_system_;
     flecs::query<Transform, Collider> entity_query_;
@@ -180,6 +184,11 @@ class GameMode {
 
     Formation &formation(EntityId captain_id, SoldierRole role, EntityId target_id);
     std::unordered_map<FormationKey, std::unique_ptr<Formation>> formations_;
+
+    std::unordered_map<EntityId, std::string> current_town_for_player_;
+    std::vector<LocationDefinition> const *location_defs_ = nullptr;
+    std::vector<std::pair<std::string, std::string>> pending_town_discoveries_;
+    bool pending_town_left_ = false;
 
     void mark_dirty(EntityId eid) { dirty_entities_.insert(eid); }
     void check_event_spawns();

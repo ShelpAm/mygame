@@ -1,4 +1,5 @@
 #include "dialogue/dialogue-engine.hpp"
+#include "core/game-types.hpp"
 #include "entities/components/npc-state.hpp"
 #include <boost/json.hpp>
 #include <filesystem>
@@ -81,7 +82,10 @@ DialogueResponse DialogueEngine::generate_greeting(NPCState const &npc, int play
     for (auto const &t : active_templates()) {
         if (t.type == "greeting_" + npc.personality) {
             std::uniform_int_distribution<size_t> dist(0, t.texts.size() - 1);
-            resp.text = t.texts[dist(rng)];
+            auto idx = dist(rng);
+            resp.text = t.texts[idx];
+            resp.template_type = t.type;
+            resp.variant_index = static_cast<int>(idx);
             break;
         }
     }
@@ -91,7 +95,10 @@ DialogueResponse DialogueEngine::generate_greeting(NPCState const &npc, int play
         for (auto const &t : active_templates()) {
             if (t.type == "greeting") {
                 std::uniform_int_distribution<size_t> dist(0, t.texts.size() - 1);
-                resp.text = t.texts[dist(rng)];
+                auto idx = dist(rng);
+                resp.text = t.texts[idx];
+                resp.template_type = t.type;
+                resp.variant_index = static_cast<int>(idx);
                 break;
             }
         }
@@ -152,23 +159,42 @@ DialogueResponse DialogueEngine::generate_ask_response(NPCState const &npc,
         }
     }
 
-    std::unordered_map<std::string, std::string> slots;
-    slots["topic"] = topic_display_name;
+    // Populate template metadata for client-side localization
+    if (tmpl) {
+        resp.template_type = tmpl->type;
+    }
+
+    // Slots for client-side localization — values are locale keys
+    resp.slots["topic"] = "topic." + topic_id;
     if (knows && !lie) {
-        slots["detail"] = it->second.npc_version;
-        slots["person"] =
-            it->second.source_npc_id.empty() ? "a traveler" : it->second.source_npc_id;
+        resp.slots["detail"] = it->second.locale_key.empty() ? it->second.npc_version : it->second.locale_key;
+        resp.slots["person"] = it->second.source_npc_id.empty() ? "" : it->second.source_npc_id;
         resp.fact_id = topic_id;
     }
     else {
-        slots["detail"] = "";
-        slots["person"] = "someone";
+        resp.slots["detail"] = "";
+        resp.slots["person"] = "someone";
+    }
+
+    // Fill resp.text for backward compat — use display names, not locale keys
+    std::unordered_map<std::string, std::string> text_slots;
+    text_slots["topic"] = topic_display_name;
+    if (knows && !lie) {
+        text_slots["detail"] = it->second.npc_version;
+        text_slots["person"] =
+            it->second.source_npc_id.empty() ? "a traveler" : it->second.source_npc_id;
+    }
+    else {
+        text_slots["detail"] = "";
+        text_slots["person"] = "someone";
     }
 
     {
         thread_local std::mt19937 rng2{std::random_device{}()};
         std::uniform_int_distribution<size_t> dist(0, tmpl->texts.size() - 1);
-        resp.text = fill_template(tmpl->texts[dist(rng2)], slots);
+        auto idx = dist(rng2);
+        resp.variant_index = static_cast<int>(idx);
+        resp.text = fill_template(tmpl->texts[idx], text_slots);
     }
     resp.is_truthful = !lie && knows;
 
@@ -206,22 +232,6 @@ DialogueTemplate const *DialogueEngine::pick_template(NPCState const &npc, bool 
         return &t;
     }
     return nullptr;
-}
-
-std::string
-DialogueEngine::fill_template(std::string const &pattern,
-                              std::unordered_map<std::string, std::string> const &slots) const
-{
-    std::string result = pattern;
-    for (auto const &[key, value] : slots) {
-        std::string placeholder = "[" + key + "]";
-        size_t pos = 0;
-        while ((pos = result.find(placeholder, pos)) != std::string::npos) {
-            result.replace(pos, placeholder.length(), value);
-            pos += value.length();
-        }
-    }
-    return result;
 }
 
 bool DialogueEngine::would_lie(NPCState const &npc, int player_trust) const

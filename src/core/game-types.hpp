@@ -2,10 +2,27 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using EntityId = std::uint64_t; // matches flecs::entity_t
 constexpr EntityId invalid_entity = 0;
+
+// Fill [key] placeholders with values from slots map
+inline std::string fill_template(std::string const &pattern,
+                                 std::unordered_map<std::string, std::string> const &slots)
+{
+    std::string result = pattern;
+    for (auto const &[key, value] : slots) {
+        std::string placeholder = "[" + key + "]";
+        size_t pos = 0;
+        while ((pos = result.find(placeholder, pos)) != std::string::npos) {
+            result.replace(pos, placeholder.length(), value);
+            pos += value.length();
+        }
+    }
+    return result;
+}
 
 struct DialogueLine {
     enum Speaker { player, npc };
@@ -14,11 +31,18 @@ struct DialogueLine {
     std::string raw_text;
     bool use_raw = false;
     std::string npc_name;
+
+    // Template-based rendering (for client-side localization)
+    bool use_template = false;
+    std::string template_type;
+    int variant_index = 0;
+    std::unordered_map<std::string, std::string> slots;
 };
 
 struct NPCKnowledgeEntry {
     std::string fact_id;
-    std::string version;
+    std::string locale_key; // e.g. "fact.ugarit_sack.merchant_1"
+    std::string version;    // English fallback text
     int confidence = 70;
     bool witnessed = false;
     std::string source;

@@ -11,6 +11,7 @@ Server::Server()
       next_player_team_{static_cast<std::uint8_t>(Team::player_begin)}
 {
 }
+
 Server::~Server()
 {
     clear_transports();
@@ -21,12 +22,6 @@ Server::~Server()
 void Server::set_game_mode(GameMode *gm)
 {
     game_mode_ = gm;
-}
-
-void Server::set_language(int lang_index)
-{
-    if (game_mode_)
-        game_mode_->dialogue_engine().set_language(lang_index);
 }
 
 awaitable<void> Server::listen(std::uint16_t port)
@@ -73,7 +68,7 @@ awaitable<void> Server::attach_transport(std::shared_ptr<Session> t)
                 // still alive. We don't need to check `self`.
                 spdlog::trace("Server: received message \"{}\" with payload size "
                               "{} from transport {}",
-                              msg.type, msg.payload.size(), t->remote_info());
+                              static_cast<ClientMsgType>(msg.type), msg.payload.size(), t->remote_info());
                 if (!s->messages_.try_send(boost::system::error_code{}, t, msg)) {
                     Session::spawn([](Server *s, auto t, auto msg) -> awaitable<void> {
                         co_await s->messages_.async_send(boost::system::error_code{}, t,
@@ -124,7 +119,7 @@ void Server::kick(std::shared_ptr<Session> t, std::string const &reason)
     std::vector<uint8_t> reason_payload(reason.begin(), reason.end());
     Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
         try {
-            co_await t->write({NetPacket::kicked, std::move(payload)});
+            co_await t->write({ServerMsgType::kicked, std::move(payload)});
         }
         catch (boost::system::system_error const &e) {
             ; // TODO(shelpam): Temporarily leaves empty, as I don't know
@@ -141,7 +136,8 @@ void Server::clear_transports()
 
 void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
 {
-    if (msg.type == NetPacket::join) {
+    switch (static_cast<ClientMsgType>(msg.type)) {
+    case ClientMsgType::join: {
         assert(msg.payload.empty());
         Team team = static_cast<Team>(next_player_team_++);
         auto eid = game_mode_->spawn_player({0, 0}, team);
@@ -149,13 +145,14 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
         player_eid_of_session_[from.get()] = eid;
         auto payload = make_return_pid(eid, static_cast<std::uint8_t>(team));
         Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::return_pid, std::move(payload)});
+            co_await t->write({ServerMsgType::return_pid, std::move(payload)});
         }(from, std::move(payload)));
         spdlog::info("Server: new player joined (ID: {}, team: {})", eid,
                      static_cast<std::uint8_t>(team));
         mark_needs_full_sync("new player joined");
+        break;
     }
-    else if (msg.type == NetPacket::entity_update) {
+    case ClientMsgType::entity_update: {
         auto u = parse_entity_update(msg.payload);
         assert(game_mode_->is_player(u.id));
         game_mode_->sync_entity_state(u.id, {u.x, u.y}, u.hp, u.max_hp, u.alive);
@@ -163,87 +160,104 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
             sent_initial_sync_[u.id] = true;
             mark_needs_full_sync("entity_update");
         }
+        break;
     }
-    else if (msg.type == NetPacket::recruit_soldier) {
+    case ClientMsgType::recruit_soldier: {
         assert(msg.payload.size() >= 8);
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
         assert(pid != invalid_entity);
         spdlog::debug("Server: recruit soldier for player {}", pid);
         game_mode_->spawn_recruit(pid);
+        break;
     }
-    else if (msg.type == NetPacket::recruit_ranged) {
+    case ClientMsgType::recruit_ranged: {
         assert(msg.payload.size() >= 8);
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
         spdlog::debug("Server: recruit ranged for player {}", pid);
         game_mode_->spawn_recruit_ranged(pid);
+        break;
     }
-    else if (msg.type == NetPacket::soldier_command) {
+    case ClientMsgType::soldier_command: {
         assert(msg.payload.size() >= 8);
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
         game_mode_->cycle_stance(pid);
+        break;
     }
-    else if (msg.type == NetPacket::respawn) {
+    case ClientMsgType::respawn: {
         assert(msg.payload.size() >= 8);
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
         spdlog::debug("Server: respawn player {}", pid);
         game_mode_->respawn_player(pid);
+        break;
     }
-    else if (msg.type == NetPacket::formation) {
+    case ClientMsgType::formation: {
         assert(msg.payload.size() >= 9);
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
         uint8_t mask = msg.payload[8];
         game_mode_->cycle_formation(pid, mask);
+        break;
     }
-    else if (msg.type == NetPacket::player_input) {
+    case ClientMsgType::player_input: {
         auto in = parse_player_input(msg.payload);
         spdlog::debug("Server: player_input pid={} dir=({:.2f},{:.2f}) "
                       "client_tick={} server_tick={} delay={}ms",
                       in.pid, in.mx, in.my, in.client_ms, SDL_GetTicks(),
                       static_cast<int32_t>(SDL_GetTicks() - in.client_ms));
         game_mode_->apply_player_input(in.pid, {in.mx, in.my});
+        break;
     }
-    else if (msg.type == NetPacket::interact) {
+    case ClientMsgType::interact: {
         auto it = player_eid_of_session_.find(from.get());
         if (it == player_eid_of_session_.end())
-            return;
+            break;
         game_mode_->handle_interaction(it->second);
         send_dialogue_to(from, it->second);
+        break;
     }
-    else if (msg.type == NetPacket::dialogue_action) {
+    case ClientMsgType::dialogue_action: {
         auto it = player_eid_of_session_.find(from.get());
         if (it != player_eid_of_session_.end()) {
             std::string action(msg.payload.begin(), msg.payload.end());
             game_mode_->do_dialogue_action(it->second, action);
             send_dialogue_to(from, it->second);
         }
+        break;
     }
-    else if (msg.type == NetPacket::rest) {
+    case ClientMsgType::rest: {
         assert(msg.payload.size() >= 8);
         EntityId pid;
         memcpy(&pid, msg.payload.data(), 8);
         spdlog::debug("Server: player {} rests", pid);
         game_mode_->heal_entity(pid, 5);
         mark_needs_full_sync("player rest");
+        break;
     }
-    else if (msg.type == NetPacket::combat_event) {
+    case ClientMsgType::combat_event: {
         auto ev = parse_combat_event(msg.payload);
         spdlog::debug("Server: combat event: attacker={}, defender={}, dmg={}", ev.attacker_id,
                       ev.defender_id, ev.damage);
         game_mode_->apply_damage(ev.defender_id, ev.damage, ev.killed);
+        break;
     }
-    else if (msg.type == NetPacket::chat) {
+    case ClientMsgType::chat: {
         std::string chat_msg(msg.payload.begin(), msg.payload.end());
         spdlog::info("Chat message from {}: {}", from->remote_info(), chat_msg);
         auto payload = make_chat(chat_msg);
         for (auto &s : sessions_)
             Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-                co_await t->write({NetPacket::chat, payload});
+                co_await t->write({ServerMsgType::chat, payload});
             }(s, payload));
+        break;
+    }
+    case ClientMsgType::auth:
+        // Auth is handled in authenticate_transport, not here
+        spdlog::debug("Server: unexpected auth message in handle_message");
+        break;
     }
 }
 
@@ -269,16 +283,16 @@ void Server::broadcast_sync()
             continue;
         EntityId player_eid = player_it->second;
 
-        NetPacket::Type pkt_type{};
+        ServerMsgType pkt_type{};
         GameMode::PlayerSyncPayload result;
 
         if (needs_full) {
             result = game_mode_->build_full_payload(player_eid);
-            pkt_type = NetPacket::state_full;
+            pkt_type = ServerMsgType::state_full;
         }
         else {
             result = game_mode_->build_dirty_payload(player_eid, last_sent_entities_[s.get()]);
-            pkt_type = NetPacket::state_delta;
+            pkt_type = ServerMsgType::state_delta;
         }
 
         if (result.bytes.empty())
@@ -286,7 +300,7 @@ void Server::broadcast_sync()
 
         last_sent_entities_[s.get()] = result.entity_ids;
 
-        Session::spawn([](std::shared_ptr<Session> t, NetPacket::Type pkt_type,
+        Session::spawn([](std::shared_ptr<Session> t, ServerMsgType pkt_type,
                           std::vector<uint8_t> payload) -> awaitable<void> {
             co_await t->write({pkt_type, payload});
         }(s, pkt_type, std::move(result.bytes)));
@@ -300,14 +314,14 @@ void Server::broadcast_entity_removed(EntityId eid)
     auto payload = make_entity_removed(eid);
     for (auto &s : sessions_)
         Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::entity_removed, payload});
+            co_await t->write({ServerMsgType::entity_removed, payload});
         }(s, payload));
 }
 
-void Server::broadcast_to_all(NetPacket::Type type, std::vector<uint8_t> payload)
+void Server::broadcast_to_all(ServerMsgType type, std::vector<uint8_t> payload)
 {
     for (auto &s : sessions_)
-        Session::spawn([](std::shared_ptr<Session> t, NetPacket::Type type,
+        Session::spawn([](std::shared_ptr<Session> t, ServerMsgType type,
                           std::vector<uint8_t> payload) -> awaitable<void> {
             co_await t->write({type, payload});
         }(s, type, payload));
@@ -333,7 +347,7 @@ void Server::send_dialogue_to(std::shared_ptr<Session> to, EntityId pid)
     std::vector<uint8_t> payload;
     serialize_dialogue_sync(payload, game_mode_->dialogue(pid));
     Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-        co_await t->write({NetPacket::dialogue_sync, std::move(payload)});
+        co_await t->write({ServerMsgType::dialogue_sync, std::move(payload)});
     }(to, std::move(payload)));
 }
 
@@ -341,11 +355,11 @@ awaitable<bool> Server::authenticate_transport(std::shared_ptr<Session> t)
 {
     try {
         auto req = co_await t->read();
-        spdlog::debug("Server: received auth: type: {}, payload: {}", req.type, req.payload);
-        if (req.type != NetPacket::auth || req.payload != auth_payload())
+        spdlog::debug("Server: received auth: type: {}, payload: {}", static_cast<ClientMsgType>(req.type), req.payload);
+        if (req.type != static_cast<std::uint32_t>(ClientMsgType::auth) || req.payload != auth_payload())
             co_return false;
 
-        co_await t->write({NetPacket::auth, auth_payload()});
+        co_await t->write({ServerMsgType::auth, auth_payload()});
         co_return true;
     }
     catch (...) {

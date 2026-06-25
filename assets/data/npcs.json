@@ -4,144 +4,341 @@
             "id": "merchant_1",
             "name": "Old Nabu",
             "personality": "friendly",
-            "x": 160, "y": 0,
+            "location_id": "ugarit",
+            "x": 160,
+            "y": 0,
             "knowledge": [
-                {"fact_id": "ugarit_sack", "version": "The port was overrun at night. I barely escaped with my ledger.", "confidence": 80, "witnessed": true},
-                {"fact_id": "sea_peoples", "version": "They came from the west — ships unlike any I have seen before.", "confidence": 70, "witnessed": true}
+                {
+                    "fact_id": "ugarit_sack",
+                    "locale_key": "fact.ugarit_sack.merchant_1",
+                    "version": "The port was overrun at night. I barely escaped with my ledger.",
+                    "confidence": 80,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "sea_peoples",
+                    "locale_key": "fact.sea_peoples.merchant_1",
+                    "version": "They came from the west \u2014 ships unlike any I have seen before.",
+                    "confidence": 70,
+                    "witnessed": true
+                }
             ]
         },
         {
             "id": "guard_1",
             "name": "Captain Hatt",
             "personality": "guarded",
-            "x": 0, "y": 160,
+            "location_id": "ugarit",
+            "x": 0,
+            "y": 160,
             "knowledge": [
-                {"fact_id": "byblos_king", "version": "The King grows desperate. He has been asking for foreign troops.", "confidence": 60, "witnessed": true},
-                {"fact_id": "sea_peoples", "version": "They struck Ugarit first. We are fortifying the walls.", "confidence": 50, "witnessed": false, "source": "a messenger from the palace"}
+                {
+                    "fact_id": "byblos_king",
+                    "locale_key": "fact.byblos_king.guard_1",
+                    "version": "The King grows desperate. He has been asking for foreign troops.",
+                    "confidence": 60,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "sea_peoples",
+                    "locale_key": "fact.sea_peoples.guard_1",
+                    "version": "They struck Ugarit first. We are fortifying the walls.",
+                    "confidence": 50,
+                    "witnessed": false,
+                    "source": "a messenger from the palace"
+                }
             ]
         },
         {
             "id": "pirate_1",
             "name": "Zikar",
             "personality": "hostile",
-            "x": -160, "y": 0,
+            "location_id": "cyprus",
+            "x": -160,
+            "y": 0,
             "knowledge": [
-                {"fact_id": "sea_peoples", "version": "They are not the enemy you should fear, little merchant.", "confidence": 90, "witnessed": false, "source": "my own sources"},
-                {"fact_id": "copper_trade", "version": "Cyprus still ships copper. For now.", "confidence": 60, "witnessed": false, "source": "a fellow smuggler"}
+                {
+                    "fact_id": "sea_peoples",
+                    "locale_key": "fact.sea_peoples.pirate_1",
+                    "version": "They are not the enemy you should fear, little merchant.",
+                    "confidence": 90,
+                    "witnessed": false,
+                    "source": "my own sources"
+                },
+                {
+                    "fact_id": "copper_trade",
+                    "locale_key": "fact.copper_trade.pirate_1",
+                    "version": "Cyprus still ships copper. For now.",
+                    "confidence": 60,
+                    "witnessed": false,
+                    "source": "a fellow smuggler"
+                }
             ]
         },
         {
             "id": "priest_1",
             "name": "Priestess Elissa",
             "personality": "friendly",
-            "x": -80, "y": 120,
+            "x": -80,
+            "y": 120,
             "knowledge": [
-                {"fact_id": "ugarit_sack", "version": "The gods have turned their back on us. The omens were clear.", "confidence": 90, "witnessed": true},
-                {"fact_id": "byblos_king", "version": "The King sacrifices daily. He fears more than just the Sea Peoples.", "confidence": 40, "witnessed": false, "source": "temple servants"}
-            ]
+                {
+                    "fact_id": "ugarit_sack",
+                    "locale_key": "fact.ugarit_sack.priest_1",
+                    "version": "The gods have turned their back on us. The omens were clear.",
+                    "confidence": 90,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "byblos_king",
+                    "locale_key": "fact.byblos_king.priest_1",
+                    "version": "The King sacrifices daily. He fears more than just the Sea Peoples.",
+                    "confidence": 40,
+                    "witnessed": false,
+                    "source": "temple servants"
+                }
+            ],
+            "location_id": "ugarit"
         },
         {
             "id": "refugee_1",
             "name": "Mara the Displaced",
             "personality": "fearful",
-            "x": 200, "y": -100,
+            "x": 200,
+            "y": -100,
             "knowledge": [
-                {"fact_id": "ugarit_sack", "version": "I lost everything. My husband, my home... the flames were visible for miles.", "confidence": 100, "witnessed": true},
-                {"fact_id": "sea_peoples", "version": "They take no prisoners. They burn everything.", "confidence": 90, "witnessed": true}
-            ]
+                {
+                    "fact_id": "ugarit_sack",
+                    "locale_key": "fact.ugarit_sack.refugee_1",
+                    "version": "I lost everything. My husband, my home... the flames were visible for miles.",
+                    "confidence": 100,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "sea_peoples",
+                    "locale_key": "fact.sea_peoples.refugee_1",
+                    "version": "They take no prisoners. They burn everything.",
+                    "confidence": 90,
+                    "witnessed": true
+                }
+            ],
+            "location_id": "ugarit"
         },
         {
             "id": "smith_1",
             "name": "Hepar the Smith",
             "personality": "guarded",
-            "x": 120, "y": -160,
+            "x": 120,
+            "y": -160,
             "knowledge": [
-                {"fact_id": "copper_trade", "version": "The price of copper has tripled this season. War is good for my trade but bad for my soul.", "confidence": 80, "witnessed": true},
-                {"fact_id": "byblos_king", "version": "He ordered a thousand spearheads last week. A thousand.", "confidence": 70, "witnessed": true}
-            ]
+                {
+                    "fact_id": "copper_trade",
+                    "locale_key": "fact.copper_trade.smith_1",
+                    "version": "The price of copper has tripled this season. War is good for my trade but bad for my soul.",
+                    "confidence": 80,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "byblos_king",
+                    "locale_key": "fact.byblos_king.smith_1",
+                    "version": "He ordered a thousand spearheads last week. A thousand.",
+                    "confidence": 70,
+                    "witnessed": true
+                }
+            ],
+            "location_id": "byblos"
         },
         {
             "id": "scribe_1",
             "name": "Nabu-zer the Scribe",
             "personality": "friendly",
-            "x": -200, "y": -80,
+            "x": -200,
+            "y": -80,
             "knowledge": [
-                {"fact_id": "copper_trade", "version": "The palace archives record copper shipments from Alashiya for 200 years. Those records are now ash.", "confidence": 90, "witnessed": true},
-                {"fact_id": "byblos_king", "version": "The King of Byblos sent envoys to Egypt last month. Pharaoh refused them.", "confidence": 50, "witnessed": false, "source": "a dock worker"}
-            ]
+                {
+                    "fact_id": "copper_trade",
+                    "locale_key": "fact.copper_trade.scribe_1",
+                    "version": "The palace archives record copper shipments from Alashiya for 200 years. Those records are now ash.",
+                    "confidence": 90,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "byblos_king",
+                    "locale_key": "fact.byblos_king.scribe_1",
+                    "version": "The King of Byblos sent envoys to Egypt last month. Pharaoh refused them.",
+                    "confidence": 50,
+                    "witnessed": false,
+                    "source": "a dock worker"
+                }
+            ],
+            "location_id": "byblos"
         },
         {
             "id": "sailor_1",
             "name": "Wenamun the Sailor",
             "personality": "friendly",
-            "x": 80, "y": 200,
+            "x": 80,
+            "y": 200,
             "knowledge": [
-                {"fact_id": "sea_peoples", "version": "I have seen their ships on the horizon. Three times this season. They are circling like vultures.", "confidence": 85, "witnessed": true},
-                {"fact_id": "copper_trade", "version": "The trade route to Alashiya is still open if you are brave enough. Few are.", "confidence": 70, "witnessed": true}
-            ]
+                {
+                    "fact_id": "sea_peoples",
+                    "locale_key": "fact.sea_peoples.sailor_1",
+                    "version": "I have seen their ships on the horizon. Three times this season. They are circling like vultures.",
+                    "confidence": 85,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "copper_trade",
+                    "locale_key": "fact.copper_trade.sailor_1",
+                    "version": "The trade route to Alashiya is still open if you are brave enough. Few are.",
+                    "confidence": 70,
+                    "witnessed": true
+                }
+            ],
+            "location_id": "sidon"
         },
         {
             "id": "warlord_1",
             "name": "Warlord Agapios",
             "personality": "hostile",
-            "x": 300, "y": 0,
+            "x": 300,
+            "y": 0,
             "captain": true,
             "guards": 4,
             "knowledge": [
-                {"fact_id": "sea_peoples", "version": "I lost three men to them last week. They are more organized than people think.", "confidence": 80, "witnessed": true}
+                {
+                    "fact_id": "sea_peoples",
+                    "locale_key": "fact.sea_peoples.warlord_1",
+                    "version": "I lost three men to them last week. They are more organized than people think.",
+                    "confidence": 80,
+                    "witnessed": true
+                }
             ]
         },
         {
             "id": "mercenary_captain",
             "name": "Captain Dagan",
             "personality": "guarded",
-            "x": -300, "y": 0,
+            "x": -300,
+            "y": 0,
             "captain": true,
             "guards": 3,
             "knowledge": [
-                {"fact_id": "sea_peoples", "version": "I have been hired to protect caravans. Double the usual rate. Everyone is scared.", "confidence": 70, "witnessed": true},
-                {"fact_id": "byblos_king", "version": "The King pays well for swords. But loyalty is cheaper than gold.", "confidence": 50, "witnessed": false, "source": "my employer"}
-            ]
+                {
+                    "fact_id": "sea_peoples",
+                    "locale_key": "fact.sea_peoples.mercenary_captain",
+                    "version": "I have been hired to protect caravans. Double the usual rate. Everyone is scared.",
+                    "confidence": 70,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "byblos_king",
+                    "locale_key": "fact.byblos_king.mercenary_captain",
+                    "version": "The King pays well for swords. But loyalty is cheaper than gold.",
+                    "confidence": 50,
+                    "witnessed": false,
+                    "source": "my employer"
+                }
+            ],
+            "location_id": "byblos"
         },
         {
             "id": "hunter_1",
             "name": "Khalid the Hunter",
             "personality": "guarded",
-            "x": -200, "y": 200,
+            "x": -200,
+            "y": 200,
             "knowledge": [
-                {"fact_id": "sea_peoples", "version": "I found their tracks along the northern shore. They have scouts inland.", "confidence": 75, "witnessed": true},
-                {"fact_id": "copper_trade", "version": "The old trade roads are unsafe. I saw a caravan ambushed last moon.", "confidence": 65, "witnessed": true}
-            ]
+                {
+                    "fact_id": "sea_peoples",
+                    "locale_key": "fact.sea_peoples.hunter_1",
+                    "version": "I found their tracks along the northern shore. They have scouts inland.",
+                    "confidence": 75,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "copper_trade",
+                    "locale_key": "fact.copper_trade.hunter_1",
+                    "version": "The old trade roads are unsafe. I saw a caravan ambushed last moon.",
+                    "confidence": 65,
+                    "witnessed": true
+                }
+            ],
+            "location_id": "sidon"
         },
         {
             "id": "fisher_1",
             "name": "Old Tammuz",
             "personality": "friendly",
-            "x": 50, "y": -250,
+            "x": 50,
+            "y": -250,
             "knowledge": [
-                {"fact_id": "sea_peoples", "version": "I saw their ships from my boat. They travel in threes — two strike, one waits.", "confidence": 80, "witnessed": true},
-                {"fact_id": "copper_trade", "version": "Cyprus ships still pass by. Fewer than before, but they pass.", "confidence": 70, "witnessed": true}
-            ]
+                {
+                    "fact_id": "sea_peoples",
+                    "locale_key": "fact.sea_peoples.fisher_1",
+                    "version": "I saw their ships from my boat. They travel in threes \u2014 two strike, one waits.",
+                    "confidence": 80,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "copper_trade",
+                    "locale_key": "fact.copper_trade.fisher_1",
+                    "version": "Cyprus ships still pass by. Fewer than before, but they pass.",
+                    "confidence": 70,
+                    "witnessed": true
+                }
+            ],
+            "location_id": "sidon"
         },
         {
             "id": "healer_1",
             "name": "Shifra the Healer",
             "personality": "friendly",
-            "x": -100, "y": -200,
+            "x": -100,
+            "y": -200,
             "knowledge": [
-                {"fact_id": "ugarit_sack", "version": "I treated the survivors. The stories they told... I cannot repeat them.", "confidence": 85, "witnessed": true},
-                {"fact_id": "byblos_king", "version": "The King's physician bought all my medicines last week. Someone important is ill.", "confidence": 60, "witnessed": false, "source": "the King's physician himself"}
-            ]
+                {
+                    "fact_id": "ugarit_sack",
+                    "locale_key": "fact.ugarit_sack.healer_1",
+                    "version": "I treated the survivors. The stories they told... I cannot repeat them.",
+                    "confidence": 85,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "byblos_king",
+                    "locale_key": "fact.byblos_king.healer_1",
+                    "version": "The King's physician bought all my medicines last week. Someone important is ill.",
+                    "confidence": 60,
+                    "witnessed": false,
+                    "source": "the King's physician himself"
+                }
+            ],
+            "location_id": "ugarit"
         },
         {
             "id": "beggar_1",
             "name": "Zinnir the Beggar",
             "personality": "fearful",
-            "x": 0, "y": -100,
+            "x": 0,
+            "y": -100,
             "knowledge": [
-                {"fact_id": "ugarit_sack", "version": "I was in the lower city when they came. The screams... I still hear them.", "confidence": 95, "witnessed": true},
-                {"fact_id": "byblos_king", "version": "The rich flee north. The poor die. It has always been this way.", "confidence": 40, "witnessed": false, "source": "a fleeing merchant"}
-            ]
+                {
+                    "fact_id": "ugarit_sack",
+                    "locale_key": "fact.ugarit_sack.beggar_1",
+                    "version": "I was in the lower city when they came. The screams... I still hear them.",
+                    "confidence": 95,
+                    "witnessed": true
+                },
+                {
+                    "fact_id": "byblos_king",
+                    "locale_key": "fact.byblos_king.beggar_1",
+                    "version": "The rich flee north. The poor die. It has always been this way.",
+                    "confidence": 40,
+                    "witnessed": false,
+                    "source": "a fleeing merchant"
+                }
+            ],
+            "location_id": "ugarit"
         }
     ]
 }

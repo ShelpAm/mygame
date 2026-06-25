@@ -8,6 +8,8 @@
 #include "net/client.hpp"
 #include "systems/camera-system.hpp"
 #include "systems/navigation-system.hpp"
+#include "world/location-store.hpp"
+#include "world/map-data.hpp"
 
 #include <memory>
 #include <SDL3/SDL.h>
@@ -20,6 +22,11 @@ class RenderSystem;
 class UIManager;
 class Server;
 struct CombatStats;
+
+// Per-language dialogue template data for client-side resolution
+struct DialogueTemplateSet {
+    std::unordered_map<std::string, std::vector<std::string>> by_type;
+};
 
 enum class SessionMode : std::uint8_t { local, host, client };
 
@@ -35,7 +42,9 @@ class App {
     void run();
     void shutdown();
 
+    LocaleManager &locale() { return locale_; }
     LocaleManager const &locale() const { return locale_; }
+
     Client &client()
     {
         if (!client_)
@@ -67,6 +76,11 @@ class App {
     void ask_topic(std::string const &t) { do_dialogue_action(t); }
     void do_dialogue_action(std::string const &a) { client_->send_dialogue_action(a); }
 
+    // Client-side dialogue text resolution
+    std::string
+    resolve_dialogue_text(std::string const &template_type, int variant_index,
+                          std::unordered_map<std::string, std::string> const &slots) const;
+
     [[deprecated]] void quick_save();
     [[deprecated]] void save_to_slot(int slot);
     [[deprecated]] void load_from_slot(int slot);
@@ -92,6 +106,9 @@ class App {
     CameraSystem camera_system_;
     NavigationSystem navigation_system_;
     LocaleManager locale_;
+
+    MapData map_data_{200, 200};
+    std::vector<LocationDefinition> location_defs_;
 
     std::unique_ptr<FontManager> fonts_;
     std::unique_ptr<ResourceManager> resources_;
@@ -120,4 +137,9 @@ class App {
 
     bool running_ = false;
     int next_save_slot_ = 1;
+
+    // Client-side dialogue template cache
+    std::vector<DialogueTemplateSet> dialogue_template_sets_;
+    int dialogue_template_lang_ = 0;
+    void load_dialogue_templates();
 };

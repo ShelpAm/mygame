@@ -2,12 +2,12 @@
 #include "systems/navigation-system.hpp"
 #include "world/map-data.hpp"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 Vec2f CollisionSystem::resolve_tile_collisions(Vec2f pos, float radius)
 {
-    if (!navigation_)
-        return pos;
+    assert(navigation_);
 
     Vec2f resolved = pos;
 

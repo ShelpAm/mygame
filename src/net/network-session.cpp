@@ -75,7 +75,7 @@ awaitable<void> NetworkSession::write(TransportMessage msg)
         throw std::runtime_error("NetworkTransport::write: socket is not open/closed " +
                                  remote_info());
 
-    spdlog::log(msg.type == NetPacket::state_delta ? spdlog::level::trace : spdlog::level::debug,
+    spdlog::log(msg.type == static_cast<std::uint32_t>(ServerMsgType::state_delta) ? spdlog::level::trace : spdlog::level::debug,
                 "NetwortTransport {} ({}) writing message of type \"{}\" with "
                 "payload size {}",
                 remote_info(), (void *)this, msg.type, msg.payload.size());

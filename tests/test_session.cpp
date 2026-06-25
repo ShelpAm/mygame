@@ -52,9 +52,9 @@ BOOST_AUTO_TEST_CASE(session_interface_via_mock)
     BOOST_TEST(iface->remote_info() == "mock");
     iface->close();
     run_sync([&]() -> asio::awaitable<void> {
-        co_await iface->write({NetPacket::chat, {}});
+        co_await iface->write({ClientMsgType::chat, {}});
         auto msg = co_await iface->read();
-        BOOST_TEST(msg.type == NetPacket::Type{});
+        BOOST_TEST(msg.type == uint32_t{});
         BOOST_TEST(msg.payload.empty());
     }());
 }

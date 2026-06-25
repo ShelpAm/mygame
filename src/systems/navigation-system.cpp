@@ -31,7 +31,8 @@ bool NavigationSystem::walkable_line(Vec2i a, Vec2i b) const
     int sy = a.y < b.y ? 1 : -1;
     int err = dx - dy;
 
-    int x = a.x, y = a.y;
+    int x = a.x;
+    int y = a.y;
     while (true) {
         if (!is_walkable({x, y}))
             return false;
@@ -52,6 +53,9 @@ bool NavigationSystem::walkable_line(Vec2i a, Vec2i b) const
 
 std::vector<Vec2i> NavigationSystem::find_path(Vec2i start, Vec2i goal) const
 {
+    // Maximum allowed path length to prevent excessive computation
+    constexpr auto max_path_length = 32; // FIXME: but this is a workaround
+
     if (!is_walkable(goal))
         return {};
 
@@ -67,7 +71,7 @@ std::vector<Vec2i> NavigationSystem::find_path(Vec2i start, Vec2i goal) const
     gScore[start] = 0;
     openSet.emplace(heuristic(start, goal), start);
 
-    Vec2i const neighbors[] = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
+    std::vector<Vec2i> const neighbors = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
 
     while (!openSet.empty()) {
         auto [f, current] = openSet.top();
@@ -89,6 +93,10 @@ std::vector<Vec2i> NavigationSystem::find_path(Vec2i start, Vec2i goal) const
                 continue;
 
             int tentativeG = gScore[current] + 1;
+            if (tentativeG > max_path_length) {
+                continue; // Skip if the path exceeds the maximum length
+            }
+
             if (!gScore.contains(next) || tentativeG < gScore[next]) {
                 cameFrom[next] = current;
                 gScore[next] = tentativeG;

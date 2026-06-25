@@ -29,12 +29,13 @@ using deferred_concurrent_channel =
     default_token::as_default_on_t<asio::experimental::concurrent_channel<T>>;
 
 struct TransportMessage {
-    using Type = NetPacket::Type;
-    Type type{};
+    std::uint32_t type{};
     std::vector<uint8_t> payload;
 
     TransportMessage() = default;
-    TransportMessage(Type t, std::vector<uint8_t> p) : type(t), payload(std::move(p)) {}
+    TransportMessage(std::uint32_t t, std::vector<uint8_t> p) : type(t), payload(std::move(p)) {}
+    TransportMessage(ClientMsgType t, std::vector<uint8_t> p) : type(static_cast<std::uint32_t>(t)), payload(std::move(p)) {}
+    TransportMessage(ServerMsgType t, std::vector<uint8_t> p) : type(static_cast<std::uint32_t>(t)), payload(std::move(p)) {}
 };
 
 // Abstract bidirectional pipe between two endpoints.

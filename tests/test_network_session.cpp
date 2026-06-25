@@ -24,11 +24,11 @@ BOOST_AUTO_TEST_CASE(write_read_mixed_types)
 BOOST_AUTO_TEST_CASE(serialize_packet_roundtrip)
 {
     std::vector<uint8_t> payload = {0x01, 0x02, 0x03};
-    auto data = serialize_packet({NetPacket::chat, payload});
+    auto data = serialize_packet({static_cast<std::uint32_t>(ClientMsgType::chat), payload});
     BOOST_TEST(data.size() == 8 + payload.size());
     auto type = read_bytes<uint32_t>(data, 0);
     auto size = read_bytes<uint32_t>(data, 4);
-    BOOST_TEST(type == static_cast<uint32_t>(NetPacket::chat));
+    BOOST_TEST(type == static_cast<std::uint32_t>(ClientMsgType::chat));
     BOOST_TEST(size == payload.size());
     BOOST_TEST(data[8] == 0x01);
     BOOST_TEST(data[9] == 0x02);
@@ -147,12 +147,12 @@ BOOST_AUTO_TEST_CASE(network_transport_accept_connect_roundtrip)
 
         auto server_task = [&]() -> asio::awaitable<void> {
             server_side = co_await acceptor->accept();
-            co_await server_side->write({NetPacket::chat, {}});
+            co_await server_side->write({ServerMsgType::chat, {}});
         };
         co_spawn(Session::io(), server_task(), asio::detached);
         auto client_side = co_await NetworkSession::connect("127.0.0.1", kPort);
         auto msg = co_await client_side->read();
-        BOOST_TEST(msg.type == NetPacket::chat);
+        BOOST_TEST(static_cast<ServerMsgType>(msg.type) == ServerMsgType::chat);
 
         BOOST_TEST(server_side != nullptr);
         BOOST_TEST(server_side->is_open());
@@ -176,9 +176,9 @@ BOOST_AUTO_TEST_CASE(network_transport_write_read_roundtrip)
         co_spawn(Session::io(), server_task(), asio::detached);
         auto client_side = co_await NetworkSession::connect("127.0.0.1", kPort);
         std::vector<uint8_t> payload = {0xde, 0xad, 0xbe, 0xef};
-        co_await client_side->write({NetPacket::chat, payload});
+        co_await client_side->write({ClientMsgType::chat, payload});
         auto msg = co_await client_side->read();
-        BOOST_TEST(msg.type == NetPacket::chat);
+        BOOST_TEST(static_cast<ServerMsgType>(msg.type) == ServerMsgType::chat);
         BOOST_TEST(msg.payload == payload);
         acceptor->stop();
     }());
@@ -192,7 +192,7 @@ BOOST_AUTO_TEST_CASE(network_transport_remote_info_on_connected)
 
         auto server_task = [&]() -> asio::awaitable<void> {
             auto s = co_await acceptor->accept();
-            co_await s->write({NetPacket::chat, {}});
+            co_await s->write({ServerMsgType::chat, {}});
         };
         co_spawn(Session::io(), server_task(), asio::detached);
         auto peer = co_await NetworkSession::connect("127.0.0.1", kPort);
@@ -212,7 +212,7 @@ BOOST_AUTO_TEST_CASE(network_transport_close_on_connected)
 
         auto server_task = [&]() -> asio::awaitable<void> {
             auto s = co_await acceptor->accept();
-            co_await s->write({NetPacket::chat, {}});
+            co_await s->write({ServerMsgType::chat, {}});
         };
         co_spawn(Session::io(), server_task(), asio::detached);
         auto peer = co_await NetworkSession::connect("127.0.0.1", kPort);
@@ -232,13 +232,13 @@ BOOST_AUTO_TEST_CASE(network_transport_write_after_close_throws)
 
         auto server_task = [&]() -> asio::awaitable<void> {
             auto s = co_await acceptor->accept();
-            co_await s->write({NetPacket::chat, {}});
+            co_await s->write({ServerMsgType::chat, {}});
         };
         co_spawn(Session::io(), server_task(), asio::detached);
         auto peer = co_await NetworkSession::connect("127.0.0.1", kPort);
         co_await peer->read();
         peer->close();
-        BOOST_CHECK_THROW(co_await peer->write({NetPacket::chat, {}}), std::runtime_error);
+        BOOST_CHECK_THROW(co_await peer->write({ClientMsgType::chat, {}}), std::runtime_error);
         acceptor->stop();
     }());
 }
@@ -267,7 +267,7 @@ BOOST_AUTO_TEST_CASE(network_transport_socket_accessor_connected)
 
         auto server_task = [&]() -> asio::awaitable<void> {
             auto s = co_await acceptor->accept();
-            co_await s->write({NetPacket::chat, {}});
+            co_await s->write({ServerMsgType::chat, {}});
         };
         co_spawn(Session::io(), server_task(), asio::detached);
         auto peer = co_await NetworkSession::connect("127.0.0.1", kPort);
@@ -334,21 +334,21 @@ BOOST_AUTO_TEST_CASE(network_transport_auth_and_join)
         auto server_task = [&]() -> asio::awaitable<void> {
             auto t = co_await acceptor->accept();
             auto req = co_await t->read();
-            BOOST_TEST(req.type == NetPacket::auth);
-            co_await t->write({NetPacket::auth, auth_payload()});
+            BOOST_TEST(static_cast<ClientMsgType>(req.type) == ClientMsgType::auth);
+            co_await t->write({ServerMsgType::auth, auth_payload()});
             auto join = co_await t->read();
-            BOOST_TEST(join.type == NetPacket::join);
-            co_await t->write({NetPacket::return_pid, make_return_pid(456, 1)});
+            BOOST_TEST(static_cast<ClientMsgType>(join.type) == ClientMsgType::join);
+            co_await t->write({ServerMsgType::return_pid, make_return_pid(456, 1)});
         };
         co_spawn(Session::io(), server_task(), asio::detached);
 
         auto peer = co_await NetworkSession::connect("127.0.0.1", kPort);
-        co_await peer->write({NetPacket::auth, auth_payload()});
+        co_await peer->write({ClientMsgType::auth, auth_payload()});
         auto auth_res = co_await peer->read();
-        BOOST_TEST(auth_res.type == NetPacket::auth);
-        co_await peer->write({NetPacket::join, {}});
+        BOOST_TEST(static_cast<ServerMsgType>(auth_res.type) == ServerMsgType::auth);
+        co_await peer->write({ClientMsgType::join, {}});
         auto pid_res = co_await peer->read();
-        BOOST_TEST(pid_res.type == NetPacket::return_pid);
+        BOOST_TEST(static_cast<ServerMsgType>(pid_res.type) == ServerMsgType::return_pid);
         BOOST_TEST(pid_res.payload.size() >= 9);
         memcpy(&returned_pid, pid_res.payload.data(), 8);
         BOOST_TEST(returned_pid == 456);

@@ -67,8 +67,7 @@ void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transfo
         return;
     }
 
-    if (!nav)
-        throw std::invalid_argument("run_soldier_ai: nav pointer is null");
+    assert(nav && "run_soldier_ai: nav pointer is null");
 
     // ==========================================
     // Phase 1: tactical brain — where am I going? (determine Goal)
@@ -95,12 +94,18 @@ void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transfo
 
     // Update combat state and mark dirty (optimized redundant closure call)
     if (ai.in_combat != is_in_combat) {
+        spdlog::debug("SoldierAI {}: combat state change {}→{}", e.id(), ai.in_combat,
+                      is_in_combat);
         ai.in_combat = is_in_combat;
         mark_dirty(e.id());
     }
 
     // If already at destination, stop early
-    if ((goal_pos - pos.world_pos).length() <= ai.follow_distance) {
+    float dist_to_goal = (goal_pos - pos.world_pos).length();
+    if (dist_to_goal <= ai.follow_distance) {
+        if (mov.velocity.length() > 0.F)
+            spdlog::trace("SoldierAI {}: arrived at goal (dist={:.1f}), stopping", e.id(),
+                          dist_to_goal);
         mov.velocity = {0, 0};
         return;
     }
@@ -114,13 +119,27 @@ void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transfo
     Vec2i goal_tile = world_to_tile(goal_pos);
     if (curr_tile != goal_tile) {
         auto path = nav->find_path(curr_tile, goal_tile);
+        if (path.empty()) {
+            spdlog::debug("SoldierAI {}: A* found no path from ({},{}) to ({},{}), stopping",
+                          e.id(), curr_tile.x, curr_tile.y, goal_tile.x, goal_tile.y);
+            mov.velocity = {0, 0};
+            return;
+        }
         // Path smoothing: walk from farthest to nearest, pick the first tile
         // that has a clear line-of-sight from current position.
+        bool found = false;
         for (int i = static_cast<int>(path.size()) - 1; i >= 0; --i) {
             if (nav->walkable_line(curr_tile, path[i])) {
                 target_waypoint = center_of_tile(path[i]);
+                found = true;
                 break;
             }
+        }
+        if (!found) {
+            spdlog::debug(
+                "SoldierAI {}: path of {} tiles but no walkable line to any, using first step",
+                e.id(), path.size());
+            target_waypoint = center_of_tile(path[0]);
         }
     }
 
@@ -135,8 +154,15 @@ void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transfo
         float t = std::min(1.F, dt * 8.F);
         mov.velocity = mov.velocity + (desired_velocity - mov.velocity) * t;
         mark_dirty(e.id());
+        spdlog::trace("SoldierAI {}: moving  pos=({:.1f},{:.1f}) "
+                      "goal=({:.1f},{:.1f}) dist={:.1f} waypoint=({:.1f},{:.1f}) "
+                      "vel=({:.2f},{:.2f})",
+                      e.id(), pos.world_pos.x, pos.world_pos.y, goal_pos.x, goal_pos.y, dist,
+                      target_waypoint.x, target_waypoint.y, mov.velocity.x, mov.velocity.y);
     }
     else {
+        if (mov.velocity.length() > 0.F)
+            spdlog::trace("SoldierAI {}: zero diff, stopping", e.id());
         mov.velocity = {0, 0};
     }
 

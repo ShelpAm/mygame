@@ -12,10 +12,13 @@ class GameMode;
 class Server {
   public:
     Server();
+    Server(Server const &) = delete;
+    Server(Server &&) = delete;
+    Server &operator=(Server const &) = delete;
+    Server &operator=(Server &&) = delete;
     ~Server();
 
     void set_game_mode(GameMode *gm);
-    void set_language(int lang_index);
 
     awaitable<void> listen(std::uint16_t port);
     void stop_listen()
@@ -43,7 +46,7 @@ class Server {
 
     auto const &sessions() const { return sessions_; }
 
-    void broadcast_to_all(NetPacket::Type type, std::vector<uint8_t> payload);
+    void broadcast_to_all(ServerMsgType type, std::vector<uint8_t> payload);
     void poll_messages(GameMode &gm);
     void broadcast_sync();
 

@@ -9,6 +9,7 @@
 #include "survival/condition-tracker.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/quest-manager.hpp"
+#include "world/location-store.hpp"
 #include "world/world-state.hpp"
 #include <memory>
 #include <SDL3/SDL.h>
@@ -95,6 +96,17 @@ class Client {
     void send_cycle_formation();
     void send_chat(std::string const &msg);
     void send_dialogue_action(std::string const &action);
+
+    // Town discovery
+    struct DiscoveredTown {
+        std::string loc_id;
+        std::string locale_key;
+        bool notified = false;
+    };
+    std::vector<DiscoveredTown> const &discovered_towns() const { return discovered_towns_; }
+    std::string const &current_town_id() const { return current_town_id_; }
+    void set_location_defs(std::vector<LocationDefinition> const *defs) { location_defs_ = defs; }
+    std::vector<LocationDefinition> const *location_defs() const { return location_defs_; }
 
     Vec2f player_position() const;
     std::uint64_t rtt_ms() const { return estimated_rtt_ms_; }
@@ -195,6 +207,9 @@ class Client {
     uint8_t selected_roles_ = 0xFF; // all selected by default
     int formation_idx_ = 0;
     DialogueState dialogue_;
+    std::vector<LocationDefinition> const *location_defs_ = nullptr;
+    std::vector<DiscoveredTown> discovered_towns_;
+    std::string current_town_id_;
 
     // Deferred sync processing (io_context thread → main thread)
     deferred_concurrent_channel<void(boost::system::error_code, std::shared_ptr<Session>,
@@ -204,7 +219,7 @@ class Client {
     void handle_message(Session &from, TransportMessage msg);
     void apply_sync_full(std::vector<uint8_t> const &data);
     void apply_sync_delta(std::vector<uint8_t> const &data);
-    void handle_entity_update(NetPacket const &pkt);
+    void handle_entity_update(std::vector<uint8_t> const &payload);
     void handle_dialogue_sync(std::vector<uint8_t> const &data);
 
     RemoteEntity *find_entity(EntityId id);

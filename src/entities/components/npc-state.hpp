@@ -9,11 +9,13 @@ struct NPCState {
     std::string npc_id;
     std::string display_name;
     std::string personality; // "friendly", "guarded", "hostile", "fearful"
+    std::string location_id; // associated town, e.g. "ugarit"
 
     // What this NPC knows
     struct KnownFact {
         std::string fact_id;
         std::string npc_version;
+        std::string locale_key; // e.g. "fact.ugarit_sack.merchant_1"
         int confidence = 50;
         bool witnessed = false;
         std::string source_npc_id;

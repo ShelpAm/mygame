@@ -146,6 +146,21 @@
             "texts": ["You should speak to [person] about [topic]. They know more than I do.",
                        "[person] is the one you need. Ask them about [topic].",
                        "I am not the right person. But [person]? They know everything about [topic]."]
+        },
+        {
+            "type": "tell_about_topic",
+            "texts": ["Let me tell you about [topic]. I heard some things.",
+                       "I know a thing or two about [topic]. Listen.",
+                       "You want to know about [topic]? I can tell you what I know.",
+                       "I heard something about [topic] just the other day.",
+                       "Let me share what I have learned about [topic]."]
+        },
+        {
+            "type": "ask_about_topic",
+            "texts": ["What about [topic]?",
+                       "Tell me about [topic].",
+                       "I would like to know about [topic].",
+                       "Do you know anything about [topic]?"]
         }
     ]
 }

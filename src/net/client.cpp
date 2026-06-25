@@ -43,11 +43,11 @@ awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
         try {
             while (true) {
                 auto msg = co_await t->read();
-                spdlog::log((msg.type == NetPacket::state_delta ? spdlog::level::trace
+                spdlog::log((msg.type == static_cast<std::uint32_t>(ServerMsgType::state_delta) ? spdlog::level::trace
                                                                 : spdlog::level::debug),
                             "Client: received message {} with payload size {} "
                             "from transport {}",
-                            msg.type, msg.payload.size(), t->remote_info());
+                            static_cast<ServerMsgType>(msg.type), msg.payload.size(), t->remote_info());
                 if (!c->messages_.try_send(boost::system::error_code{}, t, msg))
                     Session::spawn([](Client *c, auto t, auto msg) -> awaitable<void> {
                         co_await c->messages_.async_send(boost::system::error_code{}, t,
@@ -88,7 +88,7 @@ void Client::send_join_request()
     if (!session_ || !session_->is_open())
         throw std::runtime_error("send_join_request: transport not attached or closed");
     Session::spawn([](std::shared_ptr<Session> t) -> awaitable<void> {
-        co_await t->write({NetPacket::join, std::vector<std::uint8_t>{}});
+        co_await t->write({ClientMsgType::join, std::vector<std::uint8_t>{}});
     }(session_));
 }
 
@@ -100,7 +100,7 @@ void Client::send_player_direction(Vec2f dir)
     spdlog::trace("Client: sending move dir: {}, {} (tick={})", dir.x, dir.y, SDL_GetTicks());
     last_active_send_tick_ = std::chrono::steady_clock::now();
     Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-        co_await t->write({NetPacket::player_input, payload});
+        co_await t->write({ClientMsgType::player_input, payload});
     }(session_, make_player_input(player_id_, dir.x, dir.y, SDL_GetTicks())));
 }
 
@@ -110,7 +110,7 @@ void Client::send_recruit()
     co_spawn(
         Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::recruit_soldier, payload});
+            co_await t->write({ClientMsgType::recruit_soldier, payload});
         }(session_, make_entity_id_payload(player_id_)),
         detached);
 }
@@ -121,7 +121,7 @@ void Client::send_recruit_ranged()
     co_spawn(
         Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::recruit_ranged, payload});
+            co_await t->write({ClientMsgType::recruit_ranged, payload});
         }(session_, make_entity_id_payload(player_id_)),
         detached);
 }
@@ -132,7 +132,7 @@ void Client::send_soldier_command()
     co_spawn(
         Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::soldier_command, payload});
+            co_await t->write({ClientMsgType::soldier_command, payload});
         }(session_, make_entity_id_payload(player_id_)),
         detached);
 }
@@ -143,7 +143,7 @@ void Client::send_respawn()
     co_spawn(
         Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::respawn, payload});
+            co_await t->write({ClientMsgType::respawn, payload});
         }(session_, make_entity_id_payload(player_id_)),
         detached);
 }
@@ -156,7 +156,7 @@ void Client::send_cycle_formation()
     co_spawn(
         Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::formation, payload});
+            co_await t->write({ClientMsgType::formation, payload});
         }(session_, make_formation_payload(player_id_, selected_roles_)),
         detached);
 }
@@ -167,7 +167,7 @@ void Client::send_interact()
     co_spawn(
         Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::interact, payload});
+            co_await t->write({ClientMsgType::interact, payload});
         }(session_, make_entity_id_payload(player_id_)),
         detached);
 }
@@ -178,7 +178,7 @@ void Client::send_rest()
     co_spawn(
         Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-            co_await t->write({NetPacket::rest, payload});
+            co_await t->write({ClientMsgType::rest, payload});
         }(session_, make_entity_id_payload(player_id_)),
         detached);
 }
@@ -189,7 +189,7 @@ void Client::send_chat(std::string const &msg)
     chat_history_.push_back("You: " + msg);
     std::vector<uint8_t> p(msg.begin(), msg.end());
     Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-        co_await t->write({NetPacket::chat, std::move(payload)});
+        co_await t->write({ClientMsgType::chat, std::move(payload)});
     }(session_, std::move(p)));
 }
 
@@ -197,14 +197,16 @@ void Client::send_dialogue_action(std::string const &action)
 {
     assert(session_);
     Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
-        co_await t->write({NetPacket::dialogue_action, std::move(payload)});
+        co_await t->write({ClientMsgType::dialogue_action, std::move(payload)});
     }(session_, std::vector<uint8_t>(action.begin(), action.end())));
 }
 
 void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg)
 {
+    auto st = static_cast<ServerMsgType>(msg.type);
+
     // Quick handlers: tiny writes that don't touch remote_entities_
-    if (msg.type == NetPacket::return_pid) {
+    if (st == ServerMsgType::return_pid) {
         assert(msg.payload.size() >= 9);
         memcpy(&player_id_, msg.payload.data(), 8);
         player_team_ = static_cast<Team>(msg.payload[8]);
@@ -212,47 +214,47 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
                      player_team_);
         return;
     }
-    if (msg.type == NetPacket::chat) {
+    if (st == ServerMsgType::chat) {
         chat_history_.push_back(std::string(msg.payload.begin(), msg.payload.end()));
         return;
     }
-    if (msg.type == NetPacket::dialogue_sync) {
+    if (st == ServerMsgType::dialogue_sync) {
         handle_dialogue_sync(msg.payload);
         return;
     }
 
-    switch (msg.type) {
-    case NetPacket::state_full:
+    switch (st) {
+    case ServerMsgType::state_full:
         apply_sync_full(msg.payload);
         record_sync_received();
         break;
-    case NetPacket::state_delta:
+    case ServerMsgType::state_delta:
         apply_sync_delta(msg.payload);
         record_sync_received();
         break;
-    case NetPacket::entity_removed:
+    case ServerMsgType::entity_removed:
         if (msg.payload.size() >= 8) {
             EntityId eid{};
             memcpy(&eid, msg.payload.data(), 8);
             std::erase_if(remote_entities_, [eid](RemoteEntity const &re) { return re.id == eid; });
         }
         break;
-    case NetPacket::kicked: {
+    case ServerMsgType::kicked: {
         std::string reason(msg.payload.begin(), msg.payload.end());
         spdlog::info("Client: kicked by server: {}", reason);
         session_->close();
         app_->start_local_session();
         break;
     }
-    case NetPacket::entity_update:
-        handle_entity_update({msg.type, msg.payload});
+    case ServerMsgType::entity_update:
+        handle_entity_update(msg.payload);
         break;
-    case NetPacket::combat_event: {
+    case ServerMsgType::combat_event: {
         auto ev = parse_combat_event(msg.payload);
         handle_combat_event(ev.attacker_id, ev.defender_id, ev.damage, ev.killed);
         break;
     }
-    case NetPacket::projectile_fired: {
+    case ServerMsgType::projectile_fired: {
         if (msg.payload.size() >= 16) {
             ProjectileVisual pv;
             memcpy(&pv.pos.x, msg.payload.data(), 4);
@@ -267,16 +269,32 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
         }
         break;
     }
+    case ServerMsgType::town_discovered: {
+        auto td = parse_town_discovered(msg.payload);
+        // Avoid duplicates
+        auto it = std::ranges::find_if(discovered_towns_, [&](auto const &t) {
+            return t.loc_id == td.loc_id;
+        });
+        if (it == discovered_towns_.end()) {
+            discovered_towns_.push_back({td.loc_id, td.locale_key, false});
+        }
+        current_town_id_ = td.loc_id;
+        break;
+    }
+    case ServerMsgType::town_left: {
+        current_town_id_.clear();
+        break;
+    }
     default:
         break;
     }
 }
 
-void Client::handle_entity_update(NetPacket const &pkt)
+void Client::handle_entity_update(std::vector<uint8_t> const &payload)
 {
-    if (pkt.payload.size() < 25)
+    if (payload.size() < 25)
         return;
-    auto u = parse_entity_update(pkt.payload);
+    auto u = parse_entity_update(payload);
     for (auto &rp : remote_entities_) {
         if (rp.id == u.id) {
             rp.target_pos = {u.x, u.y};
@@ -717,9 +735,22 @@ void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
     dialogue_.can_threaten = s.can_threaten;
     dialogue_.history.clear();
     for (auto &l : s.lines) {
-        dialogue_.history.push_back({l.speaker == 0 ? DialogueLine::player : DialogueLine::npc,
-                                     l.use_raw ? "" : l.text, l.use_raw ? l.text : "", l.use_raw,
-                                     std::move(l.npc_name)});
+        DialogueLine dl;
+        dl.speaker = l.speaker == 0 ? DialogueLine::player : DialogueLine::npc;
+        dl.npc_name = std::move(l.npc_name);
+        if (l.use_template) {
+            dl.use_template = true;
+            dl.template_type = std::move(l.template_type);
+            dl.variant_index = l.variant_index;
+            for (auto &kv : l.slots)
+                dl.slots.emplace(std::move(kv.first), std::move(kv.second));
+        }
+        else {
+            dl.text_key = l.use_raw ? "" : l.text;
+            dl.raw_text = l.use_raw ? l.text : "";
+            dl.use_raw = l.use_raw;
+        }
+        dialogue_.history.push_back(std::move(dl));
     }
     dialogue_.available_topics = std::move(s.topics);
     dialogue_.available_actions = std::move(s.actions);
@@ -729,10 +760,10 @@ awaitable<bool> Client::authenticate_transport(std::shared_ptr<Session> t)
 {
     try {
         spdlog::debug("Client: sending auth: payload: {}", auth_payload());
-        co_await t->write({NetPacket::auth, auth_payload()});
+        co_await t->write({ClientMsgType::auth, auth_payload()});
         auto res = co_await t->read();
-        spdlog::debug("Client: auth result: type: {}, payload: {}", res.type, res.payload);
-        co_return res.type == NetPacket::auth &&res.payload == auth_payload();
+        spdlog::debug("Client: auth result: type: {}, payload: {}", static_cast<ServerMsgType>(res.type), res.payload);
+        co_return res.type == static_cast<std::uint32_t>(ServerMsgType::auth) &&res.payload == auth_payload();
     }
     catch (...) {
         co_return false;

@@ -8,6 +8,7 @@
 #include "systems/render-system.hpp"
 #include "world/world-state.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlrenderer3.h>
 #include <spdlog/spdlog.h>
+#include <unordered_set>
 
 UIManager::UIManager(RenderSystem *rs, Font *hud_font) : render_system_(rs), hud_font_(hud_font)
 {
@@ -62,8 +64,12 @@ bool UIManager::process_event(SDL_Event const &event)
     return ImGui_ImplSDL3_ProcessEvent(&event);
 }
 
-void UIManager::update(float /*dt*/)
+void UIManager::update(float dt)
 {
+    // Update discovery notification timers
+    for (auto &n : discovery_queue_)
+        n.timer -= dt;
+    std::erase_if(discovery_queue_, [](auto const &n) { return n.timer <= 0.f; });
 }
 
 void UIManager::render(WorldState *world_state, App &app)
@@ -72,8 +78,49 @@ void UIManager::render(WorldState *world_state, App &app)
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui::NewFrame();
 
+    // Check for newly discovered towns (add to notification queue)
+    if (world_state) {
+        auto const &discovered = app.client().discovered_towns();
+        for (auto const &td : discovered) {
+            if (!notified_town_ids_.contains(td.loc_id)) {
+                notified_town_ids_.insert(td.loc_id);
+                discovery_queue_.push_back({td.locale_key, 5.f}); // 5-second display
+            }
+        }
+    }
+
     if (world_state)
         render_hud_window(*world_state, app);
+
+    // Render discovery toast notifications
+    if (!discovery_queue_.empty()) {
+        auto const &loc = app.locale();
+        float y_offset = 120.f;
+        for (auto const &n : discovery_queue_) {
+            std::string town_name = loc.get(n.locale_key);
+            if (town_name.empty())
+                town_name = n.locale_key;
+            float alpha = std::min(1.f, n.timer);
+            ImVec4 color(0.95f, 0.85f, 0.6f, alpha);
+
+            ImGui::SetNextWindowPos(ImVec2(400, y_offset), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+            ImGui::Begin(("##toast_" + n.locale_key).c_str(), nullptr,
+                         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground);
+            ImGui::TextColored(color, "🏛 %s",
+                               std::format("{} {}", loc.get("town.discovered_prefix"),
+                                           town_name).c_str());
+            // Description
+            std::string desc_key = n.locale_key + ".desc";
+            std::string desc = loc.get(desc_key);
+            if (!desc.empty()) {
+                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, alpha * 0.8f), "%s", desc.c_str());
+            }
+            ImGui::End();
+
+            y_offset += 60.f;
+        }
+    }
 
     // clang-format off
     if (app.dialogue().active)        render_dialogue(app);
@@ -114,11 +161,9 @@ void UIManager::render_hud_window([[maybe_unused]] WorldState const &world_state
     ImGui::SetNextWindowPos(ImVec2(600, 10), ImGuiCond_Always);
     ImGui::Begin("Lang", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize);
-    for (int i = 0; i < app.locale().language_count(); ++i) {
-        if (i > 0)
-            ImGui::SameLine();
-        if (ImGui::Button(app.locale().language_name(i).c_str())) {
-            app.set_ui_language(i);
+    for (auto const &lang : app.locale().available_languages()) {
+        if (ImGui::Button(lang.c_str())) {
+            app.locale().set_language(lang);
         }
     }
     ImGui::End();
@@ -145,16 +190,25 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     float y = 10.F;
 
     // Line 1: Title | Language | FPS
-    hud_font_->draw({x, y}, SDL_Color{204, 178, 102, 255},
+    hud_font_->draw({x, y}, SDL_Color{.r = 204, .g = 178, .b = 102, .a = 255},
                     std::format("{} | {}: {} | {}: {:.0f}", loc.get("game.title"),
-                                loc.get("menu.language"), loc.language_name(), loc.get("hud.fps"),
-                                app.stopwatch().fps()));
+                                loc.get("menu.language"), loc.current_language_name(),
+                                loc.get("hud.fps"), app.stopwatch().fps()));
+
+    // Current town name (if any)
+    auto const &town_id = app.client().current_town_id();
+    if (!town_id.empty()) {
+        y += line_h;
+        std::string town_name = loc.get("location." + town_id);
+        hud_font_->draw({x, y}, SDL_Color{.r = 255, .g = 220, .b = 140, .a = 255},
+                        town_name);
+    }
 
     // Line 2: Day | Season | Time
     y += line_h;
     static constexpr char const *seasonKeys[] = {"season.spring", "season.summer", "season.autumn",
                                                  "season.winter"};
-    hud_font_->draw({x, y}, SDL_Color{200, 200, 200, 230},
+    hud_font_->draw({x, y}, SDL_Color{.r = 200, .g = 200, .b = 200, .a = 230},
                     std::format("{}: {} | {}: {} | {}: {:.0f}", loc.get("hud.day"),
                                 world_state.day(), loc.get("hud.season"),
                                 loc.get(seasonKeys[world_state.season()]), loc.get("hud.time"),
@@ -162,22 +216,27 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
 
     // Line 3: Keys hint
     y += line_h;
-    hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200}, std::string(loc.get("hud.keys")));
+    hud_font_->draw({x, y}, SDL_Color{.r = 140, .g = 140, .b = 140, .a = 200},
+                    std::string(loc.get("hud.keys")));
 
     // Line 4: HP | Food | Water | Energy
     y += line_h;
     auto const &sv = app.client().survival();
     auto *cs = app.client().player_stats();
     assert(cs != nullptr);
-    hud_font_->draw({x, y}, SDL_Color{200, 200, 200, 230},
+    hud_font_->draw({x, y}, SDL_Color{.r = 200, .g = 200, .b = 200, .a = 230},
                     std::format("{}: {}/{} | {}: {:.0f} | {}: {:.0f} | {}: {:.0f}",
                                 loc.get("hud.hp"), cs->hp, cs->max_hp, loc.get("hud.food"), sv.food,
                                 loc.get("hud.water"), sv.water, loc.get("hud.energy"), sv.energy));
 
     // Soldier info (lines 5+)
     auto my_team = app.client().player_team();
-    int soldier_count = 0, follow_count = 0, guard_count = 0, patrol_count = 0;
-    int melee_count = 0, ranged_count = 0;
+    int soldier_count = 0;
+    int follow_count = 0;
+    int guard_count = 0;
+    int patrol_count = 0;
+    int melee_count = 0;
+    int ranged_count = 0;
     for (auto &re : app.client().remote_entities()) {
         if (re.kind == EntityKind::soldier && re.alive && re.team == my_team) {
             ++soldier_count;
@@ -249,7 +308,10 @@ void UIManager::render_dialogue(App const &app)
     ImGui::BeginChild("History", ImVec2(0, 200), true);
     for (auto const &line : ds.history) {
         std::string text;
-        if (line.use_raw) {
+        if (line.use_template) {
+            text = app.resolve_dialogue_text(line.template_type, line.variant_index, line.slots);
+        }
+        else if (line.use_raw) {
             text = line.raw_text;
         }
         else {
@@ -445,8 +507,55 @@ void UIManager::save_server_list()
 void UIManager::render_map(App const &app)
 {
     auto const &loc = app.locale();
-    ImGui::Begin(loc.get("ui.map").c_str(), &show_map_);
-    ImGui::Text("%s", loc.get("ui.map_placeholder").c_str());
+    ImGui::Begin(loc.get("ui.map").c_str(), &show_map_, ImGuiWindowFlags_AlwaysAutoResize);
+
+    assert(location_defs_);
+
+    // Determine bounding box of all towns
+    float min_x = 1e9f, min_y = 1e9f, max_x = -1e9f, max_y = -1e9f;
+    for (auto const &ld : *location_defs_) {
+        min_x = std::min(min_x, ld.world_pos.x);
+        min_y = std::min(min_y, ld.world_pos.y);
+        max_x = std::max(max_x, ld.world_pos.x);
+        max_y = std::max(max_y, ld.world_pos.y);
+    }
+    float range_x = max_x - min_x + 200.f; // add padding
+    float range_y = max_y - min_y + 200.f;
+
+    ImVec2 canvas_size(400, 300);
+    ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("map_canvas", canvas_size);
+
+    // Background
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(canvas_pos, ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
+                      IM_COL32(20, 18, 15, 220));
+
+    // Draw town markers
+    auto const &discovered = app.client().discovered_towns();
+    for (auto const &ld : *location_defs_) {
+        bool is_discovered = std::ranges::any_of(discovered, [&](auto const &d) {
+            return d.loc_id == ld.id;
+        });
+
+        // Map world coords to canvas coords
+        float nx = (ld.world_pos.x - min_x + 100.f) / range_x;
+        float ny = (ld.world_pos.y - min_y + 100.f) / range_y;
+        ImVec2 pos = ImVec2(canvas_pos.x + nx * canvas_size.x,
+                            canvas_pos.y + ny * canvas_size.y);
+
+        if (is_discovered) {
+            dl->AddCircleFilled(pos, 5, IM_COL32(255, 220, 140, 255));
+            dl->AddText(ImVec2(pos.x + 8, pos.y - 5),
+                        IM_COL32(200, 190, 170, 255),
+                        app.locale().get(ld.display_name).c_str());
+        }
+        else {
+            // Undiscovered: dim dot
+            dl->AddCircleFilled(pos, 3, IM_COL32(60, 55, 45, 200));
+        }
+    }
+
     ImGui::End();
 }
 

@@ -177,6 +177,9 @@ void GameMode::load_npcs()
                     auto const &ko = k.as_object();
                     NPCKnowledgeEntry e;
                     e.fact_id = std::string(ko.at("fact_id").as_string());
+                    e.locale_key = ko.contains("locale_key")
+                                       ? std::string(ko.at("locale_key").as_string())
+                                       : "";
                     e.version = std::string(ko.at("version").as_string());
                     if (ko.contains("confidence"))
                         e.confidence = static_cast<int>(ko.at("confidence").as_int64());
@@ -187,6 +190,13 @@ void GameMode::load_npcs()
                     facts.push_back(std::move(e));
                 }
             auto npc_eid = spawn_npc(id, name, x, y, pers, facts);
+            // Parse location_id if present
+            if (obj.contains("location_id") && npc_eid != invalid_entity) {
+                std::string loc_id = std::string(obj.at("location_id").as_string());
+                auto *npc = world_.entity(npc_eid).try_get_mut<NPCState>();
+                if (npc)
+                    npc->location_id = std::move(loc_id);
+            }
             if (obj.contains("captain") && obj.at("captain").as_bool()) {
                 int gc = obj.contains("guards") ? static_cast<int>(obj.at("guards").as_int64()) : 3;
                 spawn_guards(npc_eid, gc);
@@ -205,6 +215,51 @@ void GameMode::init_systems()
     // Register flecs systems once (not per-frame!)
 
     // -- PreUpdate phase: simulation decisions --
+
+    town_proximity_sys_ =
+        world_.system<Transform, PlayerTag>("TownProximity")
+            .kind(flecs::PreUpdate)
+            .each([this](flecs::entity e, Transform &pos, PlayerTag const &) {
+                EntityId pid = e.id();
+                std::string closest_town;
+
+                for (auto const &loc : *location_defs_) {
+                    float dist = (pos.world_pos - loc.world_pos).length();
+                    if (dist < loc.discovery_radius) {
+                        closest_town = loc.id;
+                        auto *ls = world_state_.location_mutable(loc.id);
+                        if (!ls) {
+                            WorldState::LocationState new_ls;
+                            new_ls.name = loc.id;
+                            world_state_.add_location(loc.id, std::move(new_ls));
+                        }
+                        ls = world_state_.location_mutable(loc.id);
+                        if (ls && !ls->player_has_visited) {
+                            ls->player_has_visited = true;
+                            ls->last_visit_day = world_state_.day();
+                            pending_town_discoveries_.push_back({loc.id, loc.display_name});
+                        }
+                        break;
+                    }
+                }
+
+                // Track entry/exit
+                auto prev_it = current_town_for_player_.find(pid);
+                std::string prev =
+                    (prev_it != current_town_for_player_.end()) ? prev_it->second : std::string();
+
+                if (closest_town != prev) {
+                    if (!closest_town.empty()) {
+                        current_town_for_player_[pid] = closest_town;
+                    }
+                    else if (prev_it != current_town_for_player_.end()) {
+                        current_town_for_player_.erase(prev_it);
+                    }
+                    if (!prev.empty() && closest_town != prev) {
+                        pending_town_left_ = true;
+                    }
+                }
+            });
 
     survival_sys_ = world_.system<SurvivalState>("SurvivalDecay")
                         .kind(flecs::PreUpdate)
@@ -298,7 +353,7 @@ void GameMode::init_systems()
 
     // -- PostUpdate phase: cleanup --
 
-    death_marker_sys_ = world_.system<CombatStats>("Combat")
+    death_marker_sys_ = world_.system<CombatStats>("DeathMarker")
                             .kind(flecs::PostUpdate)
                             .each([this](flecs::entity e, CombatStats &cs) {
                                 if (cs.alive && cs.hp <= 0) {
@@ -310,6 +365,20 @@ void GameMode::init_systems()
                                             ds = {};
                                 }
                             });
+
+    player_visibility_sys_ =
+        world_.system<Transform, Movement, Vision>("PlayerVisibility")
+            .with<PlayerTag>()
+            .kind(flecs::PostUpdate)
+            .each([this](flecs::entity e, Transform &pos, Movement &mov, Vision &vis) {
+                EntityId pid = e.id();
+                Vec2i center = world_to_tile(pos.world_pos);
+                auto visible = compute_visible_arc(center, vis.range, pos.facing, vis.arc);
+                auto &explored = player_explored_tiles_[pid];
+                explored.insert(visible.begin(), visible.end());
+                player_visible_tiles_[pid] = std::move(visible);
+            });
+    player_visibility_sys_.depends_on(death_marker_sys_);
 }
 
 EntityId GameMode::spawn_npc(std::string const &id, std::string const &name, float x, float y,
@@ -327,6 +396,7 @@ EntityId GameMode::spawn_npc(std::string const &id, std::string const &name, flo
         npc.knowledge[kf.fact_id] = {
             .fact_id = kf.fact_id,
             .npc_version = kf.version,
+            .locale_key = kf.locale_key,
             .confidence = kf.confidence,
             .witnessed = kf.witnessed,
             .source_npc_id = kf.source,
@@ -523,8 +593,7 @@ void GameMode::handle_interaction(EntityId player)
         return;
     }
     auto const *pp = world_.entity(player).try_get<Transform>();
-    if (!pp)
-        return;
+    assert(pp);
     auto eid = find_nearest_interactable(player, pp->world_pos);
     if (eid == invalid_entity) {
         spdlog::debug("No interactable NPC near player {} at ({}, {})", player, pp->world_pos.x,
@@ -546,7 +615,16 @@ void GameMode::handle_interaction(EntityId player)
     dlg.available_actions.clear();
     dlg.can_gift = false;
     dlg.can_threaten = false;
-    dlg.history.push_back({DialogueLine::npc, "", resp.text, true, npc->display_name});
+    {
+        DialogueLine line;
+        line.speaker = DialogueLine::npc;
+        line.use_template = true;
+        line.template_type = resp.template_type;
+        line.variant_index = resp.variant_index;
+        line.raw_text = resp.text; // server-rendered fallback
+        line.npc_name = npc->display_name;
+        dlg.history.push_back(std::move(line));
+    }
     dlg.npc_trust = trust;
     for (auto const &[tid, _] : npc->knowledge)
         dlg.available_topics.push_back(tid);
@@ -602,8 +680,7 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
     auto eid = dlg.npc_entity;
     auto npc_entity = world_.entity(eid);
     auto *npc = npc_entity.try_get_mut<NPCState>();
-    if (!npc)
-        return;
+    assert(npc);
 
     auto addHistory = [&](DialogueLine::Speaker s, std::string const &key,
                           std::string const &raw = "", bool use_raw = false) {
@@ -677,8 +754,14 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
     }
     if (action.starts_with("tell:")) {
         std::string tid = action.substr(5);
-        auto &dn = topic_registry_.display_name(tid);
-        addHistory(DialogueLine::player, "", dn.empty() ? tid : "Let me tell you about " + dn, true);
+        {
+            DialogueLine line;
+            line.speaker = DialogueLine::player;
+            line.use_template = true;
+            line.template_type = "tell_about_topic";
+            line.slots["topic"] = "topic." + tid;
+            dlg.history.push_back(std::move(line));
+        }
         bool known = npc->knowledge.contains(tid);
         addHistory(DialogueLine::npc, known ? "resp.already_known" : "resp.learned");
         if (!known) {
@@ -694,8 +777,27 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
     auto &dn = topic_registry_.display_name(action);
     auto resp =
         dialogue_engine_.generate_ask_response(*npc, action, dn.empty() ? action : dn, trust);
-    addHistory(DialogueLine::player, "", dn.empty() ? action : "What about " + dn + "?", true);
-    addHistory(DialogueLine::npc, "", resp.text, true);
+    // Player's ask line (template-based)
+    {
+        DialogueLine line;
+        line.speaker = DialogueLine::player;
+        line.use_template = true;
+        line.template_type = "ask_about_topic";
+        line.slots["topic"] = "topic." + action;
+        dlg.history.push_back(std::move(line));
+    }
+    // NPC's response (template-based)
+    {
+        DialogueLine line;
+        line.speaker = DialogueLine::npc;
+        line.use_template = true;
+        line.template_type = resp.template_type;
+        line.variant_index = resp.variant_index;
+        line.slots = std::move(resp.slots);
+        line.raw_text = resp.text; // server-rendered fallback
+        line.npc_name = npc->display_name;
+        dlg.history.push_back(std::move(line));
+    }
     quests_.report_talk(npc->npc_id);
     if (resp.trust_delta != 0) {
         relationships_.modify_trust(npc->npc_id, resp.trust_delta);
@@ -788,7 +890,7 @@ void GameMode::update(float dt)
         push(ev.defender_id);
         push(ev.damage);
         p.push_back(ev.killed ? 1 : 0);
-        server_->broadcast_to_all(NetPacket::combat_event, std::move(p));
+        server_->broadcast_to_all(ServerMsgType::combat_event, std::move(p));
     }
     pending_combat_events_.clear();
 
@@ -797,7 +899,7 @@ void GameMode::update(float dt)
         auto &pr = projectiles_[i];
         Vec2f dst = pr.pos + pr.direction * (pr.total_dist - pr.traveled);
         auto p = make_projectile_fired(pr.pos.x, pr.pos.y, dst.x, dst.y);
-        server_->broadcast_to_all(NetPacket::projectile_fired, std::move(p));
+        server_->broadcast_to_all(ServerMsgType::projectile_fired, std::move(p));
     }
     last_projectile_count_ = projectiles_.size();
 
@@ -806,8 +908,17 @@ void GameMode::update(float dt)
     check_event_spawns();
 
     spdlog::trace("GameMode: world.progress");
+    player_visible_tiles_.clear();
     world_.progress(dt);
-    recompute_player_visibility();
+    // Broadcast town discovery/leave events queued by the TownProximity system
+    for (auto const &[loc_id, locale_key] : pending_town_discoveries_)
+        server_->broadcast_to_all(ServerMsgType::town_discovered,
+                                  make_town_discovered(loc_id, locale_key));
+    pending_town_discoveries_.clear();
+    if (pending_town_left_) {
+        server_->broadcast_to_all(ServerMsgType::town_left, {});
+        pending_town_left_ = false;
+    }
     spdlog::trace("GameMode: broadcast sync");
     server_->broadcast_sync();
     spdlog::trace("GameMode: update done");
@@ -863,10 +974,7 @@ void GameMode::heal_entity(EntityId entity, int amount)
 
 void GameMode::respawn_player(EntityId pid)
 {
-    if (!world_.entity(pid).has<PlayerTag>()) {
-        throw std::invalid_argument("Attempted to respawn non-player entity {}");
-        return;
-    }
+    assert(world_.entity(pid).has<PlayerTag>());
 
     auto e = world_.entity(pid);
     e.get_mut<Transform>().world_pos = {0, 0};
@@ -915,8 +1023,7 @@ void GameMode::serialize_entity(flecs::entity e, std::vector<uint8_t> &out) cons
 {
     auto const *ep = e.try_get<Transform>();
     auto const *ec = e.try_get<CombatStats>();
-    if (!ep || !ec)
-        return;
+    assert(ep && ec);
 
     uint16_t mask = SyncComponent::entity_kind | SyncComponent::position | SyncComponent::combat;
     if (e.has<Movement>())
@@ -1056,21 +1163,6 @@ GameMode::PlayerSyncPayload GameMode::build_full_payload(EntityId player_eid) co
             }
         });
     return result;
-}
-
-void GameMode::recompute_player_visibility()
-{
-    player_visible_tiles_.clear();
-    auto q = world_.query_builder<Transform, Movement>().with<PlayerTag>().build();
-    q.each([this](flecs::entity e, Transform &pos, Movement &mov) {
-        EntityId pid = e.id();
-        Vec2i center = world_to_tile(pos.world_pos);
-        auto const &vis = e.get<Vision>();
-        auto visible = compute_visible_arc(center, vis.range, pos.facing, vis.arc);
-        auto &explored = player_explored_tiles_[pid];
-        explored.insert(visible.begin(), visible.end());
-        player_visible_tiles_[pid] = std::move(visible);
-    });
 }
 
 bool GameMode::is_entity_visible_to_player(EntityId player_eid, Vec2f world_pos) const

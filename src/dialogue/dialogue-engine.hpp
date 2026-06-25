@@ -13,6 +13,11 @@ struct DialogueResponse {
     int trust_delta = 0;
     int fear_delta = 0;
     int respect_delta = 0;
+
+    // Template info for client-side localization
+    std::string template_type;
+    int variant_index = 0;
+    std::unordered_map<std::string, std::string> slots;
 };
 
 struct DialogueTemplate {
@@ -43,7 +48,5 @@ class DialogueEngine {
     std::vector<DialogueTemplate> const &active_templates() const;
     DialogueTemplate const *pick_template(NPCState const &npc, bool knows_directly,
                                           bool knows_indirectly, int confidence) const;
-    std::string fill_template(std::string const &pattern,
-                              std::unordered_map<std::string, std::string> const &slots) const;
     bool would_lie(NPCState const &npc, int player_trust) const;
 };
