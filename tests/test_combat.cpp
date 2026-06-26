@@ -4,6 +4,7 @@
 #include "entities/components/soldier-ai.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/combat-utils.hpp"
+#include "systems/navigation-system.hpp"
 #include <boost/test/unit_test.hpp>
 #include <flecs.h>
 #include <vector>
@@ -96,7 +97,8 @@ BOOST_AUTO_TEST_CASE(soldier_ai_moves_toward_leader)
     auto *cs = soldier.try_get_mut<CombatStats>();
     BOOST_REQUIRE(ai && pos && mov && cs);
 
-    run_soldier_ai(world, soldier, *ai, *pos, *mov, *cs, nullptr, 0.016F, noop);
+    NavigationSystem nav;
+    run_soldier_ai(world, soldier, *ai, *pos, *mov, *cs, &nav, 0.016F, noop);
     BOOST_TEST(mov->velocity.x > 0.F);
 }
 

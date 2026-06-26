@@ -17,6 +17,7 @@
 #include "systems/combat-utils.hpp"
 #include "systems/quest-manager.hpp"
 #include "world/location-store.hpp"
+#include "world/map-data.hpp"
 #include "world/world-state.hpp"
 #include <chrono>
 #include <cstdint>
@@ -121,6 +122,7 @@ class GameMode {
 
     void set_navigation(NavigationSystem const *nav);
     void set_server(Server *s) { server_ = s; }
+    void set_map_data(MapData const *md) { map_data_ = md; }
 
     void set_location_defs(std::vector<LocationDefinition> const &defs) { location_defs_ = &defs; }
 
@@ -189,9 +191,12 @@ class GameMode {
     std::vector<LocationDefinition> const *location_defs_ = nullptr;
     std::vector<std::pair<std::string, std::string>> pending_town_discoveries_;
     bool pending_town_left_ = false;
+    MapData const *map_data_ = nullptr;
 
     void mark_dirty(EntityId eid) { dirty_entities_.insert(eid); }
     void check_event_spawns();
+    void spawn_building_entities();
+    void spawn_town_npcs();
     uint8_t entity_kind(flecs::entity e) const;
     void serialize_entity(flecs::entity e, std::vector<uint8_t> &out) const;
     EntityId find_nearest_interactable(EntityId player, Vec2f player_pos);

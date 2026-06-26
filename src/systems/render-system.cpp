@@ -23,7 +23,7 @@ void RenderSystem::render(Client const &client, NavigationSystem const &nav)
 {
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     render_tile_map(client.player_visibility(), nav);
-    render_town_labels(client);
+    render_town(client.player_visibility(), client);
     render_entities(client, client.player_position(), client.player_id());
     render_projectiles(client);
     render_health_bars(client, client.player_position());
@@ -42,36 +42,8 @@ void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem
         for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
             Vec2i tile(x, y);
             auto lu = lu_of_tile(tile);
-            auto const zoom = camera_->zoom();
 
-            // Check MapData for building/road tiles
-            if (map_data_->in_bounds(x, y)) {
-                int type = map_data_->tile(x, y).type;
-                if (type == 4) {
-                    Vec2f screen = camera_->world_to_screen(lu);
-                    SDL_FRect rect{.x = screen.x,
-                                   .y = screen.y,
-                                   .w = tile_size * zoom + 2.F,
-                                   .h = tile_size * zoom + 2.F};
-                    SDL_SetRenderDrawColor(renderer_, 120, 70, 30, 240);
-                    SDL_RenderFillRect(renderer_, &rect);
-                    SDL_SetRenderDrawColor(renderer_, 160, 110, 50, 255);
-                    SDL_RenderRect(renderer_, &rect);
-                    continue;
-                }
-                if (type == 3) {
-                    Vec2f screen = camera_->world_to_screen(lu);
-                    SDL_FRect rect{.x = screen.x,
-                                   .y = screen.y,
-                                   .w = tile_size * zoom + 2.F,
-                                   .h = tile_size * zoom + 2.F};
-                    SDL_SetRenderDrawColor(renderer_, 180, 160, 110, 200);
-                    SDL_RenderFillRect(renderer_, &rect);
-                    continue;
-                }
-            }
-
-            // Default auto-tiling for grass/water/mountain
+            // Layer 1: auto-tiled terrain for every tile
             int idx{};
             std::vector<std::pair<int, int>> const surround{
                 {-1, -1},
@@ -83,7 +55,7 @@ void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem
                 auto [ny, nx] = d;
                 ny += y;
                 nx += x;
-                if (nav.is_walkable({nx, ny}))
+                if (map_data_->tile(nx, ny).type != TileType::water)
                     idx += 1 << i;
             }
             draw_sprite(lu, tile_size, "tile_" + std::to_string(idx), max_alpha, false);
@@ -104,62 +76,60 @@ void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem
             }
         }
     }
-    // for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
-    //     for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
-    //         Vec2i tile(x, y);
-    //         Vec2f screen = camera_.world_to_screen(lu_of_tile(tile));
-
-    // Render all tiles in viewport range, layer 2
-    // for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
-    //     for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
-    //         Vec2i tile(x, y);
-    //         Vec2f screen = camera_.world_to_screen(lu_of_tile(tile));
-    //         auto const zoom = camera_.zoom();
-    //         // constexpr auto padding = 2.F; // 防止tile之间有缝隙
-    //         SDL_FRect rect{
-    //             .x = screen.x,
-    //             .y = screen.y,
-    //             .w = tile_size * zoom,
-    //             .h = tile_size * zoom,
-    //         };
-    //
-    //         bool blocked = !nav.is_walkable(tile);
-    //         switch (vis.query(tile)) {
-    //         case TileVisibility::Unexplored:
-    //             SDL_SetRenderDrawColor(renderer_, 8, 8, 14, max_alpha);
-    //             SDL_RenderFillRect(renderer_, &rect);
-    //             break;
-    //         case TileVisibility::Explored:
-    //             // Parchment map — dimmer
-    //             if (blocked)
-    //                 SDL_SetRenderDrawColor(renderer_, 155, 140, 110,
-    //                 max_alpha);
-    //             else
-    //                 SDL_SetRenderDrawColor(renderer_, 180, 170, 145, 255);
-    //             SDL_RenderFillRect(renderer_, &rect);
-    //             SDL_SetRenderDrawColor(renderer_, 130, 115, 90, 255);
-    //             SDL_RenderRect(renderer_, &rect);
-    //             break;
-    //         case TileVisibility::Visible:
-    //             // Parchment map — brighter, with grid
-    //             if (blocked)
-    //                 SDL_SetRenderDrawColor(renderer_, 185, 165, 130, 255);
-    //             else
-    //                 SDL_SetRenderDrawColor(renderer_, 210, 200, 170, 255);
-    //             SDL_RenderFillRect(renderer_, &rect);
-    //             SDL_SetRenderDrawColor(renderer_, 155, 140, 110, 255);
-    //             SDL_RenderRect(renderer_, &rect);
-    //             break;
-    //         }
-    //     }
-    // }
 }
 
-void RenderSystem::render_town_labels(Client const &client) const
+void RenderSystem::render_town(PlayerVisibility const &vis, Client const &client) const
 {
+    assert(map_data_);
     assert(location_defs_);
 
+    auto vp = camera_->viewport();
+    auto left_up = world_to_tile(Vec2f(vp.x, vp.y));
+    auto right_down = world_to_tile(Vec2f(vp.x + vp.w, vp.y + vp.h));
+
     auto const &discovered = client.discovered_towns();
+
+    for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
+        for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
+            Vec2i tile(x, y);
+            if (!map_data_->in_bounds(x, y))
+                continue;
+
+            TileType type = map_data_->tile(x, y).type;
+            if (type == TileType::grass || type == TileType::water || type == TileType::mountain)
+                continue;
+
+            // Draw overlay for building/road
+            Vec2f center = center_of_tile(tile);
+            Vec2f screen = camera_->world_to_screen(center);
+            auto const zoom = camera_->zoom();
+            float const size = tile_size * zoom + 2.F;
+            SDL_FRect overlay{
+                .x = screen.x - size / 2.F, .y = screen.y - size / 2.F, .w = size, .h = size};
+
+            if (type == TileType::building) {
+                // Uniform building tile — the entity overlay
+                // (coloured rect + type label) provides the visual
+                // differentiation per service type.
+                SDL_SetRenderDrawColor(renderer_, 130, 90, 50, 240);
+                SDL_RenderFillRect(renderer_, &overlay);
+                SDL_SetRenderDrawColor(renderer_, 170, 130, 70, 255);
+                SDL_RenderRect(renderer_, &overlay);
+            }
+            else if (type == TileType::road) {
+                SDL_SetRenderDrawColor(renderer_, 180, 160, 110, 200);
+                SDL_RenderFillRect(renderer_, &overlay);
+            }
+            else if (type == TileType::wall) {
+                SDL_SetRenderDrawColor(renderer_, 80, 75, 70, 230);
+                SDL_RenderFillRect(renderer_, &overlay);
+                SDL_SetRenderDrawColor(renderer_, 110, 105, 95, 255);
+                SDL_RenderRect(renderer_, &overlay);
+            }
+        }
+    }
+
+    // Town name labels
     if (discovered.empty())
         return;
 
@@ -178,6 +148,9 @@ void RenderSystem::render_town_labels(Client const &client) const
         Vec2f screen = camera_->world_to_screen(center);
         float label_y = screen.y - tile_size;
 
+        // Shadow for readability over bright terrain
+        font_->draw({screen.x + 1.F, label_y + 1.F}, SDL_Color{.r = 0, .g = 0, .b = 0, .a = 180},
+                    def.display_name_en);
         font_->draw({screen.x, label_y}, SDL_Color{.r = 255, .g = 240, .b = 200, .a = 255},
                     def.display_name_en);
     }
@@ -192,6 +165,56 @@ void RenderSystem::render_entities(Client const &client, Vec2f pos, EntityId eid
         // if (!re.alive || !re.visible)
         //     continue;
 
+        float dist = (re.position - pos).length();
+
+        // ---- Structures: coloured rectangle (full-tile) + type label ----
+        // Render unconditionally (skip unexplored check) so that buildings
+        // are visible as soon as they are synced.
+        if (re.kind == EntityKind::structure) {
+            Vec2f screen = camera_->world_to_screen(re.position);
+            auto const zoom = camera_->zoom();
+            // Cover the whole tile so we REPLACE the brown tile rendering
+            // from render_town() with the building-type colour.
+            float const size = (tile_size * zoom + 2.F);
+
+            SDL_FRect rect{
+                .x = screen.x - size / 2.F, .y = screen.y - size / 2.F, .w = size, .h = size};
+
+            // Filled with per-type colour (green inn, gold temple, etc.)
+            draw_rectangle({rect.x, rect.y}, {size, size},
+                           SDL_Color{static_cast<uint8_t>(re.color.r * 255),
+                                     static_cast<uint8_t>(re.color.g * 255),
+                                     static_cast<uint8_t>(re.color.b * 255), 255},
+                           true);
+            // Thin bright border for readability
+            draw_rectangle({rect.x, rect.y}, {size, size},
+                           SDL_Color{255, 255, 255, 120}, false);
+
+            // Type label centred above the building
+            char const *label{};
+            switch (re.building_type) {
+            case 1:
+                label = "Inn";
+                break;
+            case 2:
+                label = "Market";
+                break;
+            case 3:
+                label = "Temple";
+                break;
+            case 4:
+                label = "Smithy";
+                break;
+            default:
+                label = "House";
+                break;
+            }
+            font_->draw({screen.x, screen.y - size / 2.F - 14.F},
+                        SDL_Color{.r = 255, .g = 240, .b = 200, .a = 230}, label);
+            continue; // skip generic sprite path
+        }
+
+        // ---- Non-structure: skip if not explored ----
         auto tile = world_to_tile(re.position);
         auto tv = vis.query(tile);
         if (tv == TileVisibility::Unexplored)
@@ -207,7 +230,6 @@ void RenderSystem::render_entities(Client const &client, Vec2f pos, EntityId eid
         else {
             tex = "entity_dead";
         }
-        float dist = (re.position - pos).length();
         draw_sprite(re.position, 48.F * re.scale, tex, alpha_for(dist), re.anim_state.flip);
 
         // '!' mark (only when clearly visible)
@@ -359,6 +381,16 @@ void RenderSystem::render_fog_overlay(PlayerVisibility const &vis)
             }
         }
     }
+}
+
+void RenderSystem::draw_rectangle(Vec2f left_up, Vec2f size, SDL_Color color, bool fill) const
+{
+    SDL_FRect rect{.x = left_up.x, .y = left_up.y, .w = size.x, .h = size.y};
+    SDL_SetRenderDrawColor(renderer_, color.r, color.g, color.b, color.a);
+    if (fill)
+        SDL_RenderFillRect(renderer_, &rect);
+    else
+        SDL_RenderRect(renderer_, &rect);
 }
 
 void RenderSystem::draw_sprite(Vec2f center, float width, std::string const &tex, uint8_t alpha,

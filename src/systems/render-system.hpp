@@ -43,13 +43,14 @@ class RenderSystem {
     bool debug_mode_ = false;
 
     void render_tile_map(PlayerVisibility const &vis, NavigationSystem const &nav) const;
-    void render_town_labels(Client const &client) const;
+    void render_town(PlayerVisibility const &vis, Client const &client) const;
     void render_entities(Client const &client, Vec2f pos, EntityId eid);
     void render_projectiles(Client const &client);
     void render_health_bars(Client const &client, Vec2f player_pos);
     void render_damage_numbers(Client const &client, std::vector<CombatEvent> const &events);
     void render_fog_overlay(PlayerVisibility const &vis);
 
+    void draw_rectangle(Vec2f left_up, Vec2f size, SDL_Color color, bool fill) const;
     void draw_sprite(Vec2f center, float width, std::string const &tex, uint8_t alpha,
                      bool flip) const;
 

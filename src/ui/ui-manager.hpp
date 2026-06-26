@@ -66,7 +66,7 @@ class UIManager {
 
     struct DiscoveryNotification {
         std::string locale_key;
-        float timer = 0.f;
+        float timer = 0.F;
     };
     std::vector<DiscoveryNotification> discovery_queue_;
     std::vector<LocationDefinition> const *location_defs_ = nullptr;

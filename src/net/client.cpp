@@ -439,11 +439,34 @@ static void set_visual_from_kind(RemoteEntity &re)
         re.scale = 1.f;
         re.texture_name = "enemy";
         break;
-    case EntityKind::structure:
-        re.color = {0.5f, 0.5f, 0.5f, 1.f};
+    case EntityKind::structure: {
+        // Different colour per building type — use a safe tile texture
+        // so we never draw with a null texture.
         re.scale = 1.2f;
-        re.texture_name = "structure";
+        re.texture_name = "tile_0"; // solid white tile, tinted via color
+        switch (re.building_type) {
+        case 0: // generic
+            re.color = {0.45f, 0.40f, 0.35f, 1.f};
+            break;
+        case 1: // inn
+            re.color = {0.3f, 0.7f, 0.3f, 1.f};
+            break;
+        case 2: // market
+            re.color = {0.3f, 0.5f, 0.8f, 1.f};
+            break;
+        case 3: // temple
+            re.color = {0.9f, 0.7f, 0.2f, 1.f};
+            break;
+        case 4: // blacksmith
+            re.color = {0.85f, 0.3f, 0.15f, 1.f};
+            break;
+        default:
+            re.color = {0.5f, 0.5f, 0.5f, 1.f};
+            break;
+        }
+        re.color.a = 1.f;
         break;
+    }
     default:
         re.color = {0.3f, 0.5f, 0.9f, 1.f};
         re.scale = 0.8f;
@@ -475,8 +498,13 @@ std::optional<ParsedEntity> parse_one_entity(SyncReader &r)
     re.id = r.read<uint64_t>();
     uint16_t mask = r.read<uint16_t>();
 
-    if (mask & SyncComponent::entity_kind)
+    if (mask & SyncComponent::entity_kind) {
         re.kind = r.read<uint8_t>();
+        if (re.kind == EntityKind::structure)
+            re.building_type = r.read<uint8_t>();
+        else
+            re.building_type = 0;
+    }
     if (mask & SyncComponent::position) {
         Transform pos;
         pos.read_sync(r);

@@ -107,7 +107,7 @@ class App {
     NavigationSystem navigation_system_;
     LocaleManager locale_;
 
-    MapData map_data_{200, 200};
+    MapData map_data_{-100, -100, 200, 200};
     std::vector<LocationDefinition> location_defs_;
 
     std::unique_ptr<FontManager> fonts_;

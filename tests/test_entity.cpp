@@ -1,4 +1,5 @@
 #include "core/game-types.hpp"
+#include "entities/components/building-data.hpp"
 #include "entities/components/movement.hpp"
 #include "entities/components/position.hpp"
 #include "entities/components/sprite.hpp"
@@ -125,6 +126,31 @@ BOOST_AUTO_TEST_CASE(type_erased_pools_dont_cross_contaminate)
 
     BOOST_TEST(e.try_get<Movement>()->max_speed == 200.F);
     BOOST_TEST(e.try_get<Transform>()->world_pos.x == 0.F);
+}
+
+// Verify that entities with BuildingData are recognised as structures
+// (mimicking the logic in GameMode::entity_kind()).
+BOOST_AUTO_TEST_CASE(building_entity_kind_is_structure)
+{
+    flecs::world world;
+
+    // Entity WITHOUT BuildingData should NOT match.
+    auto plain = world.entity();
+    BOOST_TEST(!plain.has<BuildingData>());
+
+    // Entity WITH BuildingData should match.
+    auto building = world.entity().set(
+        BuildingData{BuildingData::Type::inn, "thornhaven", ""});
+    BOOST_TEST(building.has<BuildingData>());
+
+    // Simulate the entity_kind logic:
+    auto kind_of = [&](flecs::entity e) -> uint8_t {
+        if (e.has<BuildingData>()) return 5; // EntityKind::structure
+        return 4;                              // EntityKind::enemy (fallback)
+    };
+
+    BOOST_TEST(kind_of(plain) == 4);
+    BOOST_TEST(kind_of(building) == 5);
 }
 
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)

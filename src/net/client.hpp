@@ -64,11 +64,12 @@ struct RemoteEntity {
 
     // Visual (derived from kind + team, overridden by synced Sprite)
     SDL_FColor color{0.3f, 0.5f, 0.9f, 1.f};
-    float scale = 1.f;
+    float scale = 1.F;
     std::string texture_name = "entity";
     bool visible = true;
     bool hit_flash = false;
     AnimationState anim_state;
+    uint8_t building_type = 0; // BuildingData::Type (only valid when kind==structure)
 };
 
 class Client {

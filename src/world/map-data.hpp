@@ -23,24 +23,34 @@ inline Vec2i world_to_tile(Vec2f pos)
             static_cast<int>(std::floor(pos.y / tile_size))};
 }
 
+enum class TileType : int {
+    grass = 0,
+    water = 1,
+    mountain = 2,
+    road = 3,
+    building = 4,
+    wall = 5,
+};
+
 struct TileData {
-    int type = 0; // 0=grass, 1=water, 2=mountain, 3=road, 4=building
+    TileType type = TileType::grass;
     bool walkable = true;
     bool blocks_vision = false;
+    int building_group = 0; // 0=none; >0 groups tiles belonging to one building
 };
 
 class MapData {
   public:
-    MapData(int width, int height);
+    MapData(std::int32_t x, std::int32_t y, std::uint32_t width, std::uint32_t height);
 
-    TileData &tile(int x, int y);
-    TileData const &tile(int x, int y) const;
-    bool in_bounds(int x, int y) const;
+    TileData &tile(std::int32_t x, std::int32_t y);
+    TileData const &tile(std::int32_t x, std::int32_t y) const;
+    bool in_bounds(std::int32_t x, std::int32_t y) const;
 
-    int width() const { return width_; }
-    int height() const { return height_; }
+    std::int32_t width() const { return w_; }
+    std::int32_t height() const { return h_; }
 
   private:
-    int width_, height_;
-    std::vector<TileData> tiles_;
+    std::int32_t x_, y_, w_, h_;
+    std::vector<std::vector<TileData>> tiles_;
 };

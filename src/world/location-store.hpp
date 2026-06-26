@@ -15,15 +15,31 @@
 // ---------------------------------------------------------------------------
 
 struct LocationDefinition {
-    std::string id;             // unique key, e.g. "ugarit"
-    std::string display_name;   // locale key, e.g. "location.ugarit"
+    std::string id;              // unique key, e.g. "ugarit"
+    std::string display_name;    // locale key, e.g. "location.ugarit"
     std::string display_name_en; // English name from JSON "name" field
-    Vec2f world_pos;            // world-space centre (from JSON x / y)
-    Vec2i tile_center;          // tile coordinate of world_pos
+    Vec2f world_pos;             // world-space centre (from JSON x / y)
+    Vec2i tile_center;           // tile coordinate of world_pos
     float discovery_radius = 250.f;
-    int building_count = 5;     // how many building tiles to place
-    std::string description;    // e.g. "A ruined port..."
+    int building_count = 5;  // how many building tiles to place
+    std::string description; // e.g. "A ruined port..."
 };
+
+/// Compute a reasonable town-cluster radius from the number of buildings.
+/// Used by both terrain-generator and entity-spawning code so they agree
+/// on the buildable area.  The formula grows the radius sub-linearly so
+/// that larger towns get more room without wasting empty space for small ones.
+inline int town_build_radius(int building_count)
+{
+    // Each building needs roughly 6 tiles of effective area (footprint +
+    // minimum 1-tile gap on two sides).  The cluster is a square centred on
+    // the town, so radius = ceil(sqrt(6n))/2  with the +1 approximating ceil.
+    int area = building_count * 6;
+    int side = 1;
+    while (side * side < area)
+        ++side;
+    return std::max(2, (side + 1) / 2);
+}
 
 struct RouteDefinition {
     std::string from_id;
@@ -65,20 +81,18 @@ inline LocationData load_locations_from_json(std::string const &path)
     for (auto const &j : j_locs) {
         auto const &o = j.as_object();
         LocationDefinition ld;
-        ld.id               = o.at("id").as_string().c_str();
-        ld.display_name     = "location." + ld.id;
-        ld.display_name_en  = o.at("name").as_string().c_str();
-        ld.world_pos.x      = static_cast<float>(o.at("x").as_int64());
-        ld.world_pos.y      = static_cast<float>(o.at("y").as_int64());
-        ld.tile_center      = world_to_tile(ld.world_pos);
+        ld.id = o.at("id").as_string().c_str();
+        ld.display_name = "location." + ld.id;
+        ld.display_name_en = o.at("name").as_string().c_str();
+        ld.world_pos.x = static_cast<float>(o.at("x").as_int64());
+        ld.world_pos.y = static_cast<float>(o.at("y").as_int64());
+        ld.tile_center = world_to_tile(ld.world_pos);
 
-        // Size heuristic: larger towns get more building tiles
-        if (ld.id == "ugarit")
-            ld.building_count = 8;
-        else if (ld.id == "byblos")
-            ld.building_count = 6;
-        else
-            ld.building_count = 4;
+        // Building count from JSON (required)
+        ld.building_count = static_cast<int>(o.at("building_count").as_int64());
+
+        // Discovery radius from JSON (required)
+        ld.discovery_radius = static_cast<float>(o.at("discovery_radius").as_int64());
 
         // Description from JSON
         if (o.contains("description"))
@@ -94,10 +108,32 @@ inline LocationData load_locations_from_json(std::string const &path)
         for (auto const &j : j_routes) {
             auto const &o = j.as_object();
             RouteDefinition rd;
-            rd.from_id     = o.at("from").as_string().c_str();
-            rd.to_id       = o.at("to").as_string().c_str();
-            rd.danger      = static_cast<int>(o.at("danger").as_int64());
-            rd.travel_time = static_cast<int>(o.at("time").as_int64());
+            rd.from_id = o.at("from").as_string().c_str();
+            rd.to_id = o.at("to").as_string().c_str();
+            rd.danger = static_cast<int>(o.at("danger").as_int64());
+
+            // Travel time: explicit from JSON, or auto-calculated from
+            // distance between towns (~600 world-units per time-unit).
+            if (o.contains("time")) {
+                rd.travel_time = static_cast<int>(o.at("time").as_int64());
+            }
+            else {
+                // Linear search for both endpoints (inlined find_location
+                // since that function hasn't been declared yet).
+                LocationDefinition const *from_def = nullptr;
+                LocationDefinition const *to_def = nullptr;
+                for (auto const &loc : out.locations) {
+                    if (loc.id == rd.from_id) from_def = &loc;
+                    if (loc.id == rd.to_id)   to_def = &loc;
+                }
+                if (from_def && to_def) {
+                    float dist = (from_def->world_pos - to_def->world_pos).length();
+                    rd.travel_time = std::max(1, static_cast<int>(std::round(dist / 600.f)));
+                }
+                else {
+                    rd.travel_time = 1;
+                }
+            }
             out.routes.push_back(std::move(rd));
         }
     }
@@ -106,9 +142,8 @@ inline LocationData load_locations_from_json(std::string const &path)
 }
 
 /// Find a LocationDefinition by id; returns nullptr if not found.
-inline LocationDefinition const *find_location(
-    std::vector<LocationDefinition> const &locs,
-    std::string const &id)
+inline LocationDefinition const *find_location(std::vector<LocationDefinition> const &locs,
+                                               std::string const &id)
 {
     for (auto const &ld : locs)
         if (ld.id == id)
@@ -119,9 +154,8 @@ inline LocationDefinition const *find_location(
 /// Load terrain.json and populate MapData + NavigationSystem.
 /// Each feature tile gets its type set in MapData and is marked
 /// non-walkable in the NavigationSystem.
-inline void load_terrain_from_json(std::string const &path,
-                                    MapData &map_data,
-                                    NavigationSystem &nav)
+inline void load_terrain_from_json(std::string const &path, MapData &map_data,
+                                   NavigationSystem &nav)
 {
     FILE *fp = std::fopen(path.c_str(), "rb");
     if (!fp) {
@@ -141,7 +175,7 @@ inline void load_terrain_from_json(std::string const &path,
     int total = 0;
     for (auto const &f : features) {
         auto const &obj = f.as_object();
-        int tile_type = static_cast<int>(obj.at("type").as_int64());
+        int tile_type_id = static_cast<int>(obj.at("type").as_int64());
         auto const &tiles = obj.at("tiles").as_array();
         for (auto const &t : tiles) {
             int x = static_cast<int>(t.as_object().at("x").as_int64());
@@ -149,9 +183,9 @@ inline void load_terrain_from_json(std::string const &path,
             if (!map_data.in_bounds(x, y))
                 continue;
             auto &td = map_data.tile(x, y);
-            td.type = tile_type;
+            td.type = static_cast<TileType>(tile_type_id);
             td.walkable = false;
-            td.blocks_vision = (tile_type == 2); // mountains block vision
+            td.blocks_vision = (tile_type_id == 2); // mountains block vision
             nav.set_walkable({x, y}, false);
             ++total;
         }

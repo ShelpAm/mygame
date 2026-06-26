@@ -189,6 +189,14 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     constexpr float x = 10.F, line_h = 14.F;
     float y = 10.F;
 
+    // Dark semi-transparent background for HUD readability
+    constexpr float bg_w = 420.F;
+    float bg_h = 200.F;
+    SDL_FRect hud_bg{.x = 4.F, .y = 4.F, .w = bg_w, .h = bg_h};
+    SDL_SetRenderDrawBlendMode(render_system_->renderer(), SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(render_system_->renderer(), 8, 8, 12, 160);
+    SDL_RenderFillRect(render_system_->renderer(), &hud_bg);
+
     // Line 1: Title | Language | FPS
     hud_font_->draw({x, y}, SDL_Color{.r = 204, .g = 178, .b = 102, .a = 255},
                     std::format("{} | {}: {} | {}: {:.0f}", loc.get("game.title"),
@@ -297,8 +305,10 @@ void UIManager::render_dialogue(App const &app)
 
     // Title + trust indicator
     ImGui::TextColored(ImVec4(0.8f, 0.7f, 0.4f, 1.0f), "%s", ds.npc_name.c_str());
-    ImGui::SameLine();
-    ImGui::TextDisabled(" %s: %+d", loc.get("dialogue.trust").c_str(), ds.npc_trust);
+    if (ds.npc_id != "__town__" && ds.npc_id != "__building__") {
+        ImGui::SameLine();
+        ImGui::TextDisabled(" %s: %+d", loc.get("dialogue.trust").c_str(), ds.npc_trust);
+    }
     ImGui::Separator();
 
     // Conversation history
@@ -369,16 +379,47 @@ void UIManager::render_dialogue(App const &app)
         }
     }
 
-    // Actions bar
-    ImGui::Separator();
-    if (ds.can_gift && ImGui::Button(loc.get("dialogue.gift").c_str())) {
-        const_cast<App &>(app).do_dialogue_action("__gift__");
+    // Town service actions (__inn__ etc.)
+    bool has_town_services = std::ranges::any_of(ds.available_actions, [](auto const &a) {
+        return a.starts_with("__");
+    });
+    if (has_town_services) {
+        ImGui::Separator();
+        for (auto const &action : ds.available_actions) {
+            if (action == "__inn__") {
+                if (ImGui::Button("🏨 Rest at Inn")) {
+                    const_cast<App &>(app).do_dialogue_action(action);
+                }
+            }
+            else if (action == "__market__") {
+                if (ImGui::Button("🏪 Buy Supplies (Market)")) {
+                    const_cast<App &>(app).do_dialogue_action(action);
+                }
+            }
+            else if (action == "__temple__") {
+                if (ImGui::Button("⛪ Visit Temple (Heal Ailments)")) {
+                    const_cast<App &>(app).do_dialogue_action(action);
+                }
+            }
+            else if (action == "__blacksmith__") {
+                if (ImGui::Button("🔧 Blacksmith (Upgrade Gear)")) {
+                    const_cast<App &>(app).do_dialogue_action(action);
+                }
+            }
+        }
     }
-    ImGui::SameLine();
-    if (ds.can_threaten && ImGui::Button(loc.get("dialogue.threaten").c_str())) {
-        const_cast<App &>(app).do_dialogue_action("__threaten__");
+    else {
+        // NPC actions bar
+        ImGui::Separator();
+        if (ds.can_gift && ImGui::Button(loc.get("dialogue.gift").c_str())) {
+            const_cast<App &>(app).do_dialogue_action("__gift__");
+        }
+        ImGui::SameLine();
+        if (ds.can_threaten && ImGui::Button(loc.get("dialogue.threaten").c_str())) {
+            const_cast<App &>(app).do_dialogue_action("__threaten__");
+        }
+        ImGui::SameLine();
     }
-    ImGui::SameLine();
     if (ImGui::Button(loc.get("dialogue.leave").c_str())) {
         const_cast<App &>(app).end_dialogue();
     }

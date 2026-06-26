@@ -24,6 +24,6 @@ class CameraSystem {
     Vec2f target_;
     int width_;
     int height_;
-    float zoom_ = 1.f;
-    float smooth_speed_ = 8.f;
+    float zoom_ = 1.F;
+    float smooth_speed_ = 8.F;
 };

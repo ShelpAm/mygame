@@ -2,6 +2,7 @@
 #include "dialogue/dialogue-engine.hpp"
 #include "dialogue/relationship-table.hpp"
 #include "dialogue/topic-registry.hpp"
+#include "entities/components/building-data.hpp"
 #include "entities/components/collider.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/defense-structure.hpp"
@@ -69,15 +70,18 @@ void GameMode::init_world()
     //   SurvivalDecay → SoldierAI → CombatResolution
 
     combat_.set_dirty_callback([this](EntityId eid) { mark_dirty(eid); });
+
+    spawn_building_entities();
+    spawn_town_npcs();
 }
 
 void GameMode::load_topics()
 {
     // Topics
-    topic_registry_.register_topic("ugarit_sack", "the Sack of Ugarit", "events");
-    topic_registry_.register_topic("sea_peoples", "the Sea Peoples", "factions");
-    topic_registry_.register_topic("byblos_king", "the King of Byblos", "people");
-    topic_registry_.register_topic("copper_trade", "the Copper Trade", "resources");
+    topic_registry_.register_topic("ugarit_sack", "the Fall of Thornhaven", "events");
+    topic_registry_.register_topic("sea_peoples", "the Ashen Pact", "factions");
+    topic_registry_.register_topic("byblos_king", "the Warden of Ironholt", "people");
+    topic_registry_.register_topic("copper_trade", "the Relic Trade", "resources");
     knowledge_.mark_topic_known("ugarit_sack");
     knowledge_.mark_topic_known("sea_peoples");
     knowledge_.mark_topic_known("byblos_king");
@@ -177,9 +181,7 @@ void GameMode::load_npcs()
                     auto const &ko = k.as_object();
                     NPCKnowledgeEntry e;
                     e.fact_id = std::string(ko.at("fact_id").as_string());
-                    e.locale_key = ko.contains("locale_key")
-                                       ? std::string(ko.at("locale_key").as_string())
-                                       : "";
+                    e.locale_key = std::string(ko.at("locale_key").as_string());
                     e.version = std::string(ko.at("version").as_string());
                     if (ko.contains("confidence"))
                         e.confidence = static_cast<int>(ko.at("confidence").as_int64());
@@ -198,7 +200,7 @@ void GameMode::load_npcs()
                     npc->location_id = std::move(loc_id);
             }
             if (obj.contains("captain") && obj.at("captain").as_bool()) {
-                int gc = obj.contains("guards") ? static_cast<int>(obj.at("guards").as_int64()) : 3;
+                int gc = static_cast<int>(obj.at("guards").as_int64());
                 spawn_guards(npc_eid, gc);
             }
             relayout_formation(npc_eid);
@@ -491,6 +493,155 @@ void GameMode::spawn_guards(EntityId captain_eid, int count)
     }
 }
 
+void GameMode::spawn_building_entities()
+{
+    if (!location_defs_ || !map_data_)
+        return;
+
+    static constexpr BuildingData::Type building_types[] = {
+        BuildingData::Type::inn,
+        BuildingData::Type::market,
+        BuildingData::Type::temple,
+        BuildingData::Type::blacksmith,
+        BuildingData::Type::generic,
+    };
+
+    // Type pool — roughly 2 service buildings per 5, with generic filler.
+    std::vector<BuildingData::Type> type_pool;
+    for (int i = 0; i < 3; ++i)
+        for (auto t : building_types)
+            type_pool.push_back(t);
+    size_t type_idx = 0;
+
+    for (auto const &loc : *location_defs_) {
+        Vec2i center = loc.tile_center;
+        // Must match town_build_radius() used by terrain-generator.
+        int radius = town_build_radius(loc.building_count);
+
+        // ---- Collect building centroids from map data ----
+        // building_group on TileData ties multi-tile footprints together.
+        struct GroupData {
+            int count = 0;
+            float sum_x = 0.F;
+            float sum_y = 0.F;
+        };
+        std::unordered_map<int, GroupData> groups;
+
+        for (int dy = -radius; dy <= radius; ++dy) {
+            for (int dx = -radius; dx <= radius; ++dx) {
+                Vec2i tile{center.x + dx, center.y + dy};
+                if (!map_data_->in_bounds(tile.x, tile.y))
+                    continue;
+                int g = map_data_->tile(tile.x, tile.y).building_group;
+                if (g == 0)
+                    continue;
+                auto &gd = groups[g];
+                ++gd.count;
+                gd.sum_x += static_cast<float>(tile.x);
+                gd.sum_y += static_cast<float>(tile.y);
+            }
+        }
+
+        // ---- Spawn one entity per building ----
+        for (auto const &[g, gd] : groups) {
+            // Geometric centre of the footprint (tile coords → world)
+            float avg_x = gd.sum_x / static_cast<float>(gd.count);
+            float avg_y = gd.sum_y / static_cast<float>(gd.count);
+            Vec2f world_pos{(avg_x + 0.5F) * tile_size, (avg_y + 0.5F) * tile_size};
+
+            auto btype = type_pool[type_idx % type_pool.size()];
+            ++type_idx;
+
+            auto e = world_.entity()
+                         .set(Transform{.world_pos = world_pos})
+                         .set(BuildingData{btype, loc.id, ""})
+                         .set(Interactable{.interact_radius = 48.F,
+                                           .can_talk = false})
+                         .set(CombatStats{.team = Team::neutral,
+                                          .max_hp = 9999,
+                                          .hp = 9999,
+                                          .attack = 0,
+                                          .defense = 0,
+                                          .attack_range = 0.F})
+                         .set(Collider{22.F});
+
+            mark_dirty(e.id());
+            spdlog::debug("spawned building entity {} type {} at {} group {} ({} tiles)",
+                          e.id(), static_cast<int>(btype), loc.id, g, gd.count);
+        }
+    }
+    spdlog::info("spawn_building_entities: {} entities across {} towns",
+                 type_idx, location_defs_->size());
+}
+
+void GameMode::spawn_town_npcs()
+{
+    // Spawn a modest number of residents so towns feel inhabited but not
+    // overcrowded — roughly one NPC per 3 service buildings, placed at
+    // scattered positions inside the town rather than next to every door.
+    int count = 0;
+
+    // Gather all service-building positions + town ids.
+    struct ServiceBldg {
+        Vec2f world_pos;
+        std::string town_id;
+        std::string role;
+        std::string personality;
+    };
+    std::vector<ServiceBldg> services;
+
+    world_.query<BuildingData, Transform>().each(
+        [&](flecs::entity e, BuildingData const &bd, Transform const &bt) {
+            char const *role{};
+            char const *pers{};
+            switch (bd.type) {
+            case BuildingData::Type::inn:        role = "Innkeeper";   pers = "friendly"; break;
+            case BuildingData::Type::market:     role = "Merchant";    pers = "friendly"; break;
+            case BuildingData::Type::temple:     role = "Priest";      pers = "friendly"; break;
+            case BuildingData::Type::blacksmith: role = "Blacksmith";  pers = "friendly"; break;
+            default: return;
+            }
+            services.push_back({bt.world_pos, bd.town_id, role, pers});
+        });
+
+    if (services.empty())
+        return;
+
+    // Seeded RNG so the selection + positions are deterministic per run.
+    std::seed_seq seed{42};
+    std::mt19937 rng(seed);
+    std::shuffle(services.begin(), services.end(), rng);
+
+    // Only spawn for ~1/3 of service buildings.
+    size_t to_spawn = std::max<size_t>(1, services.size() / 3);
+    std::uniform_real_distribution<float> angle_dist(0.F, 2.F * 3.14159F);
+    std::uniform_real_distribution<float> radius_dist(30.F, 80.F);
+
+    for (size_t i = 0; i < to_spawn && i < services.size(); ++i) {
+        auto const &s = services[i];
+
+        // Place NPC at a random offset from the building, within the
+        // town area, so they don't all stand in a neat line.
+        float a = angle_dist(rng);
+        float r = radius_dist(rng);
+        Vec2f npc_pos = s.world_pos + Vec2f{std::cos(a) * r, std::sin(a) * r};
+
+        std::string npc_id = s.town_id + "_" + s.role;
+        std::string display_name = std::string(s.role) + " at " + s.town_id;
+
+        auto npc_eid = spawn_npc(npc_id, display_name, npc_pos.x, npc_pos.y, s.personality, {});
+        if (npc_eid != invalid_entity) {
+            auto *npc_state = world_.entity(npc_eid).try_get_mut<NPCState>();
+            if (npc_state)
+                npc_state->location_id = s.town_id;
+            ++count;
+        }
+    }
+
+    spdlog::info("spawn_town_npcs: spawned {} resident NPCs (from {} service buildings)",
+                 count, services.size());
+}
+
 void GameMode::cycle_stance(EntityId leader)
 {
     auto q = world_.query_builder<SoldierAI>().with<BelongsTo>(leader);
@@ -598,8 +749,89 @@ void GameMode::handle_interaction(EntityId player)
     if (eid == invalid_entity) {
         spdlog::debug("No interactable NPC near player {} at ({}, {})", player, pp->world_pos.x,
                       pp->world_pos.y);
+        // Check for town services if player is in a town
+        auto town_it = current_town_for_player_.find(player);
+        if (town_it != current_town_for_player_.end() && location_defs_) {
+            auto const *loc = find_location(*location_defs_, town_it->second);
+            if (loc) {
+                dlg.active = true;
+                dlg.npc_entity = invalid_entity;
+                dlg.npc_id = "__town__";
+                dlg.npc_name = loc->display_name_en;
+                dlg.history.clear();
+                dlg.available_topics.clear();
+                dlg.available_actions = {"__inn__", "__market__", "__temple__", "__blacksmith__"};
+                // Tell the client this is a town service dialogue
+                DialogueLine line;
+                line.speaker = DialogueLine::npc;
+                line.use_raw = true;
+                line.raw_text = "Welcome to " + loc->display_name_en + ". How can I help you?";
+                line.npc_name = loc->display_name_en;
+                dlg.history.push_back(std::move(line));
+                return;
+            }
+        }
         return;
     }
+
+    // Check for building entity interaction
+    auto const *building = world_.entity(eid).try_get<BuildingData>();
+    if (building) {
+        // Generic buildings (decorative only) — no dialogue
+        if (building->type == BuildingData::Type::generic)
+            return;
+
+        // Map building type to the corresponding action
+        std::string action;
+        std::string greeting;
+        std::string label;
+        switch (building->type) {
+        case BuildingData::Type::inn:
+            action = "__inn__";
+            label = "Innkeeper";
+            greeting = "Welcome to the inn. Would you like to rest for the night?";
+            break;
+        case BuildingData::Type::market:
+            action = "__market__";
+            label = "Merchant";
+            greeting = "Fresh supplies just arrived! Need provisions for the road?";
+            break;
+        case BuildingData::Type::temple:
+            action = "__temple__";
+            label = "Priest";
+            greeting = "The sacred flame burns bright. Seek purification, weary traveler?";
+            break;
+        case BuildingData::Type::blacksmith:
+            action = "__blacksmith__";
+            label = "Blacksmith";
+            greeting = "The forge is hot and ready. Want to upgrade your gear?";
+            break;
+        default:
+            return;
+        }
+
+        dlg.active = true;
+        dlg.npc_entity = eid;
+        dlg.npc_id = "__building__";
+        dlg.npc_name = !building->display_name.empty()
+                           ? building->display_name
+                           : (std::string(label) + " at "
+                              + (current_town_for_player_.contains(player)
+                                     ? current_town_for_player_[player]
+                                     : "town"));
+        dlg.history.clear();
+        dlg.available_topics.clear();
+        dlg.available_actions = {std::move(action)};
+
+        DialogueLine line;
+        line.speaker = DialogueLine::npc;
+        line.use_raw = true;
+        line.raw_text = std::move(greeting);
+        line.npc_name = dlg.npc_name;
+        dlg.history.push_back(std::move(line));
+        return;
+    }
+
     auto const *npc = world_.entity(eid).try_get<NPCState>();
     if (!npc)
         return;
@@ -677,6 +909,71 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
         end_dialogue(player);
         return;
     }
+
+    // Town services (generic town or specific building)
+    if (dlg.npc_id == "__town__" || dlg.npc_id == "__building__") {
+        if (action == "__inn__") {
+            auto *cs = world_.entity(player).try_get_mut<CombatStats>();
+            auto *sv = world_.entity(player).try_get_mut<SurvivalState>();
+            if (cs) {
+                cs->hp = std::min(cs->hp + 20, cs->max_hp);
+                mark_dirty(player);
+            }
+            if (sv) {
+                sv->health = std::min(sv->health + 30.F, 100.F);
+                sv->energy = 100.F;
+            }
+            DialogueLine line;
+            line.speaker = DialogueLine::npc;
+            line.use_raw = true;
+            line.raw_text = "You rest at the inn. HP restored, energy replenished.";
+            line.npc_name = dlg.npc_name;
+            dlg.history.push_back(std::move(line));
+        }
+        else if (action == "__market__") {
+            auto *sv = world_.entity(player).try_get_mut<SurvivalState>();
+            if (sv) {
+                sv->food = std::min(sv->food + 40.F, 100.F);
+                sv->water = std::min(sv->water + 40.F, 100.F);
+            }
+            DialogueLine line;
+            line.speaker = DialogueLine::npc;
+            line.use_raw = true;
+            line.raw_text = "You buy supplies at the market. Food and water restocked.";
+            line.npc_name = dlg.npc_name;
+            dlg.history.push_back(std::move(line));
+        }
+        else if (action == "__temple__") {
+            auto *sv = world_.entity(player).try_get_mut<SurvivalState>();
+            if (sv) {
+                sv->health = std::min(sv->health + 50.F, 100.F);
+                // Cure poison/ailments by resetting to full health
+                sv->energy = std::max(sv->energy, 80.F);
+            }
+            DialogueLine line;
+            line.speaker = DialogueLine::npc;
+            line.use_raw = true;
+            line.raw_text = "The temple's sacred light washes over you. Ailments cured, spirit renewed.";
+            line.npc_name = dlg.npc_name;
+            dlg.history.push_back(std::move(line));
+        }
+        else if (action == "__blacksmith__") {
+            auto *cs = world_.entity(player).try_get_mut<CombatStats>();
+            if (cs) {
+                cs->attack = std::min(cs->attack + 2, 20);
+                cs->defense = std::min(cs->defense + 1, 15);
+                mark_dirty(player);
+            }
+            DialogueLine line;
+            line.speaker = DialogueLine::npc;
+            line.use_raw = true;
+            line.raw_text = "The blacksmith hammers away. Your weapon is sharper and armor reinforced.";
+            line.npc_name = dlg.npc_name;
+            dlg.history.push_back(std::move(line));
+        }
+        return;
+    }
+
     auto eid = dlg.npc_entity;
     auto npc_entity = world_.entity(eid);
     auto *npc = npc_entity.try_get_mut<NPCState>();
@@ -1014,7 +1311,7 @@ uint8_t GameMode::entity_kind(flecs::entity e) const
         return EntityKind::npc;
     if (e.has<SoldierAI>())
         return EntityKind::soldier;
-    if (e.has<DefenseStructure>())
+    if (e.has<DefenseStructure>() || e.has<BuildingData>())
         return EntityKind::structure;
     return EntityKind::enemy;
 }
@@ -1042,7 +1339,15 @@ void GameMode::serialize_entity(flecs::entity e, std::vector<uint8_t> &out) cons
     w.write(mask);
 
     // entity_kind (bit 0) — computed, not a component
-    w.write(static_cast<uint8_t>(entity_kind(e)));
+    uint8_t kind = entity_kind(e);
+    w.write(kind);
+
+    // For structures, also send building type so the client can render
+    // different icons / colours per service.
+    if (kind == EntityKind::structure) {
+        auto const *bd = e.try_get<BuildingData>();
+        w.write(static_cast<uint8_t>(bd ? static_cast<uint8_t>(bd->type) : 0));
+    }
 
     // position (bit 1)
     e.get<Transform>().write_sync(w);

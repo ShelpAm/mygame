@@ -121,8 +121,9 @@ void App::init()
     server_ = std::make_unique<Server>();
 
     game_mode_ = std::make_unique<GameMode>();
-    game_mode_->init_world();
+    game_mode_->set_map_data(&map_data_);
     game_mode_->set_location_defs(location_defs_);
+    game_mode_->init_world();
     game_mode_->set_navigation(&navigation_system_);
     game_mode_->set_server(server_.get());
     server_->set_game_mode(game_mode_.get());
