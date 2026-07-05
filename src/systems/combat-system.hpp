@@ -8,13 +8,6 @@
 #include <unordered_map>
 #include <vector>
 
-struct CombatEvent {
-    EntityId attacker_id = 0;
-    EntityId defender_id = 0;
-    int damage = 0;
-    bool killed = false;
-};
-
 class CombatSystem {
   public:
     std::vector<CombatEvent> const &events() const { return events_; }

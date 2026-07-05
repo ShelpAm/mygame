@@ -22,8 +22,9 @@ class RenderSystem {
     RenderSystem(SDL_Window *window, SDL_Renderer *renderer, ResourceManager *resources,
                  CameraSystem *camera, Font *font);
 
-    void render(Client const &client, NavigationSystem const &nav);
+    void render(Client const &client);
     void toggle_debug_mode() { debug_mode_ = !debug_mode_; }
+    bool debug_mode() const { return debug_mode_; }
 
     void set_map_data(MapData const *md) { map_data_ = md; }
     void set_location_defs(std::vector<LocationDefinition> const *defs) { location_defs_ = defs; }
@@ -42,17 +43,17 @@ class RenderSystem {
     std::vector<LocationDefinition> const *location_defs_ = nullptr;
     bool debug_mode_ = false;
 
-    void render_tile_map(PlayerVisibility const &vis, NavigationSystem const &nav) const;
-    void render_town(PlayerVisibility const &vis, Client const &client) const;
-    void render_entities(Client const &client, Vec2f pos, EntityId eid);
+    void render_tile_map() const;
+    void render_town(Client const &client) const;
+    void render_entities(Client const &client, Vec2f local_player_pos, EntityId eid);
     void render_projectiles(Client const &client);
     void render_health_bars(Client const &client, Vec2f player_pos);
     void render_damage_numbers(Client const &client, std::vector<CombatEvent> const &events);
     void render_fog_overlay(PlayerVisibility const &vis);
 
     void draw_rectangle(Vec2f left_up, Vec2f size, SDL_Color color, bool fill) const;
-    void draw_sprite(Vec2f center, float width, std::string const &tex, uint8_t alpha,
-                     bool flip) const;
+    void draw_sprite(Vec2f foot_pos, float width, std::string const &tex, uint8_t alpha, bool flip,
+                     Vec2f origin = Vec2f{-1, -1}) const;
 
     // distance -> alpha mapping (smooth fade at boundary)
     static std::uint8_t alpha_for(float d)

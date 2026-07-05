@@ -16,7 +16,6 @@
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "knowledge/rumor-propagator.hpp"
-#include "net/local-session.hpp"
 #include "net/server.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/collision-system.hpp"
@@ -24,12 +23,12 @@
 #include "systems/combat-utils.hpp"
 #include "systems/formation.hpp"
 #include "systems/quest-manager.hpp"
+#include "world/location-store.hpp"
 #include "world/map-data.hpp"
 #include "world/world-state.hpp"
 #include <boost/json.hpp>
 #include <cmath>
 #include <fstream>
-#include <imgui.h>
 #include <random>
 #include <spdlog/spdlog.h>
 #include <string_view>
@@ -314,34 +313,39 @@ void GameMode::init_systems()
                              // 1. Tile collision (hard push-out)
                              pos = collision_system_->resolve_tile_collisions(pos, c.radius);
 
-                             // 2. Soft separation — accumulate forces from nearby entities
+                             // 2. Soft separation — skip structures (they don't move)
                              Vec2f separation_force = {0.F, 0.F};
                              bool const is_player = e.has<PlayerTag>();
+                             bool const is_structure = e.has<BuildingData>() || e.has<DefenseStructure>();
 
-                             entity_query_.each(
-                                 [&](flecs::entity other, Transform const &op, Collider const &oc) {
-                                     if (other == e)
-                                         return;
-                                     float const dx = pos.x - op.world_pos.x;
-                                     float const dy = pos.y - op.world_pos.y;
-                                     float const dist = std::hypot(dx, dy);
-                                     float const min_dist = c.radius + oc.radius;
+                             if (!is_structure) {
+                                 entity_query_.each(
+                                     [&](flecs::entity other, Transform const &op, Collider const &oc) {
+                                         if (other == e)
+                                             return;
+                                         if (other.has<BuildingData>() || other.has<DefenseStructure>())
+                                             return;
+                                         float const dx = pos.x - op.world_pos.x;
+                                         float const dy = pos.y - op.world_pos.y;
+                                         float const dist = std::hypot(dx, dy);
+                                         float const min_dist = c.radius + oc.radius;
 
-                                     if (dist < min_dist && dist > 1e-5F) {
-                                         float force_factor = (min_dist - dist) / min_dist;
-                                         float weight = other.has<PlayerTag>() ? 15.F : 1.F;
-                                         separation_force.x += (dx / dist) * force_factor * weight;
-                                         separation_force.y += (dy / dist) * force_factor * weight;
-                                     }
-                                 });
+                                         if (dist < min_dist && dist > 1e-5F) {
+                                             float force_factor = (min_dist - dist) / min_dist;
+                                             float weight = other.has<PlayerTag>() ? 15.F : 1.F;
+                                             separation_force.x += (dx / dist) * force_factor * weight;
+                                             separation_force.y += (dy / dist) * force_factor * weight;
+                                         }
+                                     });
 
-                             // Player is immune to separation push
-                             if (is_player)
-                                 separation_force = {0.F, 0.F};
+                                 // Player is immune to separation push
+                                 if (is_player)
+                                     separation_force = {0.F, 0.F};
 
-                             constexpr float kSeparationPushSpeed = 3.5F;
-                             pos.x += separation_force.x * kSeparationPushSpeed;
-                             pos.y += separation_force.y * kSeparationPushSpeed;
+                                 constexpr float kSeparationPushSpeed = 3.5F;
+                                 pos.x += separation_force.x * kSeparationPushSpeed;
+                                 pos.y += separation_force.y * kSeparationPushSpeed;
+                             }
 
                              // 3. Tile collision re-check
                              pos = collision_system_->resolve_tile_collisions(pos, c.radius);
@@ -372,7 +376,7 @@ void GameMode::init_systems()
         world_.system<Transform, Movement, Vision>("PlayerVisibility")
             .with<PlayerTag>()
             .kind(flecs::PostUpdate)
-            .each([this](flecs::entity e, Transform &pos, Movement &mov, Vision &vis) {
+            .each([this](flecs::entity e, Transform &pos, Movement &, Vision &vis) {
                 EntityId pid = e.id();
                 Vec2i center = world_to_tile(pos.world_pos);
                 auto visible = compute_visible_arc(center, vis.range, pos.facing, vis.arc);
@@ -470,6 +474,7 @@ EntityId GameMode::spawn_soldier(EntityId captain_id, SoldierRole role)
                      .engage_range = defaults.engage_range,
                      .role = role,
                      .stance = defaults.stance,
+                     .path_ = {},
                  });
     mark_dirty(e.id());
     relayout_formation(captain_id);
@@ -591,7 +596,7 @@ void GameMode::spawn_town_npcs()
     std::vector<ServiceBldg> services;
 
     world_.query<BuildingData, Transform>().each(
-        [&](flecs::entity e, BuildingData const &bd, Transform const &bt) {
+        [&](flecs::entity, BuildingData const &bd, Transform const &bt) {
             char const *role{};
             char const *pers{};
             switch (bd.type) {
@@ -711,7 +716,7 @@ void GameMode::relayout_formation(EntityId captain_id)
     });
 }
 
-void GameMode::cycle_formation(EntityId player, uint8_t role_mask)
+void GameMode::cycle_formation(EntityId /*player*/, uint8_t /*role_mask*/)
 {
     spdlog::warn("GameMode: cycle formation failed, not implemented. This may "
                  "be removed in the future.");
@@ -981,7 +986,7 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
 
     auto addHistory = [&](DialogueLine::Speaker s, std::string const &key,
                           std::string const &raw = "", bool use_raw = false) {
-        dlg.history.push_back({s, key, raw, use_raw, npc->display_name});
+        dlg.history.push_back({s, key, raw, use_raw, npc->display_name, false, {}, {}});
     };
 
     if (action == "__attack__") {
@@ -1303,179 +1308,15 @@ bool GameMode::has_dirty_entities() const
     return !dirty_entities_.empty();
 }
 
-uint8_t GameMode::entity_kind(flecs::entity e) const
+sync_util::SyncState GameMode::sync_state() const
 {
-    if (e.has<PlayerTag>())
-        return EntityKind::player;
-    if (e.has<NPCState>())
-        return EntityKind::npc;
-    if (e.has<SoldierAI>())
-        return EntityKind::soldier;
-    if (e.has<DefenseStructure>() || e.has<BuildingData>())
-        return EntityKind::structure;
-    return EntityKind::enemy;
-}
-
-void GameMode::serialize_entity(flecs::entity e, std::vector<uint8_t> &out) const
-{
-    auto const *ep = e.try_get<Transform>();
-    auto const *ec = e.try_get<CombatStats>();
-    assert(ep && ec);
-
-    uint16_t mask = SyncComponent::entity_kind | SyncComponent::position | SyncComponent::combat;
-    if (e.has<Movement>())
-        mask |= SyncComponent::movement;
-    if (e.has<SoldierAI>())
-        mask |= SyncComponent::soldier_ai;
-    if (e.has<Interactable>())
-        mask |= SyncComponent::interact;
-    if (e.has<SurvivalState>())
-        mask |= SyncComponent::survival;
-    if (e.has<Vision>())
-        mask |= SyncComponent::vision;
-
-    SyncWriter w(out);
-    w.write(e.id());
-    w.write(mask);
-
-    // entity_kind (bit 0) — computed, not a component
-    uint8_t kind = entity_kind(e);
-    w.write(kind);
-
-    // For structures, also send building type so the client can render
-    // different icons / colours per service.
-    if (kind == EntityKind::structure) {
-        auto const *bd = e.try_get<BuildingData>();
-        w.write(static_cast<uint8_t>(bd ? static_cast<uint8_t>(bd->type) : 0));
-    }
-
-    // position (bit 1)
-    e.get<Transform>().write_sync(w);
-
-    // combat (bit 2)
-    e.get<CombatStats>().write_sync(w);
-
-    // movement (bit 3)
-    if (mask & SyncComponent::movement)
-        e.get<Movement>().write_sync(w);
-
-    // soldier_ai (bit 4)
-    if (mask & SyncComponent::soldier_ai)
-        e.get<SoldierAI>().write_sync(w);
-
-    // interact (bit 5) — presence flag
-    if (mask & SyncComponent::interact)
-        e.get<Interactable>().write_sync(w);
-
-    // survival (bit 6)
-    if (mask & SyncComponent::survival)
-        e.get<SurvivalState>().write_sync(w);
-
-    // vision (bit 7)
-    if (mask & SyncComponent::vision)
-        e.get<Vision>().write_sync(w);
-}
-
-static void write_world_header(std::vector<uint8_t> &out, WorldState const &ws)
-{
-    write_bytes(out, ws.day());
-    write_bytes(out, static_cast<std::uint8_t>(ws.season()));
-    write_float(out, ws.time_of_day());
-}
-
-GameMode::PlayerSyncPayload
-GameMode::build_dirty_payload(EntityId player_eid, std::unordered_set<EntityId> const &prev_sent)
-{
-    PlayerSyncPayload result;
-    write_world_header(result.bytes, world_state_);
-
-    // Explored tiles (server-authoritative, sent every frame for now)
-    {
-        auto eit = player_explored_tiles_.find(player_eid);
-        auto count =
-            static_cast<uint16_t>(eit != player_explored_tiles_.end() ? eit->second.size() : 0);
-        write_bytes(result.bytes, count);
-        if (eit != player_explored_tiles_.end())
-            for (auto const &t : eit->second) {
-                write_bytes(result.bytes, static_cast<int32_t>(t.x));
-                write_bytes(result.bytes, static_cast<int32_t>(t.y));
-            }
-    }
-
-    auto it = player_visible_tiles_.find(player_eid);
-    if (it == player_visible_tiles_.end())
-        throw std::runtime_error("Player visible tiles not found for player_eid: " +
-                                 std::to_string(player_eid));
-    auto const &visible = it->second;
-
-    auto emit = [&](flecs::entity e) {
-        serialize_entity(e, result.bytes);
-        result.entity_ids.insert(e.id());
+    return sync_util::SyncState{
+        .world_state = world_state_,
+        .player_explored_tiles = player_explored_tiles_,
+        .player_visible_tiles = player_visible_tiles_,
+        .dirty_entities = dirty_entities_,
+        .ecs_world = world_,
     };
-
-    // 1. Dirty entities on visible tiles
-    for (auto eid : dirty_entities_) {
-        auto e = world_.entity(eid);
-        auto const *pos = e.try_get<Transform>();
-        if (!pos)
-            continue;
-        // if (visible.contains(world_to_tile(pos->world_pos)))
-        emit(e);
-    }
-
-    // 2. Newly-visible entities (on visible tiles but not sent last frame)
-    world_.query<Transform, CombatStats>().each(
-        [&](flecs::entity e, Transform &pos, CombatStats &) {
-            if (result.entity_ids.contains(e.id()))
-                return;
-            if (e.id() == player_eid)
-                return;
-            if (prev_sent.contains(e.id()))
-                return;
-            if (visible.contains(world_to_tile(pos.world_pos)))
-                emit(e);
-        });
-
-    return result;
-}
-
-GameMode::PlayerSyncPayload GameMode::build_full_payload(EntityId player_eid) const
-{
-    PlayerSyncPayload result;
-    write_world_header(result.bytes, world_state_);
-
-    // Explored tiles (server-authoritative)
-    {
-        auto eit = player_explored_tiles_.find(player_eid);
-        auto count =
-            static_cast<uint16_t>(eit != player_explored_tiles_.end() ? eit->second.size() : 0);
-        write_bytes(result.bytes, count);
-        if (eit != player_explored_tiles_.end())
-            for (auto const &t : eit->second) {
-                write_bytes(result.bytes, static_cast<int32_t>(t.x));
-                write_bytes(result.bytes, static_cast<int32_t>(t.y));
-            }
-    }
-
-    auto it = player_visible_tiles_.find(player_eid);
-    auto const &visible = it != player_visible_tiles_.end() ? it->second : decltype(it->second){};
-
-    world_.query<Transform, CombatStats>().each(
-        [&](flecs::entity e, Transform &pos, CombatStats &) {
-            if (e.id() == player_eid || visible.contains(world_to_tile(pos.world_pos))) {
-                serialize_entity(e, result.bytes);
-                result.entity_ids.insert(e.id());
-            }
-        });
-    return result;
-}
-
-bool GameMode::is_entity_visible_to_player(EntityId player_eid, Vec2f world_pos) const
-{
-    auto it = player_visible_tiles_.find(player_eid);
-    if (it == player_visible_tiles_.end())
-        return false;
-    return it->second.contains(world_to_tile(world_pos));
 }
 
 void GameMode::mark_frame_clean()

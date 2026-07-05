@@ -1,14 +1,12 @@
 #include "systems/render-system.hpp"
 #include "animation/animation-data.hpp"
 #include "core/resource-manager.hpp"
+#include "entities/components/building-data.hpp"
 #include "net/client.hpp"
 #include "systems/camera-system.hpp"
 #include "systems/navigation-system.hpp"
 #include "world/map-data.hpp"
-#include "world/world-state.hpp"
 #include <cassert>
-#include <cmath>
-#include <deque>
 #include <ranges>
 #include <string>
 #include <unordered_map>
@@ -19,11 +17,11 @@ RenderSystem::RenderSystem(SDL_Window *window, SDL_Renderer *renderer, ResourceM
 {
 }
 
-void RenderSystem::render(Client const &client, NavigationSystem const &nav)
+void RenderSystem::render(Client const &client)
 {
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-    render_tile_map(client.player_visibility(), nav);
-    render_town(client.player_visibility(), client);
+    render_tile_map();
+    render_town(client);
     render_entities(client, client.player_position(), client.player_id());
     render_projectiles(client);
     render_health_bars(client, client.player_position());
@@ -31,7 +29,7 @@ void RenderSystem::render(Client const &client, NavigationSystem const &nav)
     render_fog_overlay(client.player_visibility());
 }
 
-void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem const &nav) const
+void RenderSystem::render_tile_map() const
 {
     assert(map_data_);
     auto vp = camera_->viewport();
@@ -78,7 +76,7 @@ void RenderSystem::render_tile_map(PlayerVisibility const &vis, NavigationSystem
     }
 }
 
-void RenderSystem::render_town(PlayerVisibility const &vis, Client const &client) const
+void RenderSystem::render_town(Client const &client) const
 {
     assert(map_data_);
     assert(location_defs_);
@@ -88,6 +86,16 @@ void RenderSystem::render_town(PlayerVisibility const &vis, Client const &client
     auto right_down = world_to_tile(Vec2f(vp.x + vp.w, vp.y + vp.h));
 
     auto const &discovered = client.discovered_towns();
+
+    // Build a map: tile → building_type from synced structure entities
+    // so we can colour each building tile correctly.
+    std::unordered_map<Vec2i, uint8_t> building_tiles;
+    for (auto const &re : client.remote_entities()) {
+        if (re.kind != EntityKind::structure)
+            continue;
+        Vec2i tile = world_to_tile(re.position);
+        building_tiles[tile] = re.building_type;
+    }
 
     for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
         for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
@@ -108,13 +116,46 @@ void RenderSystem::render_town(PlayerVisibility const &vis, Client const &client
                 .x = screen.x - size / 2.F, .y = screen.y - size / 2.F, .w = size, .h = size};
 
             if (type == TileType::building) {
-                // Uniform building tile — the entity overlay
-                // (coloured rect + type label) provides the visual
-                // differentiation per service type.
-                SDL_SetRenderDrawColor(renderer_, 130, 90, 50, 240);
+                // Colour per building type — look up from synced data
+                auto it = building_tiles.find(tile);
+                uint8_t bt = it != building_tiles.end() ? it->second : 0;
+                SDL_Color col;
+                char const *label = nullptr;
+                using BDT = BuildingData::Type;
+                switch (static_cast<BDT>(bt)) {
+                case BDT::inn:
+                    col = {.r = 76, .g = 179, .b = 76, .a = 240};
+                    label = "Inn";
+                    break;
+                case BDT::market:
+                    col = {.r = 76, .g = 125, .b = 204, .a = 240};
+                    label = "Market";
+                    break;
+                case BDT::temple:
+                    col = {.r = 229, .g = 178, .b = 51, .a = 240};
+                    label = "Temple";
+                    break;
+                case BDT::blacksmith:
+                    col = {.r = 217, .g = 76, .b = 38, .a = 240};
+                    label = "Smithy";
+                    break;
+                default:
+                    col = {.r = 130, .g = 90, .b = 50, .a = 240};
+                    label = "House";
+                    break;
+                }
+                SDL_SetRenderDrawColor(renderer_, col.r, col.g, col.b, col.a);
                 SDL_RenderFillRect(renderer_, &overlay);
-                SDL_SetRenderDrawColor(renderer_, 170, 130, 70, 255);
+                // Thin border
+                SDL_SetRenderDrawColor(renderer_, 240, 220, 180, 200);
                 SDL_RenderRect(renderer_, &overlay);
+                // Label
+                if (label) {
+                    auto lp = center_of_tile(tile);
+                    auto ls = camera_->world_to_screen(lp);
+                    font_->draw({ls.x, ls.y - tile_size / 2.F},
+                                SDL_Color{.r = 255, .g = 255, .b = 255, .a = 255}, label);
+                }
             }
             else if (type == TileType::road) {
                 SDL_SetRenderDrawColor(renderer_, 180, 160, 110, 200);
@@ -156,86 +197,35 @@ void RenderSystem::render_town(PlayerVisibility const &vis, Client const &client
     }
 }
 
-void RenderSystem::render_entities(Client const &client, Vec2f pos, EntityId eid)
+void RenderSystem::render_entities(Client const &client, Vec2f local_player_pos, EntityId eid)
 {
     auto const &vis = client.player_visibility();
 
     // --- 1. Live entities ---
     for (auto const &re : client.remote_entities()) {
-        // if (!re.alive || !re.visible)
+        // if (!re.cs.alive || !re.visible)
         //     continue;
 
-        float dist = (re.position - pos).length();
+        // ---- Non-structure handling ----
+        if (re.kind == EntityKind::structure)
+            continue;
 
-        // ---- Structures: coloured rectangle (full-tile) + type label ----
-        // Render unconditionally (skip unexplored check) so that buildings
-        // are visible as soon as they are synced.
-        if (re.kind == EntityKind::structure) {
-            Vec2f screen = camera_->world_to_screen(re.position);
-            auto const zoom = camera_->zoom();
-            // Cover the whole tile so we REPLACE the brown tile rendering
-            // from render_town() with the building-type colour.
-            float const size = (tile_size * zoom + 2.F);
-
-            SDL_FRect rect{
-                .x = screen.x - size / 2.F, .y = screen.y - size / 2.F, .w = size, .h = size};
-
-            // Filled with per-type colour (green inn, gold temple, etc.)
-            draw_rectangle({rect.x, rect.y}, {size, size},
-                           SDL_Color{static_cast<uint8_t>(re.color.r * 255),
-                                     static_cast<uint8_t>(re.color.g * 255),
-                                     static_cast<uint8_t>(re.color.b * 255), 255},
-                           true);
-            // Thin bright border for readability
-            draw_rectangle({rect.x, rect.y}, {size, size},
-                           SDL_Color{255, 255, 255, 120}, false);
-
-            // Type label centred above the building
-            char const *label{};
-            switch (re.building_type) {
-            case 1:
-                label = "Inn";
-                break;
-            case 2:
-                label = "Market";
-                break;
-            case 3:
-                label = "Temple";
-                break;
-            case 4:
-                label = "Smithy";
-                break;
-            default:
-                label = "House";
-                break;
-            }
-            font_->draw({screen.x, screen.y - size / 2.F - 14.F},
-                        SDL_Color{.r = 255, .g = 240, .b = 200, .a = 230}, label);
-            continue; // skip generic sprite path
-        }
-
-        // ---- Non-structure: skip if not explored ----
+        // ---- Skip if not explored ----
         auto tile = world_to_tile(re.position);
         auto tv = vis.query(tile);
         if (tv == TileVisibility::Unexplored)
             continue;
 
-        char const *tex{};
-        if (re.alive) {
-            if (re.anim_state.clip)
-                tex = re.anim_state.clip->frame_names.at(re.anim_state.frame_index).c_str();
-            else
-                tex = re.texture_name.c_str();
-        }
-        else {
-            tex = "entity_dead";
-        }
-        draw_sprite(re.position, 48.F * re.scale, tex, alpha_for(dist), re.anim_state.flip);
+        char const *tex = re.visual.current_frame_name().c_str();
+        float dist = (re.position - local_player_pos).length();
 
-        // '!' mark (only when clearly visible)
+        draw_sprite(re.position, 48.F * re.visual.scale, tex, alpha_for(dist), re.visual.flip,
+                    re.visual.origin);
+
+        // '!' mark
         if (re.id != eid && re.interactable && dist < 48) { // character width
             Vec2f screen = camera_->world_to_screen(re.position);
-            float size = 24.F * re.scale;
+            float size = 24.F * re.visual.scale;
             SDL_FRect hint{.x = screen.x - 4, .y = screen.y - size - 12, .w = 4, .h = 14};
             SDL_SetRenderDrawColor(renderer_, 255, 255, 100, 220);
             SDL_RenderFillRect(renderer_, &hint);
@@ -243,14 +233,38 @@ void RenderSystem::render_entities(Client const &client, Vec2f pos, EntityId eid
 
         if (debug_mode_) {
             // Draw debug text
-            SDL_SetRenderDrawColor(renderer_, 255, 0, 0, 100);
-            // Grid lines
             auto c = camera_->world_to_screen(re.position);
-            font_->draw({c.x, c.y}, SDL_Color{.r = 255, .g = 0, .b = 0, .a = 150},
-                        std::format("id={}, team={}, text={}", re.id, re.team, tex));
+            font_->draw({c.x, c.y - 24.F}, SDL_Color{.r = 255, .g = 0, .b = 0, .a = 150},
+                        std::format("id={}, team={}, text={}", re.id, re.cs.team, tex));
+
+            // Look up actual texture dimensions
+            auto *sdl_tex = resources_->texture(tex);
+            float tex_w = 32.F;
+            float tex_h = 32.F;
+            if (sdl_tex) {
+                SDL_GetTextureSize(sdl_tex, &tex_w, &tex_h);
+            }
+
+            // Compute screen-space origin offset
+            float ox = (re.visual.origin.x < 0) ? tex_w * re.visual.scale * 0.5F
+                                                : re.visual.origin.x * re.visual.scale;
+            float oy = (re.visual.origin.y < 0) ? tex_h * re.visual.scale * 0.5F
+                                                : re.visual.origin.y * re.visual.scale;
+
+            // ── Texture bounding box (cyan) ──
+            draw_rectangle({c.x - ox, c.y - oy}, {tex_w * re.visual.scale, tex_h * re.visual.scale},
+                           SDL_Color{0, 255, 255, 160}, false);
+
+            // ── Collision volume box (orange) ──
+            float constexpr coll_ratio = 0.70F; // ~70% of texture size
+            float coll_w = tex_w * re.visual.scale * coll_ratio;
+            float coll_h = tex_h * re.visual.scale * coll_ratio;
+            draw_rectangle({c.x - coll_w * 0.5F, c.y - coll_h * 0.5F}, {coll_w, coll_h},
+                           SDL_Color{255, 165, 0, 160}, false);
         }
     }
 
+    // TODO: should be applied afterwards
     // --- 2. Snapshots (frozen memory, always rendered on Explored tiles) ---
     // for (auto &sn : client.snapshots()) {
     //     auto tile = world_to_tile(sn.position);
@@ -281,7 +295,7 @@ void RenderSystem::render_projectiles(Client const &client)
 void RenderSystem::render_health_bars(Client const &client, Vec2f player_pos)
 {
     for (auto const &re : client.remote_entities()) {
-        if (!re.alive)
+        if (!re.cs.alive)
             continue;
         // if
         // (!client.player_visibility().is_visible(world_to_tile(re.position)))
@@ -299,9 +313,9 @@ void RenderSystem::render_health_bars(Client const &client, Vec2f player_pos)
         SDL_SetRenderDrawColor(renderer_, 40, 10, 10, alpha);
         SDL_RenderFillRect(renderer_, &bg);
 
-        float ratio = static_cast<float>(re.hp) / static_cast<float>(re.max_hp);
+        float ratio = static_cast<float>(re.cs.hp) / static_cast<float>(re.cs.max_hp);
         SDL_FRect fill{.x = barX, .y = barY, .w = barW * ratio, .h = barH};
-        bool hostile = is_hostile(re.team, client.player_team());
+        bool hostile = is_hostile(re.cs.team, client.player_team());
         SDL_FColor col = // hostile->red otherwise green
             hostile ? SDL_FColor{.r = 0.9F, .g = 0.2F, .b = 0.1F, .a = 1.F}
                     : SDL_FColor{.r = 0.2F, .g = 0.8F, .b = 0.3F, .a = 1.F};
@@ -393,18 +407,23 @@ void RenderSystem::draw_rectangle(Vec2f left_up, Vec2f size, SDL_Color color, bo
         SDL_RenderRect(renderer_, &rect);
 }
 
-void RenderSystem::draw_sprite(Vec2f center, float width, std::string const &tex, uint8_t alpha,
-                               bool flip) const
+void RenderSystem::draw_sprite(Vec2f foot_pos, float width, std::string const &tex, uint8_t alpha,
+                               bool flip, Vec2f origin) const
 {
     auto *texture = resources_->texture(tex);
-    Vec2f screen = camera_->world_to_screen(center);
+    Vec2f screen = camera_->world_to_screen(foot_pos);
     float original_w{};
     float original_h{};
     SDL_GetTextureSize(texture, &original_w, &original_h);
     auto scale = width / original_w;
     auto height = original_h * scale;
-    SDL_FRect dst{
-        .x = screen.x - (width / 2), .y = screen.y - (height / 2), .w = width, .h = height};
+
+    // origin = {-1,-1} means centre of texture (backward-compatible default)
+    if (origin.x < 0)
+        origin = {original_w / 2.F, original_h / 2.F};
+    float ox = origin.x * scale;
+    float oy = origin.y * scale;
+    SDL_FRect dst{.x = screen.x - ox, .y = screen.y - oy, .w = width, .h = height};
     SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_PIXELART);
     SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
     SDL_SetTextureAlphaMod(texture, alpha);

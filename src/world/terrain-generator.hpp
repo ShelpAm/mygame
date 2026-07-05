@@ -135,7 +135,6 @@ inline void generate_town_footprints(MapData &map_data, NavigationSystem &nav,
             auto [w, h] = pick_size();
 
             // Find a valid anchor from the shuffled list.
-            bool success = false;
             for (auto const &anchor : anchors) {
                 // Check that every tile in the footprint is valid and
                 // maintains a minimum 1-tile gap from any already-placed
@@ -170,7 +169,6 @@ inline void generate_town_footprints(MapData &map_data, NavigationSystem &nav,
                     }
                 ++next_group;
                 ++placed;
-                success = true;
                 break;
             }
         }

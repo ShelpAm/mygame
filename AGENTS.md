@@ -30,7 +30,25 @@ conan install . --output-folder=build/Debug --build=missing -s build_type=Debug
 - **Formatting** — follow `.clang-format` (LLVM-based). Address clangd/clang-tidy warnings.
 - **Assert over if** — use `assert()` for invariant checks (non-null pointers, component presence). Reserve `if` guards for runtime data conditions (bounds checks, file I/O).
 - **Conventional commits** — `feat:`, `fix:`, `refactor:`, `chore:`, etc.
-- **Tests** — write Boost.Test unit tests for new features (`tests/test_*.cpp`). The test target links production .cpp files directly.
+- **Tests** — write Boost.Test unit tests for new features (`tests/test_*.cpp`). The test target links `TheSunsetStraits_lib` + `Boost::unit_test_framework`.
+- **Regard warnings as errors** — treat compiler warnings as errors. Use `-Werror` in coding.
+
+### TDD Workflow
+
+1. **Write the test first** in `tests/test_<feature>.cpp` using `BOOST_AUTO_TEST_SUITE` + `BOOST_AUTO_TEST_CASE`
+2. **Build**: `cmake --build --preset conan-debug`
+3. **Run**: `ctest --preset conan-debug` or single suite: `./build/Debug/TheSunsetStraits_tests --run_test=<suite>`
+4. **Test patterns** used in this project:
+   - Stack-allocate a `flecs::world` if ECS is needed (see `test_combat.cpp`)
+   - Use `BOOST_TEST()` for assertions; `BOOST_REQUIRE()` for mandatory checks
+   - No mocking — use real production classes directly
+   - Use `std::filesystem::temp_directory_path()` for temp file I/O tests
+   - Don't use `||`/`&&` inside `BOOST_TEST()` — assign to a `bool` first
+
+### Code Patterns
+
+- **Prefer `enum class`** over magic numbers. If a switch matches values that correspond to an existing enum (e.g. `BuildingData::Type`, `Team`), use the enum directly with `static_cast`.
+- **Use existing component structs** instead of declaring parallel fields. If data already exists in an ECS component (`CombatStats`, `Movement`, `Vision`, `Sprite`), embed it or reuse it rather than re-declaring its fields.
 
 - Don't pre-optimize. Focus on correctness and clarity first. Use profiling to identify bottlenecks before optimizing, which is my work.
 - Don't hardcode anything if there is a config for it, use it.

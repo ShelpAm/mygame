@@ -1,9 +1,10 @@
 #include "net/server.hpp"
 #include "core/game-mode.hpp"
 #include "net/net-packet.hpp"
+#include "net/sync-utils.hpp"
 #include <cassert>
+#include <chrono>
 #include <cstring>
-#include <SDL3/SDL_timer.h>
 #include <spdlog/spdlog.h>
 
 Server::Server()
@@ -204,10 +205,12 @@ void Server::handle_message(std::shared_ptr<Session> from, TransportMessage msg)
     }
     case ClientMsgType::player_input: {
         auto in = parse_player_input(msg.payload);
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
         spdlog::debug("Server: player_input pid={} dir=({:.2f},{:.2f}) "
                       "client_tick={} server_tick={} delay={}ms",
-                      in.pid, in.mx, in.my, in.client_ms, SDL_GetTicks(),
-                      static_cast<int32_t>(SDL_GetTicks() - in.client_ms));
+                      in.pid, in.mx, in.my, in.client_ms, now_ms,
+                      static_cast<int32_t>(now_ms - in.client_ms));
         game_mode_->apply_player_input(in.pid, {in.mx, in.my});
         break;
     }
@@ -284,14 +287,15 @@ void Server::broadcast_sync()
         EntityId player_eid = player_it->second;
 
         ServerMsgType pkt_type{};
-        GameMode::PlayerSyncPayload result;
+        sync_util::SyncPayload result;
 
         if (needs_full) {
-            result = game_mode_->build_full_payload(player_eid);
+            result = sync_util::build_full_payload(game_mode_->sync_state(), player_eid);
             pkt_type = ServerMsgType::state_full;
         }
         else {
-            result = game_mode_->build_dirty_payload(player_eid, last_sent_entities_[s.get()]);
+            result = sync_util::build_dirty_payload(game_mode_->sync_state(), player_eid,
+                                                last_sent_entities_[s.get()]);
             pkt_type = ServerMsgType::state_delta;
         }
 

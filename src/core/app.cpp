@@ -1,5 +1,6 @@
 #include "core/app.hpp"
 
+#include "animation/animation-data.hpp"
 #include "core/game-mode.hpp"
 #include "core/resource-manager.hpp"
 #include "dialogue/dialogue-engine.hpp"
@@ -33,7 +34,23 @@ void App::init()
     spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%-8l%$] %v");
     // spdlog::flush_on(spdlog::level::trace);
 
-    SDL_SetAppMetadata("The Sunset Straits App name", "1.0", "com.example.app-identifier");
+    init_sdl();
+    init_graphics();
+    init_io();
+    init_world_data();
+    init_ui();
+    init_server();
+
+    stopwatch_.restart();
+    running_ = true;
+
+    spdlog::info("App: initialization complete");
+}
+
+void App::init_sdl()
+{
+    if (!SDL_SetAppMetadata("The Sunset Straits App name", "1.0", "com.example.app-identifier"))
+        throw std::runtime_error("Failed to set SDL app metadata");
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS | SDL_INIT_CAMERA))
         throw std::runtime_error("Failed to initialize SDL");
@@ -44,68 +61,29 @@ void App::init()
 
     camera_system_.resize(window_width_, window_height_);
     SDL_SetRenderVSync(renderer_, 1);
+}
 
+void App::init_graphics()
+{
     resources_ = std::make_unique<ResourceManager>();
 
     FontManager::init();
     fonts_ = std::make_unique<FontManager>(renderer_);
 
-    // Load all knight animation frames
-    constexpr std::string_view base = "assets/textures/CHIBI KNIGHT-PNG/CHIBI KNIGHT-PNG";
-    struct Anim {
-        std::string_view dir;
-        std::string_view anim;
-        std::string_view prefix;
-        int count;
-    };
-    constexpr std::array<Anim, 5> anims{
-        Anim{.dir = "01-Idle_", .anim = "Idle", .prefix = "knight_idle", .count = 8},
-        Anim{.dir = "02-Run_", .anim = "Run", .prefix = "knight_run", .count = 8},
-        Anim{.dir = "03-Attack_", .anim = "Attack", .prefix = "knight_attack", .count = 8},
-        Anim{.dir = "05-Hurt_", .anim = "Hurt", .prefix = "knight_hurt", .count = 8},
-        Anim{.dir = "06-Die_", .anim = "Die", .prefix = "knight_die", .count = 8},
-    };
-    for (auto const &a : anims) {
-        for (int i = 0; i < a.count; ++i) {
-            auto name = std::format("{}_{}", a.prefix, i);
-            auto path = std::format("{}/{}/2D_KNIGHT__{}_{:03d}.png", base, a.dir, a.anim, i);
-            resources_->load_texture(renderer_, name, path);
-        }
-    }
+    load_textures();
 
-    for (auto i : std::views::iota(0, 16)) {
-        auto s = std::to_string(i);
-        resources_->load_texture(renderer_, "tile_" + s, "./assets/textures/tilemap/" + s + ".png");
-    }
+    register_default_clips(*resources_);
 
-    resources_->load_texture(renderer_, "entity_dead", "./assets/textures/entity-dead.png");
-
-    auto *default_font = fonts_->load_font("./assets/fonts/Monaspace Neon Var.ttf", 12.F);
+    hud_font_ = fonts_->load_font("./assets/fonts/Monaspace Neon Var.ttf", 12.F);
     auto *cjk_font = fonts_->load_font("./assets/fonts/SourceHanSansCN-Regular.otf", 12.F);
-    default_font->patch_fallback(*cjk_font);
+    hud_font_->patch_fallback(*cjk_font);
+
     render_system_ = std::make_unique<RenderSystem>(window_, renderer_, resources_.get(),
-                                                    &camera_system_, default_font);
+                                                    &camera_system_, hud_font_);
+}
 
-    navigation_system_ = NavigationSystem{};
-
-    // ---- Load terrain features from file ----
-    load_terrain_from_json("assets/data/terrain.json", map_data_, navigation_system_);
-
-    // ---- Load locations and generate terrain ----
-    auto loc_data = load_locations_from_json("assets/data/locations.json");
-    location_defs_ = std::move(loc_data.locations);
-    generate_town_footprints(map_data_, navigation_system_, location_defs_, loc_data.routes);
-    render_system_->set_map_data(&map_data_);
-    render_system_->set_location_defs(&location_defs_);
-
-    ui_manager_ = std::make_unique<UIManager>(render_system_.get(), default_font);
-    ui_manager_->set_location_defs(&location_defs_);
-
-    locale_.discover_languages("assets/locale");
-    locale_.set_language("en");
-    load_dialogue_templates();
-
-    // Start IO thread
+void App::init_io()
+{
     io_thread_ = std::jthread([this]() {
         try {
             spdlog::info("IO thread started");
@@ -118,6 +96,59 @@ void App::init()
     });
     Session::set_io(&io_);
 
+    client_ = std::make_unique<Client>();
+    client_->on_kicked_ = [this] { start_local_session(); };
+    client_->set_resources(resources_.get());
+}
+
+void App::init_world_data()
+{
+    navigation_system_ = NavigationSystem{};
+
+    load_terrain_from_json("assets/data/terrain.json", map_data_, navigation_system_);
+
+    auto loc_data = load_locations_from_json("assets/data/locations.json");
+    location_defs_ = std::move(loc_data.locations);
+    generate_town_footprints(map_data_, navigation_system_, location_defs_, loc_data.routes);
+    render_system_->set_map_data(&map_data_);
+    render_system_->set_location_defs(&location_defs_);
+
+    locale_.discover_languages("assets/locale");
+    locale_.set_language("en");
+    load_dialogue_templates();
+
+    client_->set_location_defs(&location_defs_);
+}
+
+void App::init_ui()
+{
+    UIControl ui_ctrl;
+    ui_ctrl.get_session_mode = [this] { return session_mode_; };
+    ui_ctrl.get_fps = [this] { return stopwatch_.fps(); };
+    ui_ctrl.do_dialogue_action = [this](auto const &a) { do_dialogue_action(a); };
+    ui_ctrl.end_dialogue = [this] { end_dialogue(); };
+    ui_ctrl.resolve_dialogue_text = [this](auto const &t, int i, auto const &s) {
+        return resolve_dialogue_text(t, i, s);
+    };
+    ui_ctrl.start_local_session = [this] { start_local_session(); };
+    ui_ctrl.start_host_session = [this](int p) { start_host_session(p); };
+    ui_ctrl.start_client_session = [this](auto const &h, int p) { start_client_session(h, p); };
+    ui_ctrl.stop_listen = [this] { stop_listen(); };
+    ui_ctrl.set_session_mode = [this](SessionMode m) { set_session_mode(m); };
+    ui_ctrl.server_sessions = [this]() -> std::vector<std::shared_ptr<Session>> const & {
+        return server_sessions();
+    };
+    ui_ctrl.kick_session = [this](auto s, auto const &r) { kick_session(s, r); };
+    ui_ctrl.available_save_slots = [this] { return available_save_slots(); };
+    ui_ctrl.load_from_slot = [this](int s) { load_from_slot(s); };
+
+    ui_manager_ = std::make_unique<UIManager>(render_system_.get(), hud_font_, *client_, locale_,
+                                              std::move(ui_ctrl));
+    ui_manager_->set_location_defs(&location_defs_);
+}
+
+void App::init_server()
+{
     server_ = std::make_unique<Server>();
 
     game_mode_ = std::make_unique<GameMode>();
@@ -132,21 +163,109 @@ void App::init()
         Stopwatch sw;
         while (!st.stop_requested()) {
             auto dt = sw.tick();
-            // 只有在客户端模式时才update，节省计算资源
             if (session_mode_ != SessionMode::client)
                 game_mode_->update(dt);
         }
     });
 
-    client_ = std::make_unique<Client>(this);
-    client_->set_location_defs(&location_defs_);
-
     start_local_session();
+}
 
-    stopwatch_.restart();
-    running_ = true;
+void App::load_textures()
+{
+    struct ChibiPack {
+        std::string_view dir, anim, prefix;
+        int count;
+    };
+    struct FramePack {
+        std::string_view sub, prefix;
+        int count;
+    };
+    struct SheetPack {
+        std::string_view file, prefix;
+        int frames;
+    };
 
-    spdlog::info("App: initialization complete");
+    // Load original CHIBI KNIGHT frames (used by player entity)
+    constexpr std::string_view base = "assets/textures/CHIBI KNIGHT-PNG/CHIBI KNIGHT-PNG";
+    std::array chibi_anims{
+        ChibiPack{"01-Idle_", "Idle", "knight_idle", 8},
+        ChibiPack{"02-Run_", "Run", "knight_run", 8},
+        ChibiPack{"03-Attack_", "Attack", "knight_attack", 8},
+        ChibiPack{"05-Hurt_", "Hurt", "knight_hurt", 8},
+        ChibiPack{"06-Die_", "Die", "knight_die", 8},
+    };
+    for (auto const &a : chibi_anims) {
+        for (int i = 0; i < a.count; ++i) {
+            auto name = std::format("{}_{}", a.prefix, i);
+            auto path = std::format("{}/{}/2D_KNIGHT__{}_{:03d}.png", base, a.dir, a.anim, i);
+            resources_->load_texture(renderer_, name, path);
+        }
+    }
+
+    for (auto i : std::views::iota(0, 16)) {
+        auto s = std::to_string(i);
+        resources_->load_texture(renderer_, "tile_" + s, "./assets/textures/tilemap/" + s + ".png");
+    }
+
+    resources_->load_texture(renderer_, "entity_dead", "./assets/textures/entity-dead.png");
+
+    // ── Archer Pack (individual frames) ──────────────────────────────────
+    {
+        constexpr std::string_view ap = "assets/textures/Tiny World Archer Pack V0.1.0";
+        std::array archer_anims{
+            FramePack{"Idle", "archer_idle", 4},     FramePack{"Walk", "archer_walk", 5},
+            FramePack{"Attack", "archer_attack", 6}, FramePack{"Hit", "archer_hit", 5},
+            FramePack{"Die", "archer_die", 19},
+        };
+        for (auto const &a : archer_anims) {
+            for (int i = 0; i < a.count; ++i) {
+                auto path = std::format("{}/{}/{}_sprite_{}.png", ap, a.sub, a.sub, i + 1);
+                resources_->load_texture(renderer_, std::format("{}_{}", a.prefix, i), path);
+            }
+        }
+    }
+
+    // ── Goblin Pack (spritesheet, 32 px per frame) ───────────────────────
+    {
+        constexpr std::string_view gp = "assets/textures/Tiny World Knife Goblin Pack V0.1.0";
+        std::array goblin_anims{
+            SheetPack{"Idle", "goblin_idle", 4},     SheetPack{"Walk", "goblin_walk", 5},
+            SheetPack{"Attack", "goblin_attack", 8}, SheetPack{"Hit", "goblin_hit", 5},
+            SheetPack{"Die", "goblin_die", 17},
+        };
+        for (auto const &a : goblin_anims)
+            resources_->load_spritesheet(renderer_, std::string{a.prefix},
+                                         std::format("{}/{}.png", gp, a.file), 32);
+    }
+
+    // ── Knight Pack (spritesheet) ────────────────────────────────────────
+    {
+        constexpr std::string_view kp = "assets/textures/Tiny World Knight Pack V0.1.2";
+        std::array knight_anims{
+            SheetPack{"Idle", "twk_idle", 4},     SheetPack{"Walk", "twk_walk", 5},
+            SheetPack{"Attack", "twk_attack", 6}, SheetPack{"Hit", "twk_hit", 5},
+            SheetPack{"Die", "twk_die", 19},
+        };
+        for (auto const &a : knight_anims)
+            resources_->load_spritesheet(renderer_, std::string{a.prefix},
+                                         std::format("{}/{}.png", kp, a.file), 32);
+    }
+
+    // ── Villager Pack (spritesheet, 32 px per frame) ─────────────────────
+    {
+        constexpr std::string_view vp =
+            "assets/textures/Tiny World FREE Starter Pack v0.1.3/Character/Villager";
+        std::array villager_anims{
+            SheetPack{"Idle", "villager_idle", 4},
+            SheetPack{"Walk", "villager_walk", 5},
+            SheetPack{"Hit", "villager_hit", 5},
+            SheetPack{"Die", "villager_die", 14},
+        };
+        for (auto const &a : villager_anims)
+            resources_->load_spritesheet(renderer_, std::string{a.prefix},
+                                         std::format("{}/{}.png", vp, a.file), 32);
+    }
 }
 
 void App::start_host_session(int port)
@@ -293,6 +412,9 @@ void App::process_events()
         case SDL_EVENT_WINDOW_RESIZED:
             handle_resize(event.window.data1, event.window.data2);
             break;
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            break;
         default:
             spdlog::warn("Unhandled SDL event type: {}", event.type);
         }
@@ -305,15 +427,9 @@ void App::update(float dt)
 {
     spdlog::trace("App::update dt={} mode={}", dt, static_cast<int>(session_mode_));
 
-    if (input_.just_pressed(InputManager::Action::help))
-        ui_manager_->toggle_help();
-    if (input_.just_pressed(InputManager::Action::multiplayer))
-        ui_manager_->toggle_multiplayer();
-
     client_->update(dt);
 
-    // Logged in to a server
-    if (client_->player_id() != invalid_entity) {
+    if (client_->connected()) {
         // Handles move
         float mx = 0;
         float my = 0;
@@ -331,41 +447,41 @@ void App::update(float dt)
         float len = std::hypot(mx, my);
         static Vec2f last_sent_dir{0, 0};
         Vec2f dir = len > 0 ? Vec2f{mx / len, my / len} : Vec2f{0, 0};
-        if (dir.x != last_sent_dir.x || dir.y != last_sent_dir.y) {
+        if (dir != last_sent_dir) {
             client_->send_player_direction(dir);
             last_sent_dir = dir;
         }
 
-        // Discrete actions — just_pressed fires once per key press
-        if (input_.just_pressed(InputManager::Action::interact))
-            client_->send_interact();
-        if (input_.just_pressed(InputManager::Action::rest))
-            client_->send_rest();
-        if (input_.just_pressed(InputManager::Action::recruit))
-            client_->send_recruit();
-        if (input_.just_pressed(InputManager::Action::recruit_ranged))
-            client_->send_recruit_ranged();
-        if (input_.just_pressed(InputManager::Action::guard))
-            client_->send_soldier_command();
-        if (input_.just_pressed(InputManager::Action::respawn))
-            client_->send_respawn();
-        if (input_.just_pressed(InputManager::Action::cycle_formation))
-            client_->send_cycle_formation();
-        if (input_.just_pressed(InputManager::Action::select_melee))
-            client_->toggle_selected_role(0);
-        if (input_.just_pressed(InputManager::Action::select_ranged))
-            client_->toggle_selected_role(1);
-        if (input_.just_pressed(InputManager::Action::debug_toggle)) {
-            static bool trace_on = false;
-            trace_on = !trace_on;
-            spdlog::set_level(trace_on ? spdlog::level::trace : spdlog::level::debug);
-            spdlog::info("Log level: {}", trace_on ? "trace" : "debug");
-            render_system_->toggle_debug_mode();
+        using Action = InputManager::Action;
+        // 映射表：动作 → 对应的处理函数
+        static std::unordered_map<Action, std::function<void()>> const handlers = {
+            {Action::interact, [this]() { client_->send_interact(); }},
+            {Action::rest, [this]() { client_->send_rest(); }},
+            {Action::recruit, [this]() { client_->send_recruit(); }},
+            {Action::recruit_ranged, [this]() { client_->send_recruit_ranged(); }},
+            {Action::guard, [this]() { client_->send_soldier_command(); }},
+            {Action::respawn, [this]() { client_->send_respawn(); }},
+            {Action::cycle_formation, [this]() { client_->send_cycle_formation(); }},
+            {Action::select_melee, [this]() { client_->toggle_selected_role(0); }},
+            {Action::select_ranged, [this]() { client_->toggle_selected_role(1); }},
+            {Action::toggle_log_level,
+             []() {
+                 static bool trace_on = false;
+                 trace_on = !trace_on;
+                 spdlog::set_level(trace_on ? spdlog::level::trace : spdlog::level::debug);
+                 spdlog::info("Log level toggled, now is {}", trace_on ? "trace" : "debug");
+             }},
+            {Action::toggle_debug, [this]() { render_system_->toggle_debug_mode(); }},
+            {Action::quick_save, [this]() { quick_save(); }},
+            {Action::load_menu, [this]() { ui_manager_->toggle_load_menu(); }},
+            {Action::help, [this]() { ui_manager_->toggle_help(); }},
+            {Action::multiplayer, [this]() { ui_manager_->toggle_multiplayer(); }},
+        };
+
+        for (auto const &[action, handler] : handlers) {
+            if (input_.just_pressed(action))
+                handler();
         }
-        if (input_.just_pressed(InputManager::Action::quick_save))
-            quick_save();
-        if (input_.just_pressed(InputManager::Action::load_menu))
-            ui_manager_->toggle_load_menu();
 
         camera_system_.set_target(client_->player_position());
     }
@@ -379,13 +495,11 @@ void App::render()
     SDL_SetRenderDrawColor(renderer_, 10, 10, 15, 255);
     SDL_RenderClear(renderer_);
 
-    // Connected to server and have a player entity
-    if (client_->player_id() != invalid_entity) {
-        render_system_->render(*client_, navigation_system_);
+    if (client_->connected()) {
+        render_system_->render(*client_);
         client_->combat_events().clear();
     }
-    ui_manager_->render(client_->player_id() == invalid_entity ? nullptr : &client_->world_state(),
-                        *this);
+    ui_manager_->render(client_->connected() ? &client_->world_state() : nullptr);
 
     SDL_RenderPresent(renderer_);
 }

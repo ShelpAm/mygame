@@ -1,117 +1,197 @@
 #include "animation/animation-data.hpp"
+#include "core/resource-manager.hpp"
 #include "net/net-packet.hpp" // EntityKind
+#include <algorithm>
 #include <cmath>
 
-// -- static knight animation clip data --
+// ── Internal helpers ─────────────────────────────────────────────────────
 
-static std::vector<AnimationClip> knight_clips;
-static bool knight_clips_init = false;
-
-static void init_knight_clips()
+static void add_frames(AnimationClip &clip, std::string const &base, int count, float dur)
 {
-    if (knight_clips_init)
-        return;
-    knight_clips_init = true;
-
-    auto idle =
-        AnimationClip{.name = "idle", .frame_duration = 0.12f, .loop = true, .faces_right = false};
-    for (int i = 0; i < 8; ++i)
-        idle.frame_names.push_back("knight_idle_" + std::to_string(i));
-
-    auto run = AnimationClip{"run", {}, 0.08f, true, false};
-    for (int i = 0; i < 8; ++i)
-        run.frame_names.push_back("knight_run_" + std::to_string(i));
-
-    auto attack = AnimationClip{"attack", {}, 0.07f, false, false};
-    for (int i = 0; i < 8; ++i)
-        attack.frame_names.push_back("knight_attack_" + std::to_string(i));
-
-    auto hurt = AnimationClip{"hurt", {}, 0.07f, false, false};
-    for (int i = 0; i < 8; ++i)
-        hurt.frame_names.push_back("knight_hurt_" + std::to_string(i));
-
-    auto die = AnimationClip{"die", {}, 0.12f, false, false};
-    for (int i = 0; i < 8; ++i)
-        die.frame_names.push_back("knight_die_" + std::to_string(i));
-
-    knight_clips = {std::move(idle), std::move(run), std::move(attack), std::move(hurt),
-                    std::move(die)};
+    for (int i = 0; i < count; ++i) {
+        clip.frame_names.push_back(base + "_" + std::to_string(i));
+        clip.frame_durations.push_back(dur);
+    }
 }
 
-static std::vector<AnimationClip> empty_clips;
+static void register_group(ResourceManager &resources, std::string const &prefix,
+                           std::vector<AnimationClip> const &clips)
+{
+    for (auto const &c : clips)
+        resources.register_clip(prefix + "_" + c.name, c);
+}
 
-std::vector<AnimationClip> const &animation_clips_for_kind(uint8_t entity_kind, uint8_t /*team*/)
+// ── Clip factories ───────────────────────────────────────────────────────
+
+static std::vector<AnimationClip> knight_clips()
+{
+    AnimationClip idle{"idle", {}, {}, true, false};
+    add_frames(idle, "knight_idle", 8, 0.12f);
+    AnimationClip run{"run", {}, {}, true, false};
+    add_frames(run, "knight_run", 8, 0.08f);
+    AnimationClip attack{"attack", {}, {}, false, false};
+    add_frames(attack, "knight_attack", 8, 0.07f);
+    AnimationClip hurt{"hurt", {}, {}, false, false};
+    add_frames(hurt, "knight_hurt", 8, 0.07f);
+    AnimationClip die{"die", {}, {}, false, false};
+    add_frames(die, "knight_die", 8, 0.12f);
+    return {idle, run, attack, hurt, die};
+}
+
+static std::vector<AnimationClip> archer_clips()
+{
+    AnimationClip idle{"idle", {}, {}, true, false};
+    add_frames(idle, "archer_idle", 4, 0.15f);
+    AnimationClip run{"run", {}, {}, true, false};
+    add_frames(run, "archer_walk", 5, 0.10f);
+    AnimationClip attack{"attack", {}, {}, false, false};
+    add_frames(attack, "archer_attack", 6, 0.07f);
+    AnimationClip hurt{"hurt", {}, {}, false, false};
+    add_frames(hurt, "archer_hit", 5, 0.07f);
+    AnimationClip die{"die", {}, {}, false, false};
+    add_frames(die, "archer_die", 19, 0.10f);
+    return {idle, run, attack, hurt, die};
+}
+
+static std::vector<AnimationClip> goblin_clips()
+{
+    AnimationClip idle{"idle", {}, {}, true, false};
+    add_frames(idle, "goblin_idle", 4, 0.15f);
+    AnimationClip run{"run", {}, {}, true, false};
+    add_frames(run, "goblin_walk", 5, 0.10f);
+    AnimationClip attack{"attack", {}, {}, false, false};
+    add_frames(attack, "goblin_attack", 8, 0.07f);
+    AnimationClip hurt{"hurt", {}, {}, false, false};
+    add_frames(hurt, "goblin_hit", 5, 0.07f);
+    AnimationClip die{"die", {}, {}, false, false};
+    add_frames(die, "goblin_die", 17, 0.10f);
+    return {idle, run, attack, hurt, die};
+}
+
+static std::vector<AnimationClip> villager_clips()
+{
+    AnimationClip idle{"idle", {}, {}, true, false};
+    add_frames(idle, "villager_idle", 4, 0.15f);
+    AnimationClip run{"run", {}, {}, true, false};
+    add_frames(run, "villager_walk", 5, 0.10f);
+    AnimationClip hurt{"hurt", {}, {}, false, false};
+    add_frames(hurt, "villager_hit", 5, 0.07f);
+    AnimationClip die{"die", {}, {}, false, false};
+    add_frames(die, "villager_die", 14, 0.10f);
+    return {idle, run, hurt, die};
+}
+
+static std::vector<AnimationClip> twknight_clips()
+{
+    AnimationClip idle{"idle", {}, {}, true, false};
+    add_frames(idle, "twk_idle", 4, 0.15f);
+    AnimationClip run{"run", {}, {}, true, false};
+    add_frames(run, "twk_walk", 5, 0.10f);
+    AnimationClip attack{"attack", {}, {}, false, false};
+    add_frames(attack, "twk_attack", 6, 0.07f);
+    AnimationClip hurt{"hurt", {}, {}, false, false};
+    add_frames(hurt, "twk_hit", 5, 0.07f);
+    AnimationClip die{"die", {}, {}, false, false};
+    add_frames(die, "twk_die", 19, 0.10f);
+    return {idle, run, attack, hurt, die};
+}
+
+// ── Public API ───────────────────────────────────────────────────────────
+
+static char const *kind_key(uint8_t entity_kind, uint8_t team, uint8_t role)
 {
     using namespace EntityKind;
     switch (entity_kind) {
     case player:
+        return "player";
     case soldier:
+        return (role == 1) ? "archer" : (team >= static_cast<uint8_t>(100)) ? "goblin" : "knight";
     case enemy:
+        return "goblin";
     case npc:
-        init_knight_clips();
-        return knight_clips;
+        return "villager";
+    case structure:
+        return "structure";
     default:
-        return empty_clips;
+        return "";
     }
 }
 
-AnimationClip const *find_clip(std::vector<AnimationClip> const &clips, std::string const &name)
+void register_default_clips(ResourceManager &resources)
 {
-    for (auto &c : clips)
-        if (c.name == name)
-            return &c;
-    return nullptr;
+    register_group(resources, "player", knight_clips());
+    register_group(resources, "archer", archer_clips());
+    register_group(resources, "goblin", goblin_clips());
+    register_group(resources, "villager", villager_clips());
+    register_group(resources, "knight", twknight_clips());
+
+    // 1-frame static clip for structures and other non-animated entities
+    resources.register_clip("structure_idle", {"idle", {"tile_0"}, {0.f}, false, false});
 }
 
-AnimationClip const *determine_clip(std::vector<AnimationClip> const &clips, AnimationState &state,
-                                    Vec2f velocity, bool alive, float dt)
+std::string determine_clip_name(Visual &vis, Vec2f velocity, bool alive, float dt)
 {
-    // Tick down transient triggers
-    state.hurt_timer = std::max(0.f, state.hurt_timer - dt);
-    state.attack_timer = std::max(0.f, state.attack_timer - dt);
+    vis.hurt_timer = std::max(0.f, vis.hurt_timer - dt);
+    vis.attack_timer = std::max(0.f, vis.attack_timer - dt);
 
     if (!alive)
-        return find_clip(clips, "die");
-    if (state.hurt_timer > 0.f)
-        return find_clip(clips, "hurt");
-    if (state.attack_timer > 0.f)
-        return find_clip(clips, "attack");
+        return "die";
+    if (vis.hurt_timer > 0.f)
+        return "hurt";
+    if (vis.attack_timer > 0.f)
+        return "attack";
     if (std::abs(velocity.x) > 10.f || std::abs(velocity.y) > 10.f)
-        return find_clip(clips, "run");
-    return find_clip(clips, "idle");
+        return "run";
+    return "idle";
 }
 
-void switch_clip(AnimationState &state, AnimationClip const *clip)
+void switch_clip(Visual &vis, std::string const &clip_name, uint8_t entity_kind, uint8_t team,
+                 uint8_t role, ResourceManager const &resources)
 {
-    if (state.clip == clip)
+    char const *key_prefix = kind_key(entity_kind, team, role);
+    if (!key_prefix)
         return;
-    state.clip = clip;
-    state.frame_index = 0;
-    state.frame_timer = 0.f;
+
+    std::string key = std::string(key_prefix) + "_" + clip_name;
+    AnimationClip const *c = resources.clip(key);
+    if (!c)
+        return;
+
+    // No-op if already on this clip
+    if (vis.clip == c)
+        return;
+
+    vis.clip = c;
+    vis.frame_index = 0;
+    vis.frame_timer = 0.f;
+    vis.frame_durations = c->frame_durations;
 }
 
-char const *tick_animation(AnimationState &state, Vec2f velocity, float dt)
+char const *tick_animation(Visual &vis, Vec2f velocity, float dt)
 {
-    if (!state.clip || state.clip->frame_names.empty())
+    if (!vis.clip || vis.clip->frame_names.empty())
         return "entity";
 
-    // Advance timer
-    state.frame_timer += dt;
-    while (state.frame_timer >= state.clip->frame_duration) {
-        state.frame_timer -= state.clip->frame_duration;
-        int next = state.frame_index + 1;
-        if (next < (int)state.clip->frame_names.size())
-            state.frame_index = next;
-        else if (state.clip->loop)
-            state.frame_index = 0;
-        // else: stay on last frame (non-looping clip finished)
+    float dur =
+        vis.frame_index < vis.frame_durations.size() ? vis.frame_durations[vis.frame_index] : 0.1F;
+    vis.frame_timer += dt;
+    while (vis.frame_timer >= dur) {
+        vis.frame_timer -= dur;
+        int next = vis.frame_index + 1;
+        if (next < (int)vis.clip->frame_names.size())
+            vis.frame_index = next;
+        else if (vis.clip->loop)
+            vis.frame_index = 0;
+        else
+            break;
+        dur = vis.frame_index < vis.frame_durations.size() ? vis.frame_durations[vis.frame_index]
+                                                           : 0.1F;
     }
 
-    // Update flip based on horizontal velocity vs clip's default facing
     if (velocity.x > 1.f)
-        state.flip = !state.clip->faces_right;
+        vis.flip = !vis.clip->faces_right;
     else if (velocity.x < -1.f)
-        state.flip = state.clip->faces_right;
+        vis.flip = vis.clip->faces_right;
 
-    return state.clip->frame_names[state.frame_index].c_str();
+    return vis.clip->frame_names[vis.frame_index].c_str();
 }

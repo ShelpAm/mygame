@@ -1,22 +1,26 @@
 #pragma once
 
 #include "animation/animation-data.hpp"
+#include "animation/visual.hpp"
 #include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "entities/components/combat-stats.hpp"
+#include "entities/components/movement.hpp"
 #include "entities/components/soldier-ai.hpp"
+#include "entities/components/sprite.hpp"
+#include "entities/components/vision.hpp"
 #include "net/session.hpp"
 #include "survival/condition-tracker.hpp"
-#include "systems/combat-system.hpp"
 #include "systems/quest-manager.hpp"
 #include "world/location-store.hpp"
 #include "world/world-state.hpp"
+#include <functional>
 #include <memory>
 #include <SDL3/SDL.h>
 #include <string>
 #include <vector>
 
-class App;
+class ResourceManager;
 
 struct ProjectileVisual {
     Vec2f pos;
@@ -45,12 +49,12 @@ struct RemoteEntity {
     Vec2f position;   // interpolated (for rendering)
     Vec2f target_pos; // server-authoritative target
 
-    int hp = 20, max_hp = 20;
-    bool alive = true;
-    Team team = Team::neutral;
+    CombatStats cs;
 
-    // Movement (optional, set when synced)
-    Vec2f velocity{0, 0};
+    // Movement (synced from Movement component)
+    Movement mov;
+
+    // Facing direction (synced from Transform::facing)
     Vec2f facing{0, -1};
 
     // Interactable
@@ -59,29 +63,35 @@ struct RemoteEntity {
     // Soldier state (synced from SoldierAI component)
     SoldierStance soldier_stance = SoldierStance::defensive;
     SoldierRole soldier_role = SoldierRole::melee;
-    int vision_range = 6;
-    float vision_arc = 180.f;
 
-    // Visual (derived from kind + team, overridden by synced Sprite)
-    SDL_FColor color{0.3f, 0.5f, 0.9f, 1.f};
-    float scale = 1.F;
-    std::string texture_name = "entity";
-    bool visible = true;
+    // Vision (synced from Vision component)
+    Vision vis;
+
+    // Visual (derived from kind + team)
+    Visual visual;
     bool hit_flash = false;
-    AnimationState anim_state;
     uint8_t building_type = 0; // BuildingData::Type (only valid when kind==structure)
 };
 
 class Client {
   public:
-    Client(App *app);
+    Client(Client const &) = delete;
+    Client(Client &&) = delete;
+    Client &operator=(Client const &) = delete;
+    Client &operator=(Client &&) = delete;
+    Client();
     ~Client();
 
     void update(float dt);
     void handle_combat_event(EntityId attacker_id, EntityId defender_id, int damage, bool killed);
 
+    bool connected() const
+    {
+        return session_ != nullptr && session_->is_open() && player_id_ != invalid_entity;
+    }
+
     EntityId player_id() const { return player_id_; }
-    Team player_team() const { return player_team_; }
+    Team player_team() const { return player_cs_.team; }
 
     // Verifies authority of server
     static awaitable<bool> authenticate_transport(std::shared_ptr<Session> t);
@@ -132,7 +142,7 @@ class Client {
 
     std::string session_remote_info() const
     {
-        return session_ ? session_->remote_info() : std::string{};
+        return session_ ? session_->remote_info() : std::string{"`session is null`"};
     }
 
     void interpolate_entities(float dt);
@@ -163,6 +173,13 @@ class Client {
     DialogueState const &dialogue() const { return dialogue_; }
     DialogueState &dialogue() { return dialogue_; }
 
+    /// Called when server kicks this client — typically rebinds to local session
+    std::function<void()> on_kicked_;
+    ResourceManager const *resources_ = nullptr;
+
+    /// Resource manager for animation clip lookups.
+    void set_resources(ResourceManager const *res) { resources_ = res; }
+
   private:
     // Only the read_loop in attach_transport may construct this token
     struct detach_token {
@@ -173,23 +190,17 @@ class Client {
     //   Don't call this directly, use kick() or close the connection instead.
     void detach_transport(detach_token, Session *);
 
-    App *app_;
     WorldState world_state_;
     PlayerVisibility player_visibility_;
     SurvivalState player_survival_;
     QuestManager const *quests_ = nullptr;
 
     EntityId player_id_ = invalid_entity;
-    Team player_team_ = Team::invalid_team;
+    CombatStats player_cs_;
     Vec2f player_pos_, player_target_pos_;
-    Vec2f player_velocity_{0, 0};
-    Vec2f player_facing_{0, -1};
-    int player_hp_ = 20, player_max_hp_ = 20;
-    int player_attack_ = 4, player_defense_ = 3;
-    float player_attack_range_ = 80.f;
-    int player_vision_range_ = 6;
-    float player_vision_arc_ = 180.f;
-    bool player_alive_ = true;
+
+    /// Find the player's RemoteEntity (or nullptr if not synced yet).
+    RemoteEntity const *find_player() const;
 
     // Network diagnostics
     std::chrono::steady_clock::time_point last_sync_recv_tick_{};

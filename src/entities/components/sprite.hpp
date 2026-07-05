@@ -6,7 +6,6 @@
 
 struct Sprite {
     std::string texture_name;
-    SDL_FRect src_rect{};
     Vec2f origin;
     SDL_FColor color{1.f, 1.f, 1.f, 1.f};
     float scale = 1.f;

@@ -8,16 +8,12 @@
 #include "entities/components/collider.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/player.hpp"
-#include "factions/event-simulator.hpp"
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
-#include "knowledge/rumor-propagator.hpp"
-#include "save/save-manager.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/combat-utils.hpp"
 #include "systems/quest-manager.hpp"
-#include "world/location-store.hpp"
-#include "world/map-data.hpp"
+#include "net/sync-utils.hpp"
 #include "world/world-state.hpp"
 #include <chrono>
 #include <cstdint>
@@ -28,6 +24,10 @@
 #include <unordered_set>
 #include <vector>
 
+class EventSimulator;
+class RumorPropagator;
+struct LocationDefinition;
+class MapData;
 class Server;
 class NavigationSystem;
 class CollisionSystem;
@@ -87,19 +87,13 @@ class GameMode {
 
     void sync_entity_state(EntityId entity, Vec2f pos, int hp, int max_hp, bool alive);
 
-    struct PlayerSyncPayload {
-        std::vector<uint8_t> bytes;
-        std::unordered_set<EntityId> entity_ids;
-    };
-
     bool has_dirty_entities() const;
-    PlayerSyncPayload build_dirty_payload(EntityId player_eid,
-                                          std::unordered_set<EntityId> const &prev_sent);
-    PlayerSyncPayload build_full_payload(EntityId player_eid) const;
     void mark_frame_clean();
 
+    /// Assemble SyncState for sync_util::build_dirty_payload / sync_util::build_full_payload.
+    sync_util::SyncState sync_state() const;
+
     void register_player(EntityId _) {}
-    bool is_entity_visible_to_player(EntityId player_eid, Vec2f world_pos) const;
 
     void remove_player(EntityId pid)
     {
@@ -193,11 +187,9 @@ class GameMode {
     bool pending_town_left_ = false;
     MapData const *map_data_ = nullptr;
 
-    void mark_dirty(EntityId eid) { dirty_entities_.insert(eid); }
     void check_event_spawns();
     void spawn_building_entities();
     void spawn_town_npcs();
-    uint8_t entity_kind(flecs::entity e) const;
-    void serialize_entity(flecs::entity e, std::vector<uint8_t> &out) const;
     EntityId find_nearest_interactable(EntityId player, Vec2f player_pos);
+    void mark_dirty(EntityId eid) { dirty_entities_.insert(eid); }
 };

@@ -1,30 +1,32 @@
 #pragma once
 
 #include "core/font.hpp"
+#include "core/ui-control.hpp"
 #include "world/location-store.hpp"
 #include <SDL3/SDL.h>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
-class App;
-class WorldState;
+class Client;
 class LocaleManager;
+class WorldState;
 class RenderSystem;
 
 class UIManager {
   public:
-    UIManager(UIManager const &) = default;
+    UIManager(UIManager const &) = delete;
     UIManager(UIManager &&) = delete;
-    UIManager &operator=(UIManager const &) = default;
+    UIManager &operator=(UIManager const &) = delete;
     UIManager &operator=(UIManager &&) = delete;
-    UIManager(RenderSystem *rs, Font *hud_font);
+    UIManager(RenderSystem *rs, Font *hud_font, Client &client, LocaleManager &locale,
+              UIControl control);
     ~UIManager();
 
     /// @return If recognized and handled
     bool process_event(SDL_Event const &event);
     void update(float dt);
-    void render(WorldState *world_state, App &app);
+    void render(WorldState *world_state);
 
     void toggle_help() { show_help_ = !show_help_; }
     void toggle_load_menu() { show_load_menu_ = !show_load_menu_; }
@@ -35,6 +37,9 @@ class UIManager {
   private:
     RenderSystem *render_system_;
     Font *hud_font_;
+    Client &client_;
+    LocaleManager &locale_;
+    UIControl ctrl_;
     bool show_journal_ = false;
     bool show_inventory_ = false;
     bool show_map_ = false;
@@ -42,21 +47,23 @@ class UIManager {
     bool show_help_ = false;
     bool show_multiplayer_ = false;
 
-    void render_hud_window(WorldState const &world_state, App &app);
-    void render_hud_text(WorldState const &world_state, App &app);
-    void render_journal(App const &app);
-    void render_inventory(App const &app);
-    void render_map(App const &app);
-    void render_dialogue(App const &app);
-    void render_help_panel(App const &app);
-    void render_load_menu(App const &app);
-    void render_multiplayer_menu(App const &app);
+    void render_hud_window(WorldState const &world_state);
+    void render_hud_text(WorldState const &world_state);
+    void render_journal();
+    void render_inventory();
+    void render_map();
+    void render_dialogue();
+    void render_help_panel();
+    void render_load_menu();
+    void render_multiplayer_menu();
 
-    void render_hosting(App &app);
-    void render_local(App &app);
-    void render_client(App &app);
-    void render_client_list(App &app);
-    void render_chat(App &app);
+    void render_debug_legend();
+
+    void render_hosting();
+    void render_local();
+    void render_client();
+    void render_client_list();
+    void render_chat();
 
     std::string host_ip_ = "127.0.0.1";
     int host_port_ = 27015;

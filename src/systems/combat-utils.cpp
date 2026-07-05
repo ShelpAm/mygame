@@ -120,7 +120,7 @@ void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transfo
     if (curr_tile != goal_tile) {
         auto path = nav->find_path(curr_tile, goal_tile);
         if (path.empty()) {
-            spdlog::debug("SoldierAI {}: A* found no path from ({},{}) to ({},{}), stopping",
+            spdlog::trace("SoldierAI {}: A* found no path from ({},{}) to ({},{}), stopping",
                           e.id(), curr_tile.x, curr_tile.y, goal_tile.x, goal_tile.y);
             mov.velocity = {0, 0};
             return;

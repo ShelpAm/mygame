@@ -3,6 +3,7 @@
 #include "core/font.hpp"
 #include "core/game-clock.hpp"
 #include "core/game-mode.hpp"
+#include "core/game-types.hpp"
 #include "core/input-manager.hpp"
 #include "core/locale-manager.hpp"
 #include "net/client.hpp"
@@ -27,8 +28,6 @@ struct CombatStats;
 struct DialogueTemplateSet {
     std::unordered_map<std::string, std::vector<std::string>> by_type;
 };
-
-enum class SessionMode : std::uint8_t { local, host, client };
 
 class App {
   public:
@@ -93,6 +92,14 @@ class App {
 
     void handle_resize(int new_width, int new_height);
 
+    void load_textures();
+    void init_sdl();
+    void init_graphics();
+    void init_io();
+    void init_world_data();
+    void init_ui();
+    void init_server();
+
     SDL_Window *window_ = nullptr;
     SDL_Renderer *renderer_ = nullptr;
 
@@ -111,6 +118,7 @@ class App {
     std::vector<LocationDefinition> location_defs_;
 
     std::unique_ptr<FontManager> fonts_;
+    Font *hud_font_ = nullptr;
     std::unique_ptr<ResourceManager> resources_;
     std::unique_ptr<RenderSystem> render_system_;
     std::unique_ptr<UIManager> ui_manager_;

@@ -28,6 +28,8 @@ struct Vec2f {
     friend Vec2f operator-(Vec2f v) { return {-v.x, -v.y}; }
     friend Vec2f operator*(float s, Vec2f v) { return {v.x * s, v.y * s}; }
     friend Vec2f operator/(float s, Vec2f v) { return {v.x / s, v.y / s}; }
+    friend auto operator<=>(Vec2f const &, Vec2f const &) = default;
+
     float length() const { return std::hypot(x, y); }
     Vec2f normalized() const
     {

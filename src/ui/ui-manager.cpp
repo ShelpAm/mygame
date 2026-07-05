@@ -1,8 +1,8 @@
 #include "ui/ui-manager.hpp"
-#include "core/app.hpp"
 #include "core/locale-manager.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/soldier-ai.hpp"
+#include "net/client.hpp"
 #include "net/session.hpp"
 #include "systems/formation.hpp"
 #include "systems/render-system.hpp"
@@ -18,7 +18,10 @@
 #include <spdlog/spdlog.h>
 #include <unordered_set>
 
-UIManager::UIManager(RenderSystem *rs, Font *hud_font) : render_system_(rs), hud_font_(hud_font)
+UIManager::UIManager(RenderSystem *rs, Font *hud_font, Client &client,
+                     LocaleManager &locale, UIControl control)
+    : render_system_(rs), hud_font_(hud_font), client_(client), locale_(locale),
+      ctrl_(std::move(control))
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -72,7 +75,7 @@ void UIManager::update(float dt)
     std::erase_if(discovery_queue_, [](auto const &n) { return n.timer <= 0.f; });
 }
 
-void UIManager::render(WorldState *world_state, App &app)
+void UIManager::render(WorldState *world_state)
 {
     ImGui_ImplSDL3_NewFrame();
     ImGui_ImplSDLRenderer3_NewFrame();
@@ -80,7 +83,7 @@ void UIManager::render(WorldState *world_state, App &app)
 
     // Check for newly discovered towns (add to notification queue)
     if (world_state) {
-        auto const &discovered = app.client().discovered_towns();
+        auto const &discovered = client_.discovered_towns();
         for (auto const &td : discovered) {
             if (!notified_town_ids_.contains(td.loc_id)) {
                 notified_town_ids_.insert(td.loc_id);
@@ -90,14 +93,13 @@ void UIManager::render(WorldState *world_state, App &app)
     }
 
     if (world_state)
-        render_hud_window(*world_state, app);
+        render_hud_window(*world_state);
 
     // Render discovery toast notifications
     if (!discovery_queue_.empty()) {
-        auto const &loc = app.locale();
         float y_offset = 120.f;
         for (auto const &n : discovery_queue_) {
-            std::string town_name = loc.get(n.locale_key);
+            std::string town_name = locale_.get(n.locale_key);
             if (town_name.empty())
                 town_name = n.locale_key;
             float alpha = std::min(1.f, n.timer);
@@ -108,11 +110,11 @@ void UIManager::render(WorldState *world_state, App &app)
                          ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                              ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground);
             ImGui::TextColored(color, "🏛 %s",
-                               std::format("{} {}", loc.get("town.discovered_prefix"),
+                               std::format("{} {}", locale_.get("town.discovered_prefix"),
                                            town_name).c_str());
             // Description
             std::string desc_key = n.locale_key + ".desc";
-            std::string desc = loc.get(desc_key);
+            std::string desc = locale_.get(desc_key);
             if (!desc.empty()) {
                 ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, alpha * 0.8f), "%s", desc.c_str());
             }
@@ -123,19 +125,19 @@ void UIManager::render(WorldState *world_state, App &app)
     }
 
     // clang-format off
-    if (app.dialogue().active)        render_dialogue(app);
-    if (show_journal_)                render_journal(app);
-    if (show_inventory_)              render_inventory(app);
-    if (show_map_)                    render_map(app);
-    if (show_help_)                   render_help_panel(app);
-    if (show_load_menu_)              render_load_menu(app);
+    if (client_.dialogue().active)        render_dialogue();
+    if (show_journal_)                render_journal();
+    if (show_inventory_)              render_inventory();
+    if (show_map_)                    render_map();
+    if (show_help_)                   render_help_panel();
+    if (show_load_menu_)              render_load_menu();
 
     if (show_multiplayer_) {
         if (!chat_active_) {
             chat_buf_[0] = '\0';
             chat_active_ = true;
         }
-        render_multiplayer_menu(app);
+        render_multiplayer_menu();
     }
     else {
         if (chat_active_) {
@@ -145,47 +147,47 @@ void UIManager::render(WorldState *world_state, App &app)
     }
     // clang-format on
 
+    if (render_system_->debug_mode())
+        render_debug_legend();
+
     ImGui::Render();
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), render_system_->renderer());
 
     // HUD text rendered with game font on top of everything
-    if (app.client().player_id() != invalid_entity && world_state)
-        render_hud_text(*world_state, app);
+    if (client_.player_id() != invalid_entity && world_state)
+        render_hud_text(*world_state);
 }
 
-void UIManager::render_hud_window([[maybe_unused]] WorldState const &world_state, App &app)
+void UIManager::render_hud_window([[maybe_unused]] WorldState const &world_state)
 {
-    // auto const &loc = app.locale();
-
     // Language switcher (top-right, needs buttons, stays in ImGui)
     ImGui::SetNextWindowPos(ImVec2(600, 10), ImGuiCond_Always);
     ImGui::Begin("Lang", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize);
-    for (auto const &lang : app.locale().available_languages()) {
+    for (auto const &lang : locale_.available_languages()) {
         if (ImGui::Button(lang.c_str())) {
-            app.locale().set_language(lang);
+            locale_.set_language(lang);
         }
     }
     ImGui::End();
 
     // Death overlay (stays ImGui for simplicity)
-    auto const &surv = app.client().survival();
-    auto const *stat = app.client().player_stats();
+    auto const &surv = client_.survival();
+    auto const *stat = client_.player_stats();
     if ((stat && !stat->alive) || surv.health <= 0.F) {
         ImGui::SetNextWindowPos(ImVec2(440, 300), ImGuiCond_Always);
         ImGui::Begin("DeathOverlay", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                          ImGuiWindowFlags_NoInputs);
         ImGui::TextColored(ImVec4(1.f, 0.1f, 0.1f, 1.f), "%s",
-                           app.locale().get("resp.dead").c_str());
-        ImGui::TextDisabled("%s", app.locale().get("resp.dead_hint").c_str());
+                           locale_.get("resp.dead").c_str());
+        ImGui::TextDisabled("%s", locale_.get("resp.dead_hint").c_str());
         ImGui::End();
     }
 }
 
-void UIManager::render_hud_text(WorldState const &world_state, App &app)
+void UIManager::render_hud_text(WorldState const &world_state)
 {
-    auto const &loc = app.locale();
     constexpr float x = 10.F, line_h = 14.F;
     float y = 10.F;
 
@@ -199,15 +201,15 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
 
     // Line 1: Title | Language | FPS
     hud_font_->draw({x, y}, SDL_Color{.r = 204, .g = 178, .b = 102, .a = 255},
-                    std::format("{} | {}: {} | {}: {:.0f}", loc.get("game.title"),
-                                loc.get("menu.language"), loc.current_language_name(),
-                                loc.get("hud.fps"), app.stopwatch().fps()));
+                    std::format("{} | {}: {} | {}: {:.0f}", locale_.get("game.title"),
+                                locale_.get("menu.language"), locale_.current_language_name(),
+                                locale_.get("hud.fps"), ctrl_.get_fps()));
 
     // Current town name (if any)
-    auto const &town_id = app.client().current_town_id();
+    auto const &town_id = client_.current_town_id();
     if (!town_id.empty()) {
         y += line_h;
-        std::string town_name = loc.get("location." + town_id);
+        std::string town_name = locale_.get("location." + town_id);
         hud_font_->draw({x, y}, SDL_Color{.r = 255, .g = 220, .b = 140, .a = 255},
                         town_name);
     }
@@ -217,36 +219,36 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     static constexpr char const *seasonKeys[] = {"season.spring", "season.summer", "season.autumn",
                                                  "season.winter"};
     hud_font_->draw({x, y}, SDL_Color{.r = 200, .g = 200, .b = 200, .a = 230},
-                    std::format("{}: {} | {}: {} | {}: {:.0f}", loc.get("hud.day"),
-                                world_state.day(), loc.get("hud.season"),
-                                loc.get(seasonKeys[world_state.season()]), loc.get("hud.time"),
+                    std::format("{}: {} | {}: {} | {}: {:.0f}", locale_.get("hud.day"),
+                                world_state.day(), locale_.get("hud.season"),
+                                locale_.get(seasonKeys[world_state.season()]), locale_.get("hud.time"),
                                 world_state.time_of_day()));
 
     // Line 3: Keys hint
     y += line_h;
     hud_font_->draw({x, y}, SDL_Color{.r = 140, .g = 140, .b = 140, .a = 200},
-                    std::string(loc.get("hud.keys")));
+                    std::string(locale_.get("hud.keys")));
 
     // Line 4: HP | Food | Water | Energy
     y += line_h;
-    auto const &sv = app.client().survival();
-    auto *cs = app.client().player_stats();
+    auto const &sv = client_.survival();
+    auto *cs = client_.player_stats();
     assert(cs != nullptr);
     hud_font_->draw({x, y}, SDL_Color{.r = 200, .g = 200, .b = 200, .a = 230},
                     std::format("{}: {}/{} | {}: {:.0f} | {}: {:.0f} | {}: {:.0f}",
-                                loc.get("hud.hp"), cs->hp, cs->max_hp, loc.get("hud.food"), sv.food,
-                                loc.get("hud.water"), sv.water, loc.get("hud.energy"), sv.energy));
+                                locale_.get("hud.hp"), cs->hp, cs->max_hp, locale_.get("hud.food"), sv.food,
+                                locale_.get("hud.water"), sv.water, locale_.get("hud.energy"), sv.energy));
 
     // Soldier info (lines 5+)
-    auto my_team = app.client().player_team();
+    auto my_team = client_.player_team();
     int soldier_count = 0;
     int follow_count = 0;
     int guard_count = 0;
     int patrol_count = 0;
     int melee_count = 0;
     int ranged_count = 0;
-    for (auto &re : app.client().remote_entities()) {
-        if (re.kind == EntityKind::soldier && re.alive && re.team == my_team) {
+    for (auto &re : client_.remote_entities()) {
+        if (re.kind == EntityKind::soldier && re.cs.alive && re.cs.team == my_team) {
             ++soldier_count;
             if (re.soldier_stance == SoldierStance::defensive)
                 ++follow_count;
@@ -262,8 +264,7 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     }
     if (soldier_count > 0) {
         y += line_h;
-        auto &cli2 = app.client();
-        auto sel = cli2.selected_roles();
+        auto sel = client_.selected_roles();
         auto &fm_reg = formation_registry();
         hud_font_->draw({x, y}, SDL_Color{200, 200, 200, 230},
                         std::format("Soldiers: {} | [G] {}F/{}G/{}P", soldier_count, follow_count,
@@ -273,16 +274,16 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
                         std::format("[1] Melee:{} {} [2] Ranged:{} {} | [F4] Formation: {}",
                                     melee_count, (sel & 1) ? "*" : " ", ranged_count,
                                     (sel & 2) ? "*" : " ",
-                                    fm_reg[cli2.formation_idx() % fm_reg.size()].first));
+                                    fm_reg[client_.formation_idx() % fm_reg.size()].first));
     }
     else {
         y += line_h;
-        hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200}, loc.get("hud.recruit_hint"));
+        hud_font_->draw({x, y}, SDL_Color{140, 140, 140, 200}, locale_.get("hud.recruit_hint"));
     }
 
     // Network stats (bottom of HUD block)
-    auto rtt = app.client().rtt_ms();
-    auto age = app.client().last_sync_age();
+    auto rtt = client_.rtt_ms();
+    auto age = client_.last_sync_age();
     auto color = SDL_Color{100, 255, 100, 200};
     if (age > 100)
         color = SDL_Color{255, 255, 100, 200};
@@ -294,38 +295,37 @@ void UIManager::render_hud_text(WorldState const &world_state, App &app)
     hud_font_->draw({x, y}, color, std::format("RTT: {}ms  (last sync: {}ms ago)", rtt, age));
 }
 
-void UIManager::render_dialogue(App const &app)
+void UIManager::render_dialogue()
 {
-    auto const &ds = app.dialogue();
-    auto const &loc = app.locale();
+    auto const &ds = client_.dialogue();
 
     ImGui::SetNextWindowSize(ImVec2(500, 480), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImVec2(50, 50), ImGuiCond_Appearing);
-    ImGui::Begin(loc.get("dialogue.title").c_str(), nullptr, ImGuiWindowFlags_NoResize);
+    ImGui::Begin(locale_.get("dialogue.title").c_str(), nullptr, ImGuiWindowFlags_NoResize);
 
     // Title + trust indicator
     ImGui::TextColored(ImVec4(0.8f, 0.7f, 0.4f, 1.0f), "%s", ds.npc_name.c_str());
     if (ds.npc_id != "__town__" && ds.npc_id != "__building__") {
         ImGui::SameLine();
-        ImGui::TextDisabled(" %s: %+d", loc.get("dialogue.trust").c_str(), ds.npc_trust);
+        ImGui::TextDisabled(" %s: %+d", locale_.get("dialogue.trust").c_str(), ds.npc_trust);
     }
     ImGui::Separator();
 
     // Conversation history
-    auto playerLabel = loc.get("dialogue.player");
+    auto playerLabel = locale_.get("dialogue.player");
     if (playerLabel.empty())
         playerLabel = "You"; // absolute fallback
     ImGui::BeginChild("History", ImVec2(0, 200), true);
     for (auto const &line : ds.history) {
         std::string text;
         if (line.use_template) {
-            text = app.resolve_dialogue_text(line.template_type, line.variant_index, line.slots);
+            text = ctrl_.resolve_dialogue_text(line.template_type, line.variant_index, line.slots);
         }
         else if (line.use_raw) {
             text = line.raw_text;
         }
         else {
-            text = loc.get(line.text_key);
+            text = locale_.get(line.text_key);
         }
 
         if (line.speaker == DialogueLine::player) {
@@ -341,40 +341,40 @@ void UIManager::render_dialogue(App const &app)
 
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::Text("%s", loc.get("dialogue.ask_about").c_str());
+    ImGui::Text("%s", locale_.get("dialogue.ask_about").c_str());
 
     // Topics
     for (auto const &topic_id : ds.available_topics) {
         std::string label;
         if (topic_id == "__quest_turnin__")
-            label = "- " + loc.get("quest.turnin_label");
+            label = "- " + locale_.get("quest.turnin_label");
         else if (topic_id == "__quest__")
-            label = "- " + loc.get("quest.label");
+            label = "- " + locale_.get("quest.label");
         else if (topic_id == "__attack__")
-            label = "- " + loc.get("dialogue.attack");
+            label = "- " + locale_.get("dialogue.attack");
         else {
-            label = "- " + loc.get("topic." + topic_id);
+            label = "- " + locale_.get("topic." + topic_id);
             if (label == "- ")
                 label = "- " + topic_id;
         }
         if (ImGui::Selectable(label.c_str())) {
-            const_cast<App &>(app).do_dialogue_action(topic_id);
+            ctrl_.do_dialogue_action(topic_id);
         }
     }
 
     // Tell topics
     if (!ds.available_actions.empty()) {
         ImGui::Separator();
-        ImGui::Text("%s", loc.get("dialogue.share_what_you_know").c_str());
+        ImGui::Text("%s", locale_.get("dialogue.share_what_you_know").c_str());
         for (auto const &action : ds.available_actions) {
             if (!action.starts_with("tell:"))
                 continue;
             std::string topic_id = action.substr(5);
-            std::string label = "+ " + loc.get("topic." + topic_id);
+            std::string label = "+ " + locale_.get("topic." + topic_id);
             if (label == "+ ")
                 label = "+ " + topic_id;
             if (ImGui::Selectable(label.c_str())) {
-                const_cast<App &>(app).do_dialogue_action(action);
+                ctrl_.do_dialogue_action(action);
             }
         }
     }
@@ -388,22 +388,22 @@ void UIManager::render_dialogue(App const &app)
         for (auto const &action : ds.available_actions) {
             if (action == "__inn__") {
                 if (ImGui::Button("🏨 Rest at Inn")) {
-                    const_cast<App &>(app).do_dialogue_action(action);
+                    ctrl_.do_dialogue_action(action);
                 }
             }
             else if (action == "__market__") {
                 if (ImGui::Button("🏪 Buy Supplies (Market)")) {
-                    const_cast<App &>(app).do_dialogue_action(action);
+                    ctrl_.do_dialogue_action(action);
                 }
             }
             else if (action == "__temple__") {
                 if (ImGui::Button("⛪ Visit Temple (Heal Ailments)")) {
-                    const_cast<App &>(app).do_dialogue_action(action);
+                    ctrl_.do_dialogue_action(action);
                 }
             }
             else if (action == "__blacksmith__") {
                 if (ImGui::Button("🔧 Blacksmith (Upgrade Gear)")) {
-                    const_cast<App &>(app).do_dialogue_action(action);
+                    ctrl_.do_dialogue_action(action);
                 }
             }
         }
@@ -411,92 +411,89 @@ void UIManager::render_dialogue(App const &app)
     else {
         // NPC actions bar
         ImGui::Separator();
-        if (ds.can_gift && ImGui::Button(loc.get("dialogue.gift").c_str())) {
-            const_cast<App &>(app).do_dialogue_action("__gift__");
+        if (ds.can_gift && ImGui::Button(locale_.get("dialogue.gift").c_str())) {
+            ctrl_.do_dialogue_action("__gift__");
         }
         ImGui::SameLine();
-        if (ds.can_threaten && ImGui::Button(loc.get("dialogue.threaten").c_str())) {
-            const_cast<App &>(app).do_dialogue_action("__threaten__");
+        if (ds.can_threaten && ImGui::Button(locale_.get("dialogue.threaten").c_str())) {
+            ctrl_.do_dialogue_action("__threaten__");
         }
         ImGui::SameLine();
     }
-    if (ImGui::Button(loc.get("dialogue.leave").c_str())) {
-        const_cast<App &>(app).end_dialogue();
+    if (ImGui::Button(locale_.get("dialogue.leave").c_str())) {
+        ctrl_.end_dialogue();
     }
 
     ImGui::End();
 }
 
-void UIManager::render_journal(App const &app)
+void UIManager::render_journal()
 {
-    auto const &loc = app.locale();
-    ImGui::Begin(loc.get("ui.journal").c_str(), &show_journal_);
-    ImGui::Text("%s", loc.get("ui.journal_placeholder").c_str());
+    ImGui::Begin(locale_.get("ui.journal").c_str(), &show_journal_);
+    ImGui::Text("%s", locale_.get("ui.journal_placeholder").c_str());
     static char buf[4096] = {};
     ImGui::InputTextMultiline("##journal_entry", buf, sizeof(buf), ImVec2(-1, 300));
     ImGui::End();
 }
 
-void UIManager::render_inventory(App const &app)
+void UIManager::render_inventory()
 {
-    auto const &loc = app.locale();
-    ImGui::Begin(loc.get("ui.inventory").c_str(), &show_inventory_);
-    ImGui::Text("%s", loc.get("ui.inventory_placeholder").c_str());
+    ImGui::Begin(locale_.get("ui.inventory").c_str(), &show_inventory_);
+    ImGui::Text("%s", locale_.get("ui.inventory_placeholder").c_str());
     ImGui::End();
 }
 
-void UIManager::render_help_panel(App const &app)
+void UIManager::render_help_panel()
 {
-    auto const &loc = app.locale();
     ImGui::SetNextWindowSize(ImVec2(320, 380), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImVec2(300, 80), ImGuiCond_Appearing);
-    ImGui::Begin(loc.get("help.title").c_str());
-    ImGui::Text("%s", loc.get("help.wasd").c_str());
-    ImGui::Text("%s", loc.get("help.e").c_str());
-    ImGui::Text("%s", loc.get("help.r").c_str());
-    ImGui::Text("%s", loc.get("help.g").c_str());
+    ImGui::Begin(locale_.get("help.title").c_str());
+    ImGui::Text("%s", locale_.get("help.wasd").c_str());
+    ImGui::Text("%s", locale_.get("help.e").c_str());
+    ImGui::Text("%s", locale_.get("help.r").c_str());
+    ImGui::Text("%s", locale_.get("help.g").c_str());
     ImGui::Separator();
-    ImGui::Text("%s", loc.get("help.f1").c_str());
-    ImGui::Text("%s", loc.get("help.f2").c_str());
-    ImGui::Text("%s", loc.get("help.f3").c_str());
-    ImGui::Text("%s", loc.get("help.f4").c_str());
-    ImGui::Text("%s", loc.get("help.f8").c_str());
-    ImGui::Text("%s", loc.get("help.f5").c_str());
-    ImGui::Text("%s", loc.get("help.f9").c_str());
-    ImGui::Text("%s", loc.get("help.f10").c_str());
-    ImGui::Text("%s", loc.get("help.f12").c_str());
+    ImGui::Text("%s", locale_.get("help.f1").c_str());
+    ImGui::Text("%s", locale_.get("help.f2").c_str());
+    ImGui::Text("%s", locale_.get("help.f3").c_str());
+    ImGui::Text("%s", locale_.get("help.f4").c_str());
+    ImGui::Text("%s", locale_.get("help.f8").c_str());
+    ImGui::Text("%s", locale_.get("help.f5").c_str());
+    ImGui::Text("%s", locale_.get("help.f9").c_str());
+    ImGui::Text("%s", locale_.get("help.f10").c_str());
+    ImGui::Text("%s", locale_.get("help.f11").c_str());
+    ImGui::Text("%s", locale_.get("help.f12").c_str());
     ImGui::Separator();
-    ImGui::TextDisabled("%s", loc.get("help.close").c_str());
+    ImGui::TextDisabled("%s", locale_.get("help.close").c_str());
     ImGui::End();
 }
 
-void UIManager::render_load_menu(App const &app)
+void UIManager::render_load_menu()
 {
-    auto const &loc = app.locale();
     ImGui::SetNextWindowSize(ImVec2(250, 300), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImVec2(500, 200), ImGuiCond_Appearing);
     ImGui::Begin("Load Game", nullptr, ImGuiWindowFlags_NoResize);
 
-    auto slots = const_cast<App &>(app).available_save_slots();
+    auto slots = ctrl_.available_save_slots();
     if (slots.empty()) {
-        ImGui::TextDisabled("%s", loc.get("resp.no_save").c_str());
+        ImGui::TextDisabled("%s", locale_.get("resp.no_save").c_str());
     }
     else {
         for (int slot : slots) {
             if (ImGui::Selectable(std::to_string(slot).c_str())) {
-                const_cast<App &>(app).load_from_slot(slot);
+                ctrl_.load_from_slot(slot);
             }
         }
     }
 
     ImGui::Separator();
-    if (ImGui::Button(loc.get("mp.close").c_str())) {
+    if (ImGui::Button(locale_.get("mp.close").c_str())) {
         show_load_menu_ = false;
     }
     ImGui::End();
 }
 
-void UIManager::render_multiplayer_menu(App const &app)
+void UIManager::render_multiplayer_menu()
 {
     assert(show_multiplayer_);
     ImGui::SetNextWindowSize(ImVec2(320, 320), ImGuiCond_Appearing);
@@ -506,22 +503,20 @@ void UIManager::render_multiplayer_menu(App const &app)
     if (!show)
         show_multiplayer_ = false;
 
-    auto &mutApp = const_cast<App &>(app);
-
-    switch (app.session_mode()) {
+    switch (ctrl_.get_session_mode()) {
     case SessionMode::local:
-        render_local(mutApp);
+        render_local();
         break;
     case SessionMode::host:
-        render_hosting(mutApp);
+        render_hosting();
         break;
     case SessionMode::client:
-        render_client(mutApp);
+        render_client();
         break;
     }
 
     ImGui::Separator();
-    if (ImGui::Button(app.locale().get("mp.close").c_str()))
+    if (ImGui::Button(locale_.get("mp.close").c_str()))
         show_multiplayer_ = false;
     ImGui::End();
 }
@@ -545,10 +540,9 @@ void UIManager::save_server_list()
         f << ip << '\n';
 }
 
-void UIManager::render_map(App const &app)
+void UIManager::render_map()
 {
-    auto const &loc = app.locale();
-    ImGui::Begin(loc.get("ui.map").c_str(), &show_map_, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Begin(locale_.get("ui.map").c_str(), &show_map_, ImGuiWindowFlags_AlwaysAutoResize);
 
     assert(location_defs_);
 
@@ -573,7 +567,7 @@ void UIManager::render_map(App const &app)
                       IM_COL32(20, 18, 15, 220));
 
     // Draw town markers
-    auto const &discovered = app.client().discovered_towns();
+    auto const &discovered = client_.discovered_towns();
     for (auto const &ld : *location_defs_) {
         bool is_discovered = std::ranges::any_of(discovered, [&](auto const &d) {
             return d.loc_id == ld.id;
@@ -589,7 +583,7 @@ void UIManager::render_map(App const &app)
             dl->AddCircleFilled(pos, 5, IM_COL32(255, 220, 140, 255));
             dl->AddText(ImVec2(pos.x + 8, pos.y - 5),
                         IM_COL32(200, 190, 170, 255),
-                        app.locale().get(ld.display_name).c_str());
+                        locale_.get(ld.display_name).c_str());
         }
         else {
             // Undiscovered: dim dot
@@ -600,46 +594,43 @@ void UIManager::render_map(App const &app)
     ImGui::End();
 }
 
-void UIManager::render_hosting(App &app)
+void UIManager::render_hosting()
 {
-    auto const &loc = app.locale();
-    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s", loc.get("mp.hosting").c_str());
-    ImGui::TextDisabled("%s", loc.get("mp.hosting_hint").c_str());
-    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
-                app.client().remote_entities().size());
+    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s", locale_.get("mp.hosting").c_str());
+    ImGui::TextDisabled("%s", locale_.get("mp.hosting_hint").c_str());
+    ImGui::Text("%s: %zu", locale_.get("mp.remote_entities").c_str(),
+                client_.remote_entities().size());
     ImGui::Separator();
 
-    if (ImGui::Button(loc.get("mp.stop_hosting").c_str())) {
-        app.stop_listen();
-        app.set_session_mode(SessionMode::local);
+    if (ImGui::Button(locale_.get("mp.stop_hosting").c_str())) {
+        ctrl_.stop_listen();
+        ctrl_.set_session_mode(SessionMode::local);
     }
 
-    render_client_list(app);
+    render_client_list();
 }
 
-void UIManager::render_local(App &app)
+void UIManager::render_local()
 {
-    auto const &loc = app.locale();
-
-    ImGui::Text("%s", loc.get("mp.host").c_str());
+    ImGui::Text("%s", locale_.get("mp.host").c_str());
     ImGui::SetNextItemWidth(80);
-    ImGui::InputInt(loc.get("mp.port").c_str(), &host_port_);
+    ImGui::InputInt(locale_.get("mp.port").c_str(), &host_port_);
     host_port_ = std::clamp(host_port_, 1, 65535);
-    if (ImGui::Button(loc.get("mp.host_btn").c_str())) {
-        app.start_host_session(host_port_);
+    if (ImGui::Button(locale_.get("mp.host_btn").c_str())) {
+        ctrl_.start_host_session(host_port_);
     }
     ImGui::Separator();
-    ImGui::Text("%s", loc.get("mp.join").c_str());
+    ImGui::Text("%s", locale_.get("mp.join").c_str());
     host_ip_.resize(63);
-    ImGui::InputText(loc.get("mp.ip").c_str(), host_ip_.data(), host_ip_.size() + 1);
+    ImGui::InputText(locale_.get("mp.ip").c_str(), host_ip_.data(), host_ip_.size() + 1);
     host_ip_.resize(std::strlen(host_ip_.c_str()));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80);
     ImGui::InputInt("##port", &host_port_);
     host_port_ = std::clamp(host_port_, 1, 65535);
-    if (ImGui::Button(loc.get("mp.connect").c_str())) {
+    if (ImGui::Button(locale_.get("mp.connect").c_str())) {
         spdlog::debug("Clicked button, Connecting to {}:{}", host_ip_, host_port_);
-        app.start_client_session(host_ip_, host_port_);
+        ctrl_.start_client_session(host_ip_, host_port_);
         auto entry = host_ip_ + ":" + std::to_string(host_port_);
         if (!std::ranges::contains(server_list_, entry)) {
             server_list_.push_back(entry);
@@ -648,7 +639,7 @@ void UIManager::render_local(App &app)
     }
     if (!server_list_.empty()) {
         ImGui::Separator();
-        ImGui::Text("%s", loc.get("mp.saved_servers").c_str());
+        ImGui::Text("%s", locale_.get("mp.saved_servers").c_str());
         for (int i = 0; i < static_cast<int>(server_list_.size()); ++i) {
             ImGui::PushID(i);
             if (ImGui::Button(server_list_[i].c_str())) {
@@ -668,7 +659,7 @@ void UIManager::render_local(App &app)
                     host_port_ = port;
                 }
                 spdlog::debug("Clicked button, Connecting to {}:{}", host_ip_, host_port_);
-                app.start_client_session(host_ip_, host_port_);
+                ctrl_.start_client_session(host_ip_, host_port_);
             }
             ImGui::SameLine();
             if (ImGui::Button("X")) {
@@ -682,44 +673,42 @@ void UIManager::render_local(App &app)
     }
 }
 
-void UIManager::render_client(App &app)
+void UIManager::render_client()
 {
-    auto const &loc = app.locale();
-    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s Host: %s", loc.get("mp.connected").c_str(),
-                       app.client().session_remote_info().c_str());
-    ImGui::Text("%s: %zu", loc.get("mp.remote_entities").c_str(),
-                app.client().remote_entities().size());
+    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s Host: %s", locale_.get("mp.connected").c_str(),
+                       client_.session_remote_info().c_str());
+    ImGui::Text("%s: %zu", locale_.get("mp.remote_entities").c_str(),
+                client_.remote_entities().size());
     ImGui::Separator();
-    render_chat(app);
-    if (ImGui::Button(loc.get("mp.disconnect").c_str())) {
+    render_chat();
+    if (ImGui::Button(locale_.get("mp.disconnect").c_str())) {
         // Return to local
-        app.start_local_session();
+        ctrl_.start_local_session();
     }
 }
 
-void UIManager::render_client_list(App &app)
+void UIManager::render_client_list()
 {
-    auto const &loc = app.locale();
-    auto const &sessions = app.server_sessions();
+    auto const &sessions = ctrl_.server_sessions();
 
     if (sessions.empty()) {
-        ImGui::TextDisabled("%s", loc.get("mp.no_clients").c_str());
+        ImGui::TextDisabled("%s", locale_.get("mp.no_clients").c_str());
         return;
     }
 
-    if (ImGui::CollapsingHeader(loc.get("mp.clients").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader(locale_.get("mp.clients").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent();
 
         // 表格方式显示
         if (ImGui::BeginTable("client_list", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
 
-            ImGui::TableSetupColumn(loc.get("mp.id").c_str(), ImGuiTableColumnFlags_WidthFixed,
+            ImGui::TableSetupColumn(locale_.get("mp.id").c_str(), ImGuiTableColumnFlags_WidthFixed,
                                     60.0f);
-            ImGui::TableSetupColumn(loc.get("mp.address").c_str(),
+            ImGui::TableSetupColumn(locale_.get("mp.address").c_str(),
                                     ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn(loc.get("mp.status").c_str(), ImGuiTableColumnFlags_WidthFixed,
+            ImGui::TableSetupColumn(locale_.get("mp.status").c_str(), ImGuiTableColumnFlags_WidthFixed,
                                     80.0f);
-            ImGui::TableSetupColumn(loc.get("mp.kick").c_str(), ImGuiTableColumnFlags_WidthFixed,
+            ImGui::TableSetupColumn(locale_.get("mp.kick").c_str(), ImGuiTableColumnFlags_WidthFixed,
                                     50.0f);
             ImGui::TableHeadersRow();
 
@@ -739,18 +728,18 @@ void UIManager::render_client_list(App &app)
                 ImGui::TableSetColumnIndex(2);
                 if (tg.get()->is_open()) {
                     ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s",
-                                       loc.get("mp.connected").c_str());
+                                       locale_.get("mp.connected").c_str());
                 }
                 else {
                     ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "%s",
-                                       loc.get("mp.disconnected").c_str());
+                                       locale_.get("mp.disconnected").c_str());
                 }
 
                 // Kick
                 ImGui::TableSetColumnIndex(3);
                 ImGui::PushID(tg.get());
                 if (ImGui::SmallButton("X"))
-                    app.kick_session(tg, "kicked by host");
+                    ctrl_.kick_session(tg, "kicked by host");
                 ImGui::PopID();
             }
 
@@ -761,12 +750,11 @@ void UIManager::render_client_list(App &app)
     }
 }
 
-void UIManager::render_chat(App &app)
+void UIManager::render_chat()
 {
-    auto const &loc = app.locale();
-    ImGui::Text("%s", loc.get("mp.chat").c_str());
+    ImGui::Text("%s", locale_.get("mp.chat").c_str());
     ImGui::BeginChild("ChatLog", ImVec2(0, 100), true);
-    for (auto const &msg : app.client().chat_history())
+    for (auto const &msg : client_.chat_history())
         ImGui::TextWrapped("%s", msg.c_str());
     if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 5.f)
         ImGui::SetScrollHereY(1.f);
@@ -777,16 +765,34 @@ void UIManager::render_chat(App &app)
     chat_buf_.resize(std::strlen(chat_buf_.c_str()));
     if (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
         if (!chat_buf_.empty()) {
-            app.client().send_chat(chat_buf_);
+            client_.send_chat(chat_buf_);
             chat_buf_.clear();
             ImGui::SetKeyboardFocusHere(-1);
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button(loc.get("mp.send").c_str())) {
+    if (ImGui::Button(locale_.get("mp.send").c_str())) {
         if (!chat_buf_.empty()) {
-            app.client().send_chat(chat_buf_);
+            client_.send_chat(chat_buf_);
             chat_buf_.clear();
         }
     }
+}
+
+void UIManager::render_debug_legend()
+{
+    ImGui::SetNextWindowPos(ImVec2(780, 10), ImGuiCond_Always);
+    ImGui::Begin("##debug_legend", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground);
+
+    ImGui::TextColored(ImVec4(0, 1, 1, 1), "■");
+    ImGui::SameLine();
+    ImGui::TextDisabled("texture bounds");
+
+    ImGui::TextColored(ImVec4(1, 0.65f, 0, 1), "■");
+    ImGui::SameLine();
+    ImGui::TextDisabled("collision volume");
+
+    ImGui::End();
 }

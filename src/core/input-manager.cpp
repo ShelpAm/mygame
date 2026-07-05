@@ -32,7 +32,8 @@ void InputManager::init_default_bindings()
     set_key_binding(Action::respawn, SDL_SCANCODE_F8);
     set_key_binding(Action::load_menu, SDL_SCANCODE_F9);
     set_key_binding(Action::multiplayer, SDL_SCANCODE_F10);
-    set_key_binding(Action::debug_toggle, SDL_SCANCODE_F12);
+    set_key_binding(Action::toggle_log_level, SDL_SCANCODE_F11);
+    set_key_binding(Action::toggle_debug, SDL_SCANCODE_F12);
     // set_key_binding(Action::cancel, SDL_SCANCODE_BACKSPACE);
 }
 

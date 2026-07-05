@@ -1,6 +1,5 @@
 #include "net/client.hpp"
 #include "animation/animation-data.hpp"
-#include "core/app.hpp"
 #include "entities/components/combat-stats.hpp"
 #include "entities/components/movement.hpp"
 #include "entities/components/position.hpp"
@@ -10,13 +9,12 @@
 #include "net/sync-io.hpp"
 #include "survival/condition-tracker.hpp"
 #include "systems/formation.hpp"
-#include "world/map-data.hpp"
 #include <cassert>
 #include <cstring>
 #include <optional>
 #include <spdlog/spdlog.h>
 
-Client::Client(App *app) : app_(app), messages_(Session::io(), 128)
+Client::Client() : messages_(Session::io(), 128)
 {
     spdlog::info("Client: initialized");
 }
@@ -43,11 +41,13 @@ awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
         try {
             while (true) {
                 auto msg = co_await t->read();
-                spdlog::log((msg.type == static_cast<std::uint32_t>(ServerMsgType::state_delta) ? spdlog::level::trace
-                                                                : spdlog::level::debug),
+                spdlog::log((msg.type == static_cast<std::uint32_t>(ServerMsgType::state_delta)
+                                 ? spdlog::level::trace
+                                 : spdlog::level::debug),
                             "Client: received message {} with payload size {} "
                             "from transport {}",
-                            static_cast<ServerMsgType>(msg.type), msg.payload.size(), t->remote_info());
+                            static_cast<ServerMsgType>(msg.type), msg.payload.size(),
+                            t->remote_info());
                 if (!c->messages_.try_send(boost::system::error_code{}, t, msg))
                     Session::spawn([](Client *c, auto t, auto msg) -> awaitable<void> {
                         co_await c->messages_.async_send(boost::system::error_code{}, t,
@@ -209,9 +209,9 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
     if (st == ServerMsgType::return_pid) {
         assert(msg.payload.size() >= 9);
         memcpy(&player_id_, msg.payload.data(), 8);
-        player_team_ = static_cast<Team>(msg.payload[8]);
+        player_cs_.team = static_cast<Team>(msg.payload[8]);
         spdlog::info("Client: Returned player ID from server: {} team: {}", player_id_,
-                     player_team_);
+                     player_cs_.team);
         return;
     }
     if (st == ServerMsgType::chat) {
@@ -243,7 +243,8 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
         std::string reason(msg.payload.begin(), msg.payload.end());
         spdlog::info("Client: kicked by server: {}", reason);
         session_->close();
-        app_->start_local_session();
+        if (on_kicked_)
+            on_kicked_();
         break;
     }
     case ServerMsgType::entity_update:
@@ -272,9 +273,8 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
     case ServerMsgType::town_discovered: {
         auto td = parse_town_discovered(msg.payload);
         // Avoid duplicates
-        auto it = std::ranges::find_if(discovered_towns_, [&](auto const &t) {
-            return t.loc_id == td.loc_id;
-        });
+        auto it = std::ranges::find_if(discovered_towns_,
+                                       [&](auto const &t) { return t.loc_id == td.loc_id; });
         if (it == discovered_towns_.end()) {
             discovered_towns_.push_back({td.loc_id, td.locale_key, false});
         }
@@ -298,9 +298,9 @@ void Client::handle_entity_update(std::vector<uint8_t> const &payload)
     for (auto &rp : remote_entities_) {
         if (rp.id == u.id) {
             rp.target_pos = {u.x, u.y};
-            rp.hp = u.hp;
-            rp.max_hp = u.max_hp;
-            rp.alive = u.alive;
+            rp.cs.hp = u.hp;
+            rp.cs.max_hp = u.max_hp;
+            rp.cs.alive = u.alive;
             return;
         }
     }
@@ -308,24 +308,25 @@ void Client::handle_entity_update(std::vector<uint8_t> const &payload)
     re.id = u.id;
     re.position = {u.x, u.y};
     re.target_pos = {u.x, u.y};
-    re.hp = u.hp;
-    re.max_hp = u.max_hp;
-    re.alive = u.alive;
+    re.cs.hp = u.hp;
+    re.cs.max_hp = u.max_hp;
+    re.cs.alive = u.alive;
     remote_entities_.push_back(re);
 }
 
 void Client::update(float dt)
 {
     while (messages_.try_receive(
-        [this](boost::system::error_code, std::shared_ptr<Session> t, TransportMessage msg) {
+        [this](boost::system::error_code, std::shared_ptr<Session> const &t, TransportMessage msg) {
             handle_message(*t, std::move(msg));
         })) {
     }
 
-    if (player_id_ != invalid_entity) {
+    if (connected()) {
         interpolate_entities(dt);
-        player_visibility_.set_visible_arc(world_to_tile(player_pos_), player_vision_range_,
-                                           player_facing_, player_vision_arc_);
+        if (auto const *e = find_player())
+            player_visibility_.set_visible_arc(world_to_tile(player_pos_), e->vis.range, e->facing,
+                                               e->vis.arc);
 
         // Manage snapshots based on tile visibility
         // auto const &visible = player_visibility_.visible;
@@ -353,17 +354,17 @@ void Client::update(float dt)
         //         sn->facing = re.facing;
         //         sn->color = re.color;
         //         sn->scale = re.scale;
-        //         sn->team = re.team;
-        //         sn->alive = re.alive;
+        //         sn->team = re.cs.team;
+        //         sn->alive = re.cs.alive;
         //         sn->texture_name = re.texture_name;
         //     }
         // }
 
         for (auto &re : remote_entities_) {
-            auto &clips = animation_clips_for_kind(re.kind, (uint8_t)re.team);
-            auto *clip = determine_clip(clips, re.anim_state, re.velocity, re.alive, dt);
-            switch_clip(re.anim_state, clip);
-            tick_animation(re.anim_state, re.velocity, dt);
+            auto clip_name = determine_clip_name(re.visual, re.mov.velocity, re.cs.alive, dt);
+            switch_clip(re.visual, clip_name, re.kind, (uint8_t)re.cs.team,
+                        (uint8_t)re.soldier_role, *resources_);
+            tick_animation(re.visual, re.mov.velocity, dt);
         }
     }
 
@@ -390,7 +391,15 @@ bool Client::is_player_dead()
 {
     if (player_id_ == invalid_entity)
         throw std::runtime_error("is_player_dead: player ID not set");
-    return !player_alive_;
+    return !player_cs_.alive;
+}
+
+RemoteEntity const *Client::find_player() const
+{
+    for (auto const &re : remote_entities_)
+        if (re.id == player_id_)
+            return &re;
+    return nullptr;
 }
 
 CombatStats const *Client::player_stats()
@@ -398,12 +407,12 @@ CombatStats const *Client::player_stats()
     if (player_id_ == invalid_entity)
         return nullptr;
     static CombatStats stats;
-    stats.hp = player_hp_;
-    stats.max_hp = player_max_hp_;
-    stats.alive = player_alive_;
-    stats.attack = player_attack_;
-    stats.defense = player_defense_;
-    stats.attack_range = player_attack_range_;
+    stats.hp = player_cs_.hp;
+    stats.max_hp = player_cs_.max_hp;
+    stats.alive = player_cs_.alive;
+    stats.attack = player_cs_.attack;
+    stats.defense = player_cs_.defense;
+    stats.attack_range = player_cs_.attack_range;
     return &stats;
 }
 
@@ -415,65 +424,60 @@ RemoteEntity *Client::find_entity(EntityId id)
     return nullptr;
 }
 
-static void set_visual_from_kind(RemoteEntity &re)
+static void set_visual_from_kind(RemoteEntity &re, ResourceManager const &resources)
 {
     switch (re.kind) {
     case EntityKind::player:
-        re.color = {0.3f, 0.8f, 0.3f, 1.f};
-        re.scale = 1.f;
-        re.texture_name = "player";
+        re.visual.color = {0.3f, 0.8f, 0.3f, 1.f};
+        re.visual.scale = 1.f;
+        re.visual.origin = {275, 590};
         break;
     case EntityKind::soldier:
-        re.color = re.team == Team::enemy ? SDL_FColor{0.8f, 0.3f, 0.1f, 1.f}
-                                          : SDL_FColor{0.3f, 0.5f, 0.9f, 1.f};
-        re.scale = 0.8f;
-        re.texture_name = re.team == Team::enemy ? "enemy_soldier" : "soldier";
+        re.visual.color = re.cs.team == Team::enemy ? SDL_FColor{0.8f, 0.3f, 0.1f, 1.f}
+                                                    : SDL_FColor{0.3f, 0.5f, 0.9f, 1.f};
+        re.visual.scale = 2.2f;
+        re.visual.origin = {16, 28};
         break;
     case EntityKind::npc:
-        re.color = {0.8f, 0.6f, 0.2f, 1.f};
-        re.scale = 1.f;
-        re.texture_name = "npc";
+        re.visual.color = {0.8f, 0.6f, 0.2f, 1.f};
+        re.visual.scale = 2.2f;
+        re.visual.origin = {16, 28};
         break;
     case EntityKind::enemy:
-        re.color = {0.9f, 0.2f, 0.1f, 1.f};
-        re.scale = 1.f;
-        re.texture_name = "enemy";
+        re.visual.color = {0.9f, 0.2f, 0.1f, 1.f};
+        re.visual.scale = 2.5f;
+        re.visual.origin = {16, 28};
         break;
     case EntityKind::structure: {
-        // Different colour per building type — use a safe tile texture
-        // so we never draw with a null texture.
-        re.scale = 1.2f;
-        re.texture_name = "tile_0"; // solid white tile, tinted via color
+        re.visual.scale = 1.2f;
         switch (re.building_type) {
-        case 0: // generic
-            re.color = {0.45f, 0.40f, 0.35f, 1.f};
+        case 0:
+            re.visual.color = {0.45f, 0.40f, 0.35f, 1.f};
             break;
-        case 1: // inn
-            re.color = {0.3f, 0.7f, 0.3f, 1.f};
+        case 1:
+            re.visual.color = {0.3f, 0.7f, 0.3f, 1.f};
             break;
-        case 2: // market
-            re.color = {0.3f, 0.5f, 0.8f, 1.f};
+        case 2:
+            re.visual.color = {0.3f, 0.5f, 0.8f, 1.f};
             break;
-        case 3: // temple
-            re.color = {0.9f, 0.7f, 0.2f, 1.f};
+        case 3:
+            re.visual.color = {0.9f, 0.7f, 0.2f, 1.f};
             break;
-        case 4: // blacksmith
-            re.color = {0.85f, 0.3f, 0.15f, 1.f};
+        case 4:
+            re.visual.color = {0.85f, 0.3f, 0.15f, 1.f};
             break;
         default:
-            re.color = {0.5f, 0.5f, 0.5f, 1.f};
+            re.visual.color = {0.5f, 0.5f, 0.5f, 1.f};
             break;
         }
-        re.color.a = 1.f;
         break;
     }
     default:
-        re.color = {0.3f, 0.5f, 0.9f, 1.f};
-        re.scale = 0.8f;
-        re.texture_name = "entity";
         break;
     }
-    re.color.a = 1.f;
+    re.visual.color.a = 1.f;
+    switch_clip(re.visual, "idle", re.kind, (uint8_t)re.cs.team, (uint8_t)re.soldier_role,
+                resources);
 }
 
 namespace {
@@ -489,7 +493,7 @@ struct ParsedEntity {
 };
 
 // Parse a single entity from the bitmask stream.
-std::optional<ParsedEntity> parse_one_entity(SyncReader &r)
+std::optional<ParsedEntity> parse_one_entity(SyncReader &r, ResourceManager const &resources)
 {
     if (r.remaining() < 10) // id(8) + mask(2)
         return std::nullopt;
@@ -514,10 +518,10 @@ std::optional<ParsedEntity> parse_one_entity(SyncReader &r)
     if (mask & SyncComponent::combat) {
         CombatStats cs;
         cs.read_sync(r);
-        re.hp = cs.hp;
-        re.max_hp = cs.max_hp;
-        re.alive = cs.alive;
-        re.team = cs.team;
+        re.cs.hp = cs.hp;
+        re.cs.max_hp = cs.max_hp;
+        re.cs.alive = cs.alive;
+        re.cs.team = cs.team;
         pe.attack = cs.attack;
         pe.defense = cs.defense;
         pe.attack_range = cs.attack_range;
@@ -525,7 +529,7 @@ std::optional<ParsedEntity> parse_one_entity(SyncReader &r)
     if (mask & SyncComponent::movement) {
         Movement mov;
         mov.read_sync(r);
-        re.velocity = mov.velocity;
+        re.mov.velocity = mov.velocity;
     }
     if (mask & SyncComponent::soldier_ai) {
         SoldierAI ai;
@@ -542,11 +546,11 @@ std::optional<ParsedEntity> parse_one_entity(SyncReader &r)
     if (mask & SyncComponent::vision) {
         Vision v;
         v.read_sync(r);
-        re.vision_range = v.range;
-        re.vision_arc = v.arc;
+        re.vis.range = v.range;
+        re.vis.arc = v.arc;
     }
 
-    set_visual_from_kind(re);
+    set_visual_from_kind(re, resources);
     return pe;
 }
 
@@ -576,7 +580,7 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
     }
 
     while (!r.done()) {
-        auto opt = parse_one_entity(r);
+        auto opt = parse_one_entity(r, *resources_);
         if (!opt)
             break;
         auto &pe = *opt;
@@ -584,17 +588,13 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
 
         if (re.id == player_id_) {
             player_target_pos_ = re.target_pos;
-            player_hp_ = re.hp;
-            player_max_hp_ = re.max_hp;
-            player_alive_ = re.alive;
-            player_velocity_ = re.velocity;
-            player_facing_ = re.facing;
-            player_team_ = re.team;
-            player_attack_ = pe.attack;
-            player_defense_ = pe.defense;
-            player_attack_range_ = pe.attack_range;
-            player_vision_range_ = re.vision_range;
-            player_vision_arc_ = re.vision_arc;
+            player_cs_.hp = re.cs.hp;
+            player_cs_.max_hp = re.cs.max_hp;
+            player_cs_.alive = re.cs.alive;
+            player_cs_.team = re.cs.team;
+            player_cs_.attack = pe.attack;
+            player_cs_.defense = pe.defense;
+            player_cs_.attack_range = pe.attack_range;
             if (pe.has_survival)
                 player_survival_ = pe.survival;
         }
@@ -608,14 +608,14 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
         else {
             rp->kind = re.kind;
             rp->target_pos = re.target_pos;
-            rp->hp = re.hp;
-            rp->max_hp = re.max_hp;
-            rp->alive = re.alive;
-            rp->team = re.team;
-            rp->velocity = re.velocity;
+            rp->cs.hp = re.cs.hp;
+            rp->cs.max_hp = re.cs.max_hp;
+            rp->cs.alive = re.cs.alive;
+            rp->cs.team = re.cs.team;
+            rp->mov.velocity = re.mov.velocity;
             rp->facing = re.facing;
             rp->interactable = re.interactable;
-            set_visual_from_kind(*rp);
+            set_visual_from_kind(*rp, *resources_);
         }
     }
     // Entities not in this sync stay — snapshot management is handled
@@ -639,7 +639,7 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
     }
 
     while (!r.done()) {
-        auto opt = parse_one_entity(r);
+        auto opt = parse_one_entity(r, *resources_);
         if (!opt)
             break;
         auto &pe = *opt;
@@ -647,17 +647,13 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
 
         if (re.id == player_id_) {
             player_target_pos_ = re.target_pos;
-            player_hp_ = re.hp;
-            player_max_hp_ = re.max_hp;
-            player_alive_ = re.alive;
-            player_velocity_ = re.velocity;
-            player_facing_ = re.facing;
-            player_team_ = re.team;
-            player_attack_ = pe.attack;
-            player_defense_ = pe.defense;
-            player_attack_range_ = pe.attack_range;
-            player_vision_range_ = re.vision_range;
-            player_vision_arc_ = re.vision_arc;
+            player_cs_.hp = re.cs.hp;
+            player_cs_.max_hp = re.cs.max_hp;
+            player_cs_.alive = re.cs.alive;
+            player_cs_.team = re.cs.team;
+            player_cs_.attack = pe.attack;
+            player_cs_.defense = pe.defense;
+            player_cs_.attack_range = pe.attack_range;
             if (pe.has_survival)
                 player_survival_ = pe.survival;
         }
@@ -670,14 +666,14 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
         else {
             rp->kind = re.kind;
             rp->target_pos = re.target_pos;
-            rp->hp = re.hp;
-            rp->max_hp = re.max_hp;
-            rp->alive = re.alive;
-            rp->team = re.team;
-            rp->velocity = re.velocity;
+            rp->cs.hp = re.cs.hp;
+            rp->cs.max_hp = re.cs.max_hp;
+            rp->cs.alive = re.cs.alive;
+            rp->cs.team = re.cs.team;
+            rp->mov.velocity = re.mov.velocity;
             rp->facing = re.facing;
             rp->interactable = re.interactable;
-            set_visual_from_kind(*rp);
+            set_visual_from_kind(*rp, *resources_);
         }
     }
 }
@@ -692,9 +688,9 @@ void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int
     }
 
     if (target == player_id_) {
-        player_hp_ -= damage;
+        player_cs_.hp -= damage;
         if (killed)
-            player_alive_ = false;
+            player_cs_.alive = false;
     }
     else {
         auto *rp = find_entity(target);
@@ -702,17 +698,17 @@ void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int
             spdlog::warn("handle_combat_event: entity {} not found", target);
             return;
         }
-        rp->hp -= damage;
+        rp->cs.hp -= damage;
         if (killed)
-            rp->alive = false;
-        rp->anim_state.hurt_timer = 0.3f;
+            rp->cs.alive = false;
+        rp->visual.hurt_timer = 0.3f;
     }
 
     // Trigger attack animation on attacker
     if (attacker_id != 0) {
         auto *atk = find_entity(attacker_id);
         if (atk)
-            atk->anim_state.attack_timer = 0.3f;
+            atk->visual.attack_timer = 0.3f;
     }
 
     combat_events_.push_back({attacker_id, defender_id, damage, killed});
@@ -740,6 +736,8 @@ void Client::interpolate_entities(float dt)
     player_pos_.y += (player_target_pos_.y - player_pos_.y) * t;
 
     for (auto &e : remote_entities_) {
+        if (e.kind == EntityKind::structure)
+            continue;
         e.position.x += (e.target_pos.x - e.position.x) * t;
         e.position.y += (e.target_pos.y - e.position.y) * t;
     }
@@ -790,8 +788,10 @@ awaitable<bool> Client::authenticate_transport(std::shared_ptr<Session> t)
         spdlog::debug("Client: sending auth: payload: {}", auth_payload());
         co_await t->write({ClientMsgType::auth, auth_payload()});
         auto res = co_await t->read();
-        spdlog::debug("Client: auth result: type: {}, payload: {}", static_cast<ServerMsgType>(res.type), res.payload);
-        co_return res.type == static_cast<std::uint32_t>(ServerMsgType::auth) &&res.payload == auth_payload();
+        spdlog::debug("Client: auth result: type: {}, payload: {}",
+                      static_cast<ServerMsgType>(res.type), res.payload);
+        co_return res.type == static_cast<std::uint32_t>(ServerMsgType::auth) &&
+            res.payload == auth_payload();
     }
     catch (...) {
         co_return false;
