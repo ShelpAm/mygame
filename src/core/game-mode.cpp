@@ -29,6 +29,7 @@
 #include <boost/json.hpp>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <spdlog/spdlog.h>
 #include <string_view>
@@ -536,31 +537,43 @@ void GameMode::handle_interaction(EntityId player)
     auto const *pp = world_.entity(player).try_get<Transform>();
     assert(pp);
     auto eid = find_nearest_interactable(player, pp->world_pos);
+
+    // If no NPC or entity found by distance, check tiles adjacent to the player
+    // for a building (player can't reach the building collider, so proximity
+    // search to the building entity center never works).
+    if (eid == invalid_entity && map_data_) {
+        Vec2i player_tile = world_to_tile(pp->world_pos);
+        float best_dist = std::numeric_limits<float>::max();
+        auto check_tile = [&](int tx, int ty) {
+            if (!map_data_->in_bounds(tx, ty))
+                return;
+            int bg = map_data_->tile(tx, ty).building_group;
+            if (bg == 0)
+                return;
+            world_.query<BuildingData>().each(
+                [&](flecs::entity e, BuildingData &bd) {
+                    if (bd.group_id != bg)
+                        return;
+                    Vec2f dpos = pp->world_pos - e.get<Transform>().world_pos;
+                    float dist = dpos.x * dpos.x + dpos.y * dpos.y;
+                    if (dist < best_dist) {
+                        best_dist = dist;
+                        eid = e.id();
+                    }
+                });
+        };
+        // Facing direction tile (most precise)
+        Vec2i face_tile = world_to_tile(pp->world_pos + pp->facing * (tile_size * 1.2F));
+        check_tile(face_tile.x, face_tile.y);
+        // 4 cardinal tiles as fallback
+        Vec2i const dirs[] = {{0, -1}, {0, 1}, {-1, 0}, {1, 0}};
+        for (auto const &d : dirs)
+            check_tile(player_tile.x + d.x, player_tile.y + d.y);
+    }
+
     if (eid == invalid_entity) {
         spdlog::debug("No interactable NPC near player {} at ({}, {})", player, pp->world_pos.x,
                       pp->world_pos.y);
-        // Check for town services if player is in a town
-        auto town_it = current_town_for_player_.find(player);
-        if (town_it != current_town_for_player_.end() && location_defs_) {
-            auto const *loc = find_location(*location_defs_, town_it->second);
-            if (loc) {
-                dlg.active = true;
-                dlg.npc_entity = invalid_entity;
-                dlg.npc_id = "__town__";
-                dlg.npc_name = loc->display_name_en;
-                dlg.history.clear();
-                dlg.available_topics.clear();
-                dlg.available_actions = {"__inn__", "__market__", "__temple__", "__blacksmith__"};
-                // Tell the client this is a town service dialogue
-                DialogueLine line;
-                line.speaker = DialogueLine::npc;
-                line.use_raw = true;
-                line.raw_text = "Welcome to " + loc->display_name_en + ". How can I help you?";
-                line.npc_name = loc->display_name_en;
-                dlg.history.push_back(std::move(line));
-                return;
-            }
-        }
         return;
     }
 
@@ -675,14 +688,14 @@ EntityId GameMode::find_nearest_interactable(EntityId player, Vec2f player_pos)
     EntityId nearest = invalid_entity;
     float nearestDist = 80.f;
     world_.query<Transform, Interactable>().each(
-        [&](flecs::entity e, Transform &pos, Interactable &) {
+        [&](flecs::entity e, Transform &pos, Interactable &inter) {
             if (e.id() == player)
                 return;
             auto const *cs = e.try_get<CombatStats>();
             if (cs && !cs->alive)
                 return;
             float d = std::hypot(pos.world_pos.x - player_pos.x, pos.world_pos.y - player_pos.y);
-            if (d < nearestDist) {
+            if (d < inter.interact_radius && d < nearestDist) {
                 nearestDist = d;
                 nearest = e.id();
             }

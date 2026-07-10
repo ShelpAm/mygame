@@ -83,6 +83,7 @@ float float_or_int_of(rfl::Generic const &g, std::string const &key, float fallb
         if (auto *i = std::get_if<int64_t>(&v.get()))
             return static_cast<float>(*i);
     }
+    spdlog::warn("float_or_int_of: key '{}' is not a number, using default {}", key, fallback);
     return fallback;
 }
 
@@ -121,10 +122,10 @@ static std::optional<Collider> collider_of(Obj const &obj, std::string const &ke
     if (!sub)
         return std::nullopt;
 
-    auto min_it = std::find_if(sub->begin(), sub->end(),
-                               [](auto const &p) { return p.first == "min"; });
-    auto max_it = std::find_if(sub->begin(), sub->end(),
-                               [](auto const &p) { return p.first == "max"; });
+    auto min_it =
+        std::find_if(sub->begin(), sub->end(), [](auto const &p) { return p.first == "min"; });
+    auto max_it =
+        std::find_if(sub->begin(), sub->end(), [](auto const &p) { return p.first == "max"; });
     if (min_it == sub->end() || max_it == sub->end())
         return std::nullopt;
 
@@ -360,15 +361,12 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
     auto &root_b = std::get<Obj>(entities_cfg_.get());
     auto &bldg_cfg = std::get<Obj>(root_b.at("building").get());
 
-    static constexpr BuildingData::Type building_types[] = {
-        BuildingData::Type::inn,        BuildingData::Type::market,  BuildingData::Type::temple,
-        BuildingData::Type::blacksmith, BuildingData::Type::generic,
+    static constexpr BuildingData::Type special_types[] = {
+        BuildingData::Type::inn,
+        BuildingData::Type::market,
+        BuildingData::Type::temple,
+        BuildingData::Type::blacksmith,
     };
-    std::vector<BuildingData::Type> type_pool;
-    for (int i = 0; i < 3; ++i)
-        for (auto t : building_types)
-            type_pool.push_back(t);
-    size_t type_idx = 0;
 
     for (auto const &loc : loc_defs) {
         Vec2i center = loc.tile_center;
@@ -394,17 +392,25 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
                 gd.sum_y += static_cast<float>(tile.y);
             }
 
+        // Assign types: one of each special first, then generic for the rest.
+        std::vector<BuildingData::Type> assignments;
+        assignments.reserve(groups.size());
+        size_t si = 0;
+        for (size_t gi = 0; gi < groups.size(); ++gi)
+            assignments.push_back(gi < std::size(special_types) ? special_types[gi]
+                                                                : BuildingData::Type::generic);
+
+        size_t ai = 0;
         for (auto const &[g, gd] : groups) {
             float avg_x = gd.sum_x / static_cast<float>(gd.count);
             float avg_y = gd.sum_y / static_cast<float>(gd.count);
             Vec2f world_pos{(avg_x + 0.5F) * tile_size, (avg_y + 0.5F) * tile_size};
 
-            auto btype = type_pool[type_idx % type_pool.size()];
-            ++type_idx;
+            auto btype = assignments[ai++];
 
             auto e = world_.entity()
                          .set(Transform{.world_pos = world_pos})
-                         .set(BuildingData{btype, loc.id, ""})
+                         .set(BuildingData{btype, loc.id, "", g})
                          .set(Interactable{.interact_radius = 48.F, .can_talk = false});
             if (has_key(bldg_cfg, "combat"))
                 apply_combat(e, obj_of(bldg_cfg, "combat"), Team::neutral);

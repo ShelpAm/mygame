@@ -149,7 +149,6 @@ void RenderSystem::render_town(Client const &client) const
                     break;
                 default:
                     col = {.r = 130, .g = 90, .b = 50, .a = 240};
-                    label = "House";
                     break;
                 }
                 SDL_SetRenderDrawColor(renderer_, col.r, col.g, col.b, col.a);

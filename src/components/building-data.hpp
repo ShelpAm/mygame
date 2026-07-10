@@ -7,4 +7,5 @@ struct BuildingData {
     Type type = Type::generic;
     std::string town_id;     // which town this belongs to, e.g. "thornhaven"
     std::string display_name; // e.g. "The Rusty Nail Inn"
+    int group_id = 0;        // matches TileData::building_group on the tilemap
 };
