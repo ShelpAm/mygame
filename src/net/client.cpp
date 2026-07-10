@@ -271,10 +271,16 @@ void Client::detach_transport(detach_token, Session *s)
 
     player_id_ = invalid_entity;
     server_player_id_ = invalid_entity;
+    server_to_local_.clear();
     combat_events_.clear();
     chat_history_.clear();
-    // Clear client ECS world
-    world_.defer([this] { world_.each([](flecs::entity e) { e.destruct(); }); });
+    // Clear client ECS world — only user entities (those with Transform).
+    // Delete one at a time without defer to avoid batched reparenting crash.
+    std::vector<flecs::entity_t> to_delete;
+    world_.each<Transform>(
+        [&to_delete](flecs::entity e, Transform &) { to_delete.push_back(e); });
+    for (auto id : to_delete)
+        world_.entity(id).destruct();
 }
 
 // ── Accessors reading from ECS player entity ────────────────────────────────
@@ -436,9 +442,8 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
 
     if (st == ServerMsgType::return_pid) {
         assert(msg.payload.size() >= 9);
-        memcpy(&player_id_, msg.payload.data(), 8);
-        server_player_id_ = player_id_;
-        spdlog::info("Client: Returned player ID from server: {}", player_id_);
+        memcpy(&server_player_id_, msg.payload.data(), 8);
+        spdlog::info("Client: Returned player ID from server: {}", server_player_id_);
         return;
     }
     if (st == ServerMsgType::chat) {
@@ -463,10 +468,10 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
         if (msg.payload.size() >= 8) {
             EntityId server_id{};
             memcpy(&server_id, msg.payload.data(), 8);
-            world_.query<ServerEntity>().each([&](flecs::entity e, ServerEntity const &se) {
-                if (se.value == server_id)
-                    e.destruct();
-            });
+            if (auto it = server_to_local_.find(server_id); it != server_to_local_.end()) {
+                world_.entity(it->second).destruct();
+                server_to_local_.erase(it);
+            }
         }
         break;
     case ServerMsgType::kicked: {
@@ -539,25 +544,23 @@ struct PlayerExtras {
     bool has_survival = false;
 };
 
-PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const &resources)
+PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const &resources,
+                          std::unordered_map<EntityId, flecs::entity_t> &s2l)
 {
     PlayerExtras pe{};
 
     EntityId id = r.read<uint64_t>();
     uint16_t mask = r.read<uint16_t>();
 
-    // Create a fresh client entity and remember the server's entity ID on it.
-    // We do NOT try to reuse the server's flecs entity_t value because the two
-    // worlds have independent entity ID spaces and the same numeric ID may
-    // refer to a dead generation on the client side.
-    // Check if we already have a local entity for this server ID
+    // Look up existing local entity, or create a new one.
+    // Map enables O(1) lookup instead of an ECS query scan.
     EntityId local_id = invalid_entity;
-    w.query<ServerEntity>().each([&](flecs::entity ee, ServerEntity const &se) {
-        if (se.value == id) local_id = ee.id();
-    });
+    if (auto it = s2l.find(id); it != s2l.end())
+        local_id = it->second;
     auto e = local_id != invalid_entity
                  ? w.entity(local_id)
                  : w.entity().set(ServerEntity{id});
+    s2l[id] = e;
 
     // Track values across mask bits so we can initialise Animation below.
     uint8_t kind = 0;
@@ -695,17 +698,12 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
 
     while (!r.done()) {
         if (r.remaining() < 10) break;
-        parse_entity(r, world_, *resources_);
+        parse_entity(r, world_, *resources_, server_to_local_);
     }
 
-    // Resolve the player's server ID to the local entity ID.
-    // (player_id_ was set from the return_pid message to the server's entity_t)
-    EntityId server_pid = player_id_;
-    world_.query<ServerEntity>().each([&](flecs::entity e, ServerEntity const &se) {
-        if (se.value == server_pid) {
-            player_id_ = e.id();
-        }
-    });
+    // Resolve the local player entity from the server→local map.
+    if (auto it = server_to_local_.find(server_player_id_); it != server_to_local_.end())
+        player_id_ = it->second;
 }
 
 void Client::apply_sync_delta(std::vector<uint8_t> const &data)
@@ -721,7 +719,7 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
 
     while (!r.done()) {
         if (r.remaining() < 10) break;
-        parse_entity(r, world_, *resources_);
+        parse_entity(r, world_, *resources_, server_to_local_);
     }
 }
 
@@ -731,15 +729,11 @@ void Client::handle_entity_update(std::vector<uint8_t> const &payload)
     auto u = parse_entity_update(payload);
 
     // Find local entity by server ID
-    EntityId local_id = invalid_entity;
-    world_.query<ServerEntity>().each([&](flecs::entity e, ServerEntity const &se) {
-        if (se.value == u.id)
-            local_id = e.id();
-    });
-    if (local_id == invalid_entity)
+    auto it = server_to_local_.find(u.id);
+    if (it == server_to_local_.end())
         return;
 
-    auto e = world_.entity(local_id);
+    auto e = world_.entity(it->second);
     e.set(Transform{Vec2f{u.x, u.y}});
     CombatStats cs;
     cs.hp = u.hp;
@@ -761,15 +755,10 @@ void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int
         return;
     }
 
-    // Resolve server entity IDs to local IDs (non-player entities)
+    // Resolve server entity IDs to local IDs
     auto to_local = [&](EntityId server_id) -> EntityId {
-        if (server_id == player_id_) return server_id; // already local
-        EntityId result = invalid_entity;
-        world_.query<ServerEntity>().each([&](flecs::entity e, ServerEntity const &se) {
-            if (se.value == server_id)
-                result = e.id();
-        });
-        return result;
+        auto it = server_to_local_.find(server_id);
+        return it != server_to_local_.end() ? it->second : invalid_entity;
     };
     target = to_local(target);
     EntityId local_attacker = attacker_id != 0 ? to_local(attacker_id) : 0;

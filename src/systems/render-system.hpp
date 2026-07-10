@@ -6,6 +6,7 @@
 #include "core/math.hpp"
 #include "world/location-store.hpp"
 #include <SDL3/SDL.h>
+#include <array>
 #include <vector>
 class ResourceManager;
 class CameraSystem;
@@ -49,6 +50,17 @@ class RenderSystem {
     MapData const *map_data_ = nullptr;
     std::vector<LocationDefinition> const *location_defs_ = nullptr;
     bool debug_mode_ = false;
+
+    // Pre-resolved tile sprites. Index = auto-tiling 4-bit value (0–15).
+    // Populated once from the "terrain_tiles" clip + sprites.yaml.
+    struct CachedTile {
+        std::string texture_name;
+        Vec2f clip_offset;
+        Vec2f clip_size;
+    };
+    std::array<CachedTile, 16> tile_cache_{};
+    bool tile_cache_ready_ = false;
+    void init_tile_cache();
 
     void render_tile_map() const;
     void render_town(Client const &client) const;

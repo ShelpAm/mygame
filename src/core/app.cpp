@@ -215,10 +215,7 @@ void App::load_textures()
 
     // ── groups: individual frame PNGs ─────────────────────────────────────
     // Each {prefix}_{i}.png is loaded from the group's path.
-    // Frame counts come from clips.yaml.
-    auto clips = parse("assets/data/clips.yaml");
-    if (!clips) return;
-
+    // Frame counts come from the textures list within each group entry.
     for (auto const &[gk, gv] : *root) {
         if (gk != "groups") continue;
         for (auto const &[grp_name, grp_val] : std::get<Obj>(gv.get())) {
@@ -226,25 +223,17 @@ void App::load_textures()
             auto path = get_str(g, "path");
             if (!path) continue;
 
-            // Match group name in clips.yaml to get frame counts
-            for (auto const &[ck, cv] : *clips) {
-                if (ck != "groups") continue;
-                for (auto const &[cn, cval] : std::get<Obj>(cv.get())) {
-                    if (cn != grp_name) continue;
-                    auto const &grp = std::get<Obj>(cval.get());
-                    for (auto const &[ak, av] : grp) {
-                        if (ak != "anims") continue;
-                        for (auto const &a_val : std::get<std::vector<Generic>>(av.get())) {
-                            auto const &a = std::get<Obj>(a_val.get());
-                            auto prefix = get_str(a, "prefix");
-                            auto frames = get_int(a, "frames");
-                            if (!prefix || !frames) continue;
-                            for (int i = 0; i < *frames; ++i) {
-                                auto sprite = *prefix + "_" + std::to_string(i);
-                                resources_->load_texture(renderer_, sprite,
-                                    *path + "/" + sprite + ".png");
-                            }
-                        }
+            for (auto const &[tk, tv] : g) {
+                if (tk != "textures") continue;
+                for (auto const &t_val : std::get<std::vector<Generic>>(tv.get())) {
+                    auto const &t = std::get<Obj>(t_val.get());
+                    auto prefix = get_str(t, "prefix");
+                    auto frames = get_int(t, "frames");
+                    if (!prefix || !frames) continue;
+                    for (int i = 0; i < *frames; ++i) {
+                        auto sprite = *prefix + "_" + std::to_string(i);
+                        resources_->load_texture(renderer_, sprite,
+                            *path + "/" + sprite + ".png");
                     }
                 }
             }
@@ -273,20 +262,6 @@ void App::load_textures()
                         *path + "/" + filename, *fw);
                 }
             }
-        }
-    }
-
-    // ── tiles: numbered textures from a directory ─────────────────────────
-    for (auto const &[tk, tv] : *root) {
-        if (tk != "tiles") continue;
-        auto const &t = std::get<Obj>(tv.get());
-        auto path = get_str(t, "path");
-        auto count = get_int(t, "count").value_or(1);
-        auto prefix = get_str(t, "prefix").value_or("tile_");
-        if (!path) continue;
-        for (int i = 0; i < count; ++i) {
-            resources_->load_texture(renderer_, prefix + std::to_string(i),
-                *path + "/" + std::to_string(i) + ".png");
         }
     }
 

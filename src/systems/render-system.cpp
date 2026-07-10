@@ -24,6 +24,7 @@ RenderSystem::RenderSystem(SDL_Window *window, SDL_Renderer *renderer, ResourceM
                            CameraSystem *camera, Font *font)
     : window_(window), renderer_(renderer), resources_(resources), camera_(camera), font_(font)
 {
+    init_tile_cache();
 }
 
 void RenderSystem::render(Client &client)
@@ -35,6 +36,25 @@ void RenderSystem::render(Client &client)
     render_projectiles(client);
     render_damage_numbers(client, client.combat_events());
     render_fog_overlay(client.player_visibility());
+}
+
+void RenderSystem::init_tile_cache()
+{
+    auto const *clip = resources_->clip("terrain_tiles");
+    if (!clip) {
+        spdlog::warn("RenderSystem: terrain_tiles clip not found");
+        return;
+    }
+    int const count = std::min(static_cast<int>(clip->frame_sprites.size()), 16);
+    for (int i = 0; i < count; ++i) {
+        auto const *def = resources_->resolve_sprite(clip->frame_sprites[i]);
+        if (def) {
+            tile_cache_[i] = {def->texture,
+                              {def->clip[0], def->clip[1]},
+                              {def->clip[2], def->clip[3]}};
+        }
+    }
+    tile_cache_ready_ = true;
 }
 
 void RenderSystem::render_tile_map() const
@@ -59,8 +79,11 @@ void RenderSystem::render_tile_map() const
                 if (map_data_->tile(nx, ny).type != TileType::water)
                     idx += 1 << i;
             }
-            draw_sprite(lu, tile_size / 128, "tile_" + std::to_string(idx), max_alpha, false,
-                        {0.5F, 0.5F});
+            if (tile_cache_ready_) {
+                auto const &cached = tile_cache_[idx];
+                draw_sprite(lu, tile_size / 128, cached.texture_name, max_alpha, false,
+                            {0.5F, 0.5F}, cached.clip_offset, cached.clip_size);
+            }
         }
     }
 

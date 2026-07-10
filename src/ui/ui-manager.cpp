@@ -1,12 +1,12 @@
 #include "ui/ui-manager.hpp"
-#include "core/locale-manager.hpp"
 #include "components/combat-stats.hpp"
+#include "components/position.hpp"
 #include "components/soldier-ai.hpp"
+#include "core/locale-manager.hpp"
 #include "net/client.hpp"
 #include "net/session.hpp"
 #include "systems/formation.hpp"
 #include "systems/render-system.hpp"
-#include "components/position.hpp"
 #include "world/world-state.hpp"
 #include <algorithm>
 #include <cmath>
@@ -19,8 +19,8 @@
 #include <spdlog/spdlog.h>
 #include <unordered_set>
 
-UIManager::UIManager(RenderSystem *rs, Font *hud_font, Client &client,
-                     LocaleManager &locale, UIControl control)
+UIManager::UIManager(RenderSystem *rs, Font *hud_font, Client &client, LocaleManager &locale,
+                     UIControl control)
     : render_system_(rs), hud_font_(hud_font), client_(client), locale_(locale),
       ctrl_(std::move(control))
 {
@@ -110,9 +110,9 @@ void UIManager::render(WorldState *world_state)
             ImGui::Begin(("##toast_" + n.locale_key).c_str(), nullptr,
                          ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                              ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground);
-            ImGui::TextColored(color, "🏛 %s",
-                               std::format("{} {}", locale_.get("town.discovered_prefix"),
-                                           town_name).c_str());
+            ImGui::TextColored(
+                color, "🏛 %s",
+                std::format("{} {}", locale_.get("town.discovered_prefix"), town_name).c_str());
             // Description
             std::string desc_key = n.locale_key + ".desc";
             std::string desc = locale_.get(desc_key);
@@ -155,7 +155,7 @@ void UIManager::render(WorldState *world_state)
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), render_system_->renderer());
 
     // HUD text rendered with game font on top of everything
-    if (client_.player_id() != invalid_entity && world_state)
+    if (client_.connected() && world_state)
         render_hud_text(*world_state);
 }
 
@@ -180,8 +180,7 @@ void UIManager::render_hud_window([[maybe_unused]] WorldState const &world_state
         ImGui::Begin("DeathOverlay", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                          ImGuiWindowFlags_NoInputs);
-        ImGui::TextColored(ImVec4(1.f, 0.1f, 0.1f, 1.f), "%s",
-                           locale_.get("resp.dead").c_str());
+        ImGui::TextColored(ImVec4(1.f, 0.1f, 0.1f, 1.f), "%s", locale_.get("resp.dead").c_str());
         ImGui::TextDisabled("%s", locale_.get("resp.dead_hint").c_str());
         ImGui::End();
     }
@@ -211,8 +210,7 @@ void UIManager::render_hud_text(WorldState const &world_state)
     if (!town_id.empty()) {
         y += line_h;
         std::string town_name = locale_.get("location." + town_id);
-        hud_font_->draw({x, y}, SDL_Color{.r = 255, .g = 220, .b = 140, .a = 255},
-                        town_name);
+        hud_font_->draw({x, y}, SDL_Color{.r = 255, .g = 220, .b = 140, .a = 255}, town_name);
     }
 
     // Line 2: Day | Season | Time
@@ -222,8 +220,8 @@ void UIManager::render_hud_text(WorldState const &world_state)
     hud_font_->draw({x, y}, SDL_Color{.r = 200, .g = 200, .b = 200, .a = 230},
                     std::format("{}: {} | {}: {} | {}: {:.0f}", locale_.get("hud.day"),
                                 world_state.day(), locale_.get("hud.season"),
-                                locale_.get(seasonKeys[world_state.season()]), locale_.get("hud.time"),
-                                world_state.time_of_day()));
+                                locale_.get(seasonKeys[world_state.season()]),
+                                locale_.get("hud.time"), world_state.time_of_day()));
 
     // Line 3: Keys hint
     y += line_h;
@@ -237,8 +235,9 @@ void UIManager::render_hud_text(WorldState const &world_state)
     assert(cs != nullptr);
     hud_font_->draw({x, y}, SDL_Color{.r = 200, .g = 200, .b = 200, .a = 230},
                     std::format("{}: {}/{} | {}: {:.0f} | {}: {:.0f} | {}: {:.0f}",
-                                locale_.get("hud.hp"), cs->hp, cs->max_hp, locale_.get("hud.food"), sv.food,
-                                locale_.get("hud.water"), sv.water, locale_.get("hud.energy"), sv.energy));
+                                locale_.get("hud.hp"), cs->hp, cs->max_hp, locale_.get("hud.food"),
+                                sv.food, locale_.get("hud.water"), sv.water,
+                                locale_.get("hud.energy"), sv.energy));
 
     // Soldier info (lines 5+)
     auto my_team = client_.player_team();
@@ -250,20 +249,20 @@ void UIManager::render_hud_text(WorldState const &world_state)
     int ranged_count = 0;
     client_.world().query<SoldierAI, CombatStats>().each(
         [&](flecs::entity, SoldierAI const &ai, CombatStats const &cs) {
-        if (cs.alive && cs.team == my_team) {
-            ++soldier_count;
-            if (ai.stance == SoldierStance::defensive)
-                ++follow_count;
-            else if (ai.stance == SoldierStance::offensive)
-                ++guard_count;
-            else if (ai.stance == SoldierStance::passive)
-                ++patrol_count;
-            if (ai.role == SoldierRole::melee)
-                ++melee_count;
-            else if (ai.role == SoldierRole::ranged)
-                ++ranged_count;
-        }
-    });
+            if (cs.alive && cs.team == my_team) {
+                ++soldier_count;
+                if (ai.stance == SoldierStance::defensive)
+                    ++follow_count;
+                else if (ai.stance == SoldierStance::offensive)
+                    ++guard_count;
+                else if (ai.stance == SoldierStance::passive)
+                    ++patrol_count;
+                if (ai.role == SoldierRole::melee)
+                    ++melee_count;
+                else if (ai.role == SoldierRole::ranged)
+                    ++ranged_count;
+            }
+        });
     if (soldier_count > 0) {
         y += line_h;
         auto sel = client_.selected_roles();
@@ -382,9 +381,8 @@ void UIManager::render_dialogue()
     }
 
     // Town service actions (__inn__ etc.)
-    bool has_town_services = std::ranges::any_of(ds.available_actions, [](auto const &a) {
-        return a.starts_with("__");
-    });
+    bool has_town_services = std::ranges::any_of(ds.available_actions,
+                                                 [](auto const &a) { return a.starts_with("__"); });
     if (has_town_services) {
         ImGui::Separator();
         for (auto const &action : ds.available_actions) {
@@ -565,26 +563,24 @@ void UIManager::render_map()
 
     // Background
     ImDrawList *dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(canvas_pos, ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
+    dl->AddRectFilled(canvas_pos,
+                      ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
                       IM_COL32(20, 18, 15, 220));
 
     // Draw town markers
     auto const &discovered = client_.discovered_towns();
     for (auto const &ld : *location_defs_) {
-        bool is_discovered = std::ranges::any_of(discovered, [&](auto const &d) {
-            return d.loc_id == ld.id;
-        });
+        bool is_discovered =
+            std::ranges::any_of(discovered, [&](auto const &d) { return d.loc_id == ld.id; });
 
         // Map world coords to canvas coords
         float nx = (ld.world_pos.x - min_x + 100.f) / range_x;
         float ny = (ld.world_pos.y - min_y + 100.f) / range_y;
-        ImVec2 pos = ImVec2(canvas_pos.x + nx * canvas_size.x,
-                            canvas_pos.y + ny * canvas_size.y);
+        ImVec2 pos = ImVec2(canvas_pos.x + nx * canvas_size.x, canvas_pos.y + ny * canvas_size.y);
 
         if (is_discovered) {
             dl->AddCircleFilled(pos, 5, IM_COL32(255, 220, 140, 255));
-            dl->AddText(ImVec2(pos.x + 8, pos.y - 5),
-                        IM_COL32(200, 190, 170, 255),
+            dl->AddText(ImVec2(pos.x + 8, pos.y - 5), IM_COL32(200, 190, 170, 255),
                         locale_.get(ld.display_name).c_str());
         }
         else {
@@ -677,8 +673,8 @@ void UIManager::render_local()
 
 void UIManager::render_client()
 {
-    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s Host: %s", locale_.get("mp.connected").c_str(),
-                       client_.session_remote_info().c_str());
+    ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s Host: %s",
+                       locale_.get("mp.connected").c_str(), client_.session_remote_info().c_str());
     ImGui::Text("%s: %zu", locale_.get("mp.remote_entities").c_str(),
                 client_.world().count<Transform>());
     ImGui::Separator();
@@ -698,7 +694,8 @@ void UIManager::render_client_list()
         return;
     }
 
-    if (ImGui::CollapsingHeader(locale_.get("mp.clients").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader(locale_.get("mp.clients").c_str(),
+                                ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent();
 
         // 表格方式显示
@@ -708,10 +705,10 @@ void UIManager::render_client_list()
                                     60.0f);
             ImGui::TableSetupColumn(locale_.get("mp.address").c_str(),
                                     ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn(locale_.get("mp.status").c_str(), ImGuiTableColumnFlags_WidthFixed,
-                                    80.0f);
-            ImGui::TableSetupColumn(locale_.get("mp.kick").c_str(), ImGuiTableColumnFlags_WidthFixed,
-                                    50.0f);
+            ImGui::TableSetupColumn(locale_.get("mp.status").c_str(),
+                                    ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableSetupColumn(locale_.get("mp.kick").c_str(),
+                                    ImGuiTableColumnFlags_WidthFixed, 50.0f);
             ImGui::TableHeadersRow();
 
             int idx = 1;

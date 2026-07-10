@@ -22,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class ResourceManager;
@@ -166,6 +167,10 @@ class Client {
     /// Used when constructing outbound messages so the server can identify
     /// which entity to act on.  player_id_ holds the local ECS entity ID.
     EntityId server_player_id_ = invalid_entity;
+
+    /// Server entity ID → local ECS entity ID mapping.
+    /// Maintained on every entity create/destroy so lookups are O(1).
+    std::unordered_map<EntityId, flecs::entity_t> server_to_local_;
 
     // Network diagnostics
     std::chrono::steady_clock::time_point last_sync_recv_tick_{};
