@@ -34,25 +34,27 @@ void register_default_clips(ResourceManager &resources)
     using Generic = rfl::Generic;
     using Obj = Generic::Object;
 
-    auto path = std::filesystem::path("assets/data/textures.yaml");
-    if (!std::filesystem::exists(path)) {
-        spdlog::error("register_default_clips: textures.yaml not found");
+    auto read_whole = [](std::string const &p) {
+        std::ifstream f(p);
+        return std::string{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+    };
+
+    // ── Read multi-frame group clips from clips.yaml ──────────────────────
+    auto clip_path = std::filesystem::path("assets/data/clips.yaml");
+    if (!std::filesystem::exists(clip_path)) {
+        spdlog::error("register_default_clips: clips.yaml not found");
         return;
     }
 
-    auto content = [](std::string const &p) {
-        std::ifstream f(p);
-        return std::string{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
-    }(path.string());
-
+    auto content = read_whole(clip_path.string());
     if (content.empty()) {
-        spdlog::error("register_default_clips: textures.yaml is empty or not found");
+        spdlog::error("register_default_clips: clips.yaml is empty");
         return;
     }
 
     auto result = rfl::yaml::read<Generic>(content);
     if (!result) {
-        spdlog::error("register_default_clips: failed to parse textures.yaml: {}",
+        spdlog::error("register_default_clips: failed to parse clips.yaml: {}",
                       result.error().what());
         return;
     }
@@ -74,7 +76,7 @@ void register_default_clips(ResourceManager &resources)
                     return static_cast<int>(*i);
         return std::nullopt;
     };
-    auto get_dur = [](Obj const &o, std::string const &key) -> std::optional<float> {
+    auto get_float = [](Obj const &o, std::string const &key) -> std::optional<float> {
         for (auto const &[k, v] : o)
             if (k == key) {
                 if (auto *d = std::get_if<double>(&v.get()))
@@ -85,13 +87,12 @@ void register_default_clips(ResourceManager &resources)
         return std::nullopt;
     };
 
-    // ── groups ──
+    // ── groups: multi-frame clips registered as "{group}_{clip_name}" ─────
     for (auto const &[gk, gv] : root_obj) {
         if (gk != "groups")
             continue;
         for (auto const &[grp_name, grp_val] : std::get<Obj>(gv.get())) {
             auto const &grp = std::get<Obj>(grp_val.get());
-
             std::vector<AnimationClip> clips;
             for (auto const &[ak, av] : grp) {
                 if (ak != "anims")
@@ -101,7 +102,7 @@ void register_default_clips(ResourceManager &resources)
                     auto name = get_str(a, "name");
                     auto prefix = get_str(a, "prefix");
                     auto frames = get_int(a, "frames");
-                    auto dur = get_dur(a, "dur");
+                    auto dur = get_float(a, "dur");
                     if (!name || !prefix || !frames || !dur)
                         continue;
                     clips.emplace_back();
@@ -114,14 +115,39 @@ void register_default_clips(ResourceManager &resources)
         }
     }
 
-    // 1-frame static clip for structures and other non-animated entities
-    resources.register_clip("structure_idle", {"idle", {"tile_0"}, {0.f}, false});
+    // ── singles: explicit 1-frame clips registered by their key ──────────
+    for (auto const &[sk, sv] : root_obj) {
+        if (sk != "singles")
+            continue;
+        for (auto const &[key, val] : std::get<Obj>(sv.get())) {
+            auto const &s = std::get<Obj>(val.get());
+            auto name = get_str(s, "name").value_or("idle");
 
-    // 1-frame clips per building type so they resolve to the correct sprite
-    resources.register_clip("inn_idle", {"idle", {"inn"}, {0.f}, false});
-    resources.register_clip("market_idle", {"idle", {"market"}, {0.f}, false});
-    resources.register_clip("temple_idle", {"idle", {"temple"}, {0.f}, false});
-    resources.register_clip("blacksmith_idle", {"idle", {"blacksmith"}, {0.f}, false});
+            // Extract sprites array
+            auto sit = std::find_if(s.begin(), s.end(),
+                [](auto const &p) { return p.first == "sprites"; });
+            if (sit == s.end()) continue;
+            auto const &spr_arr = std::get<std::vector<Generic>>(sit->second.get());
+
+            // Extract durations array
+            auto dit = std::find_if(s.begin(), s.end(),
+                [](auto const &p) { return p.first == "durations"; });
+            if (dit == s.end()) continue;
+            auto const &dur_arr = std::get<std::vector<Generic>>(dit->second.get());
+
+            std::vector<std::string> frame_spr;
+            std::vector<float> frame_dur;
+            for (auto const &g : spr_arr)
+                frame_spr.push_back(std::get<std::string>(g.get()));
+            for (auto const &g : dur_arr) {
+                if (auto *d = std::get_if<double>(&g.get()))
+                    frame_dur.push_back(static_cast<float>(*d));
+                else if (auto *i = std::get_if<int64_t>(&g.get()))
+                    frame_dur.push_back(static_cast<float>(*i));
+            }
+            resources.register_clip(key, {name, std::move(frame_spr), std::move(frame_dur), false});
+        }
+    }
 }
 
 // ── Runtime animation logic ─────────────────────────────────────────────
