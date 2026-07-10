@@ -1,11 +1,12 @@
 #include "ui/ui-manager.hpp"
 #include "core/locale-manager.hpp"
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/soldier-ai.hpp"
+#include "components/combat-stats.hpp"
+#include "components/soldier-ai.hpp"
 #include "net/client.hpp"
 #include "net/session.hpp"
 #include "systems/formation.hpp"
 #include "systems/render-system.hpp"
+#include "components/position.hpp"
 #include "world/world-state.hpp"
 #include <algorithm>
 #include <cmath>
@@ -247,21 +248,22 @@ void UIManager::render_hud_text(WorldState const &world_state)
     int patrol_count = 0;
     int melee_count = 0;
     int ranged_count = 0;
-    for (auto &re : client_.remote_entities()) {
-        if (re.kind == EntityKind::soldier && re.cs.alive && re.cs.team == my_team) {
+    client_.world().query<SoldierAI, CombatStats>().each(
+        [&](flecs::entity, SoldierAI const &ai, CombatStats const &cs) {
+        if (cs.alive && cs.team == my_team) {
             ++soldier_count;
-            if (re.soldier_stance == SoldierStance::defensive)
+            if (ai.stance == SoldierStance::defensive)
                 ++follow_count;
-            else if (re.soldier_stance == SoldierStance::offensive)
+            else if (ai.stance == SoldierStance::offensive)
                 ++guard_count;
-            else if (re.soldier_stance == SoldierStance::passive)
+            else if (ai.stance == SoldierStance::passive)
                 ++patrol_count;
-            if (re.soldier_role == SoldierRole::melee)
+            if (ai.role == SoldierRole::melee)
                 ++melee_count;
-            else if (re.soldier_role == SoldierRole::ranged)
+            else if (ai.role == SoldierRole::ranged)
                 ++ranged_count;
         }
-    }
+    });
     if (soldier_count > 0) {
         y += line_h;
         auto sel = client_.selected_roles();
@@ -599,7 +601,7 @@ void UIManager::render_hosting()
     ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s", locale_.get("mp.hosting").c_str());
     ImGui::TextDisabled("%s", locale_.get("mp.hosting_hint").c_str());
     ImGui::Text("%s: %zu", locale_.get("mp.remote_entities").c_str(),
-                client_.remote_entities().size());
+                client_.world().count<Transform>());
     ImGui::Separator();
 
     if (ImGui::Button(locale_.get("mp.stop_hosting").c_str())) {
@@ -678,7 +680,7 @@ void UIManager::render_client()
     ImGui::TextColored(ImVec4(0.3f, 1.f, 0.3f, 1.f), "%s Host: %s", locale_.get("mp.connected").c_str(),
                        client_.session_remote_info().c_str());
     ImGui::Text("%s: %zu", locale_.get("mp.remote_entities").c_str(),
-                client_.remote_entities().size());
+                client_.world().count<Transform>());
     ImGui::Separator();
     render_chat();
     if (ImGui::Button(locale_.get("mp.disconnect").c_str())) {

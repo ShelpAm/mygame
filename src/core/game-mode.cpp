@@ -2,22 +2,22 @@
 #include "dialogue/dialogue-engine.hpp"
 #include "dialogue/relationship-table.hpp"
 #include "dialogue/topic-registry.hpp"
-#include "entities/components/building-data.hpp"
-#include "entities/components/collider.hpp"
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/defense-structure.hpp"
-#include "entities/components/interactable.hpp"
-#include "entities/components/movement.hpp"
-#include "entities/components/player.hpp"
-#include "entities/components/position.hpp"
-#include "entities/components/soldier-ai.hpp"
-#include "entities/components/vision.hpp"
+#include "components/building-data.hpp"
+#include "components/collider.hpp"
+#include "components/combat-stats.hpp"
+#include "components/defense-structure.hpp"
+#include "components/interactable.hpp"
+#include "components/movement.hpp"
+#include "components/player.hpp"
+#include "components/position.hpp"
+#include "components/soldier-ai.hpp"
+#include "components/vision.hpp"
 #include "factions/event-simulator.hpp"
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "knowledge/rumor-propagator.hpp"
 #include "net/server.hpp"
-#include "survival/condition-tracker.hpp"
+#include "components/survival-state.hpp"
 #include "systems/collision-system.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/combat-utils.hpp"
@@ -39,7 +39,7 @@ static std::string readFile(std::string const &path)
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
-GameMode::GameMode() = default;
+GameMode::GameMode() : factory_(world_) {}
 GameMode::~GameMode()
 {
     spdlog::info("GameMode: destructor called");
@@ -70,8 +70,8 @@ void GameMode::init_world()
 
     combat_.set_dirty_callback([this](EntityId eid) { mark_dirty(eid); });
 
-    spawn_building_entities();
-    spawn_town_npcs();
+    factory_.spawn_building_entities(*location_defs_, *map_data_);
+    factory_.spawn_town_npcs();
 }
 
 void GameMode::load_topics()
@@ -311,7 +311,7 @@ void GameMode::init_systems()
                              Vec2f pos = original;
 
                              // 1. Tile collision (hard push-out)
-                             pos = collision_system_->resolve_tile_collisions(pos, c.radius);
+                             pos = collision_system_->resolve_tile_collisions(pos, c);
 
                              // 2. Soft separation — skip structures (they don't move)
                              Vec2f separation_force = {0.F, 0.F};
@@ -319,22 +319,45 @@ void GameMode::init_systems()
                              bool const is_structure = e.has<BuildingData>() || e.has<DefenseStructure>();
 
                              if (!is_structure) {
+                                 Vec2f this_min = pos + c.min;
+                                 Vec2f this_max = pos + c.max;
                                  entity_query_.each(
                                      [&](flecs::entity other, Transform const &op, Collider const &oc) {
                                          if (other == e)
                                              return;
                                          if (other.has<BuildingData>() || other.has<DefenseStructure>())
                                              return;
-                                         float const dx = pos.x - op.world_pos.x;
-                                         float const dy = pos.y - op.world_pos.y;
-                                         float const dist = std::hypot(dx, dy);
-                                         float const min_dist = c.radius + oc.radius;
 
-                                         if (dist < min_dist && dist > 1e-5F) {
-                                             float force_factor = (min_dist - dist) / min_dist;
-                                             float weight = other.has<PlayerTag>() ? 15.F : 1.F;
-                                             separation_force.x += (dx / dist) * force_factor * weight;
-                                             separation_force.y += (dy / dist) * force_factor * weight;
+                                         Vec2f other_min = op.world_pos + oc.min;
+                                         Vec2f other_max = op.world_pos + oc.max;
+
+                                         // AABB overlap check
+                                         if (this_min.x >= other_max.x || this_max.x <= other_min.x)
+                                             return;
+                                         if (this_min.y >= other_max.y || this_max.y <= other_min.y)
+                                             return;
+
+                                         // Overlap amount on each axis
+                                         float overlap_x = std::min(this_max.x - other_min.x,
+                                                                    other_max.x - this_min.x);
+                                         float overlap_y = std::min(this_max.y - other_min.y,
+                                                                    other_max.y - this_min.y);
+
+                                         // Push along the shorter axis
+                                         float weight = other.has<PlayerTag>() ? 15.F : 1.F;
+                                         float const combined_sz =
+                                             (c.max.x - c.min.x) + (oc.max.x - oc.min.x) +
+                                             (c.max.y - c.min.y) + (oc.max.y - oc.min.y);
+                                         float norm = combined_sz > 0.F ? 4.F / combined_sz : 0.F;
+
+                                         if (overlap_x < overlap_y) {
+                                             float dir = (this_max.x - other_min.x <
+                                                          other_max.x - this_min.x) ? -1.F : 1.F;
+                                             separation_force.x += dir * overlap_x * norm * weight;
+                                         } else {
+                                             float dir = (this_max.y - other_min.y <
+                                                          other_max.y - this_min.y) ? -1.F : 1.F;
+                                             separation_force.y += dir * overlap_y * norm * weight;
                                          }
                                      });
 
@@ -348,7 +371,7 @@ void GameMode::init_systems()
                              }
 
                              // 3. Tile collision re-check
-                             pos = collision_system_->resolve_tile_collisions(pos, c.radius);
+                             pos = collision_system_->resolve_tile_collisions(pos, c);
 
                              if (pos.x != original.x || pos.y != original.y) {
                                  p.world_pos = pos;
@@ -419,7 +442,7 @@ EntityId GameMode::spawn_npc(std::string const &id, std::string const &name, flo
         .defense = 4,
         .attack_range = 48.F,
     });
-    e.set(Collider{14.F});
+    e.set(Collider{{-14.F, -14.F}, {14.F, 14.F}});
 
     relationships_.set_relation(id, {});
     mark_dirty(eid);
@@ -467,7 +490,7 @@ EntityId GameMode::spawn_soldier(EntityId captain_id, SoldierRole role)
                      .defense = defaults.defense,
                      .attack_range = defaults.attack_range,
                  })
-                 .set(Collider{14.F})
+                 .set(Collider{{-14.F, -14.F}, {14.F, 14.F}})
                  .set(SoldierAI{
                      .follow_distance = 2.F,
                      .formation_offset = {}, // Leaves empty, compute in `relayout_formation`.
@@ -496,155 +519,6 @@ void GameMode::spawn_guards(EntityId captain_eid, int count)
     for (int g = 0; g < count; ++g) {
         spawn_soldier(captain_eid, SoldierRole::guard);
     }
-}
-
-void GameMode::spawn_building_entities()
-{
-    if (!location_defs_ || !map_data_)
-        return;
-
-    static constexpr BuildingData::Type building_types[] = {
-        BuildingData::Type::inn,
-        BuildingData::Type::market,
-        BuildingData::Type::temple,
-        BuildingData::Type::blacksmith,
-        BuildingData::Type::generic,
-    };
-
-    // Type pool — roughly 2 service buildings per 5, with generic filler.
-    std::vector<BuildingData::Type> type_pool;
-    for (int i = 0; i < 3; ++i)
-        for (auto t : building_types)
-            type_pool.push_back(t);
-    size_t type_idx = 0;
-
-    for (auto const &loc : *location_defs_) {
-        Vec2i center = loc.tile_center;
-        // Must match town_build_radius() used by terrain-generator.
-        int radius = town_build_radius(loc.building_count);
-
-        // ---- Collect building centroids from map data ----
-        // building_group on TileData ties multi-tile footprints together.
-        struct GroupData {
-            int count = 0;
-            float sum_x = 0.F;
-            float sum_y = 0.F;
-        };
-        std::unordered_map<int, GroupData> groups;
-
-        for (int dy = -radius; dy <= radius; ++dy) {
-            for (int dx = -radius; dx <= radius; ++dx) {
-                Vec2i tile{center.x + dx, center.y + dy};
-                if (!map_data_->in_bounds(tile.x, tile.y))
-                    continue;
-                int g = map_data_->tile(tile.x, tile.y).building_group;
-                if (g == 0)
-                    continue;
-                auto &gd = groups[g];
-                ++gd.count;
-                gd.sum_x += static_cast<float>(tile.x);
-                gd.sum_y += static_cast<float>(tile.y);
-            }
-        }
-
-        // ---- Spawn one entity per building ----
-        for (auto const &[g, gd] : groups) {
-            // Geometric centre of the footprint (tile coords → world)
-            float avg_x = gd.sum_x / static_cast<float>(gd.count);
-            float avg_y = gd.sum_y / static_cast<float>(gd.count);
-            Vec2f world_pos{(avg_x + 0.5F) * tile_size, (avg_y + 0.5F) * tile_size};
-
-            auto btype = type_pool[type_idx % type_pool.size()];
-            ++type_idx;
-
-            auto e = world_.entity()
-                         .set(Transform{.world_pos = world_pos})
-                         .set(BuildingData{btype, loc.id, ""})
-                         .set(Interactable{.interact_radius = 48.F,
-                                           .can_talk = false})
-                         .set(CombatStats{.team = Team::neutral,
-                                          .max_hp = 9999,
-                                          .hp = 9999,
-                                          .attack = 0,
-                                          .defense = 0,
-                                          .attack_range = 0.F})
-                         .set(Collider{22.F});
-
-            mark_dirty(e.id());
-            spdlog::debug("spawned building entity {} type {} at {} group {} ({} tiles)",
-                          e.id(), static_cast<int>(btype), loc.id, g, gd.count);
-        }
-    }
-    spdlog::info("spawn_building_entities: {} entities across {} towns",
-                 type_idx, location_defs_->size());
-}
-
-void GameMode::spawn_town_npcs()
-{
-    // Spawn a modest number of residents so towns feel inhabited but not
-    // overcrowded — roughly one NPC per 3 service buildings, placed at
-    // scattered positions inside the town rather than next to every door.
-    int count = 0;
-
-    // Gather all service-building positions + town ids.
-    struct ServiceBldg {
-        Vec2f world_pos;
-        std::string town_id;
-        std::string role;
-        std::string personality;
-    };
-    std::vector<ServiceBldg> services;
-
-    world_.query<BuildingData, Transform>().each(
-        [&](flecs::entity, BuildingData const &bd, Transform const &bt) {
-            char const *role{};
-            char const *pers{};
-            switch (bd.type) {
-            case BuildingData::Type::inn:        role = "Innkeeper";   pers = "friendly"; break;
-            case BuildingData::Type::market:     role = "Merchant";    pers = "friendly"; break;
-            case BuildingData::Type::temple:     role = "Priest";      pers = "friendly"; break;
-            case BuildingData::Type::blacksmith: role = "Blacksmith";  pers = "friendly"; break;
-            default: return;
-            }
-            services.push_back({bt.world_pos, bd.town_id, role, pers});
-        });
-
-    if (services.empty())
-        return;
-
-    // Seeded RNG so the selection + positions are deterministic per run.
-    std::seed_seq seed{42};
-    std::mt19937 rng(seed);
-    std::shuffle(services.begin(), services.end(), rng);
-
-    // Only spawn for ~1/3 of service buildings.
-    size_t to_spawn = std::max<size_t>(1, services.size() / 3);
-    std::uniform_real_distribution<float> angle_dist(0.F, 2.F * 3.14159F);
-    std::uniform_real_distribution<float> radius_dist(30.F, 80.F);
-
-    for (size_t i = 0; i < to_spawn && i < services.size(); ++i) {
-        auto const &s = services[i];
-
-        // Place NPC at a random offset from the building, within the
-        // town area, so they don't all stand in a neat line.
-        float a = angle_dist(rng);
-        float r = radius_dist(rng);
-        Vec2f npc_pos = s.world_pos + Vec2f{std::cos(a) * r, std::sin(a) * r};
-
-        std::string npc_id = s.town_id + "_" + s.role;
-        std::string display_name = std::string(s.role) + " at " + s.town_id;
-
-        auto npc_eid = spawn_npc(npc_id, display_name, npc_pos.x, npc_pos.y, s.personality, {});
-        if (npc_eid != invalid_entity) {
-            auto *npc_state = world_.entity(npc_eid).try_get_mut<NPCState>();
-            if (npc_state)
-                npc_state->location_id = s.town_id;
-            ++count;
-        }
-    }
-
-    spdlog::info("spawn_town_npcs: spawned {} resident NPCs (from {} service buildings)",
-                 count, services.size());
 }
 
 void GameMode::cycle_stance(EntityId leader)
@@ -1140,10 +1014,25 @@ EntityId GameMode::spawn_player(Vec2f pos, Team team)
                                   .attack_range = 48.F})
                  .set(Movement{.max_speed = 200, .velocity = {}})
                  .set(SurvivalState{})
-                 .set(Collider{14.F})
+                 .set(Collider{{-14.F, -14.F}, {14.F, 14.F}})
                  .set(Vision{});
     mark_dirty(e.id());
     return e.id();
+}
+
+void GameMode::respawn_player(EntityId pid)
+{
+    assert(world_.entity(pid).has<PlayerTag>());
+
+    auto e = world_.entity(pid);
+    e.get_mut<Transform>().world_pos = {0, 0};
+    auto &cs = e.get_mut<CombatStats>();
+    cs.hp = cs.max_hp;
+    cs.alive = true;
+    auto &surv = e.get_mut<SurvivalState>();
+    surv = SurvivalState{};
+
+    mark_dirty(pid);
 }
 
 void GameMode::check_event_spawns()
@@ -1272,21 +1161,6 @@ void GameMode::heal_entity(EntityId entity, int amount)
             mark_dirty(entity);
         }
     }
-}
-
-void GameMode::respawn_player(EntityId pid)
-{
-    assert(world_.entity(pid).has<PlayerTag>());
-
-    auto e = world_.entity(pid);
-    e.get_mut<Transform>().world_pos = {0, 0};
-    auto &cs = e.get_mut<CombatStats>();
-    cs.hp = cs.max_hp;
-    cs.alive = true;
-    auto &surv = e.get_mut<SurvivalState>();
-    surv = SurvivalState{};
-
-    mark_dirty(pid);
 }
 
 void GameMode::sync_entity_state(EntityId entity, Vec2f pos, int hp, int max_hp, bool alive)

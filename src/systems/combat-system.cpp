@@ -1,7 +1,7 @@
 #include "systems/combat-system.hpp"
-#include "entities/components/collider.hpp"
-#include "entities/components/position.hpp"
-#include "entities/components/soldier-ai.hpp"
+#include "components/collider.hpp"
+#include "components/position.hpp"
+#include "components/soldier-ai.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -40,7 +40,7 @@ void CombatSystem::spawn_enemy_wave(flecs::world &world, int count, Vec2f center
 
         e.set<CombatStats>(CombatStats{
             .team = team, .max_hp = 8, .hp = 8, .attack = 3, .defense = 1, .attack_range = 80.F});
-        e.set<Collider>(Collider{14.f});
+        e.set<Collider>(Collider{{-8.f, -32.f}, {8.f, 0.f}});
         if (out_ids)
             out_ids->push_back(e.id());
     }

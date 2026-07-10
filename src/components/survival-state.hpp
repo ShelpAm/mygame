@@ -1,7 +1,5 @@
 #pragma once
 
-#include "net/sync-io.hpp"
-
 struct SurvivalState {
     float food = 100.f;   // 0-100, decays ~5/day
     float water = 100.f;  // 0-100, decays ~7/day
@@ -18,19 +16,4 @@ struct SurvivalState {
 
     // food(4) + water(4) + health(4) + energy(4) = 16 bytes
     static constexpr uint16_t kSyncWireSize = 16;
-
-    void write_sync(SyncWriter &w) const
-    {
-        w.write(food);
-        w.write(water);
-        w.write(health);
-        w.write(energy);
-    }
-    void read_sync(SyncReader &r)
-    {
-        food = r.read<float>();
-        water = r.read<float>();
-        health = r.read<float>();
-        energy = r.read<float>();
-    }
 };

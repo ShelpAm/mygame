@@ -7,7 +7,7 @@
 
 class InputManager {
   public:
-    enum class Action {
+    enum class Action : std::uint8_t {
         move_up,
         move_down,
         move_left,

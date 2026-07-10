@@ -18,6 +18,7 @@ class TheSunsetStraits(ConanFile):
         self.requires("sdl_image/3.4.0")
         self.requires("sdl_ttf/3.2.2")
         self.requires("flecs/4.1.5")
+        self.requires("reflect-cpp/0.23.0")
 
     def configure(self):
         assert self.options is not None
@@ -35,6 +36,7 @@ class TheSunsetStraits(ConanFile):
         self.options["boost/*"].without_stacktrace = True
         self.options["boost/*"].without_log = True
         self.options["spdlog/*"].use_std_fmt = True
+        self.options["reflect-cpp/*"].with_yaml = True
         self.options["imgui/*"].with_sdl3_binding = True
 
         # SDL_image

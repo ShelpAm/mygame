@@ -1,6 +1,6 @@
 #include "dialogue/dialogue-engine.hpp"
 #include "core/game-types.hpp"
-#include "entities/components/npc-state.hpp"
+#include "components/npc-state.hpp"
 #include <boost/json.hpp>
 #include <filesystem>
 #include <fstream>

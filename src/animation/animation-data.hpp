@@ -1,6 +1,5 @@
 #pragma once
 
-#include "animation/visual.hpp"
 #include "core/game-types.hpp"
 #include "core/math.hpp"
 #include <cstdint>
@@ -8,22 +7,19 @@
 #include <vector>
 
 class ResourceManager;
+struct AnimationClip;
 
 /// Register all default animation clips for every entity kind into ResourceManager.
 void register_default_clips(ResourceManager &resources);
 
-/// Pick which animation should play based on game state.
-/// Ticks down hurt/attack timers. Returns clip name (e.g. "idle", "run").
-std::string determine_clip_name(Visual &vis, Vec2f velocity, bool alive, float dt);
+/// Pick which animation clip should play based on game state.
+/// Returns clip name (e.g. "idle", "run", "hurt", "attack", "die").
+/// hurt_timer and attack_timer are passed by value (caller tracks HitFlash).
+std::string determine_clip_name(float hurt_timer, float attack_timer,
+                                 Vec2f velocity, bool alive);
 
-/// Advance frame timer, update frame_index, flip.
-/// Returns current frame's texture name c_str.
-char const *tick_animation(Visual &vis, Vec2f velocity, float dt);
-
-/// Switch Visual to a named animation clip.
-/// Looks up the clip from ResourceManager using composite key:
-///   kind_key(entity_kind, team, role) + "_" + clip_name
-/// Sets vis.clip and resets frame_index / frame_timer.
-void switch_clip(Visual &vis, std::string const &clip_name,
-                 uint8_t entity_kind, uint8_t team, uint8_t role,
-                 ResourceManager const &resources);
+/// Look up the animation clip for a given entity kind / team / role / clip_name.
+/// Returns nullptr if no clip is registered.
+AnimationClip const *get_clip(std::string const &clip_name,
+                               uint8_t entity_kind, uint8_t team, uint8_t role,
+                               ResourceManager const &resources);

@@ -1,8 +1,8 @@
 #include "core/game-types.hpp"
-#include "entities/components/building-data.hpp"
-#include "entities/components/movement.hpp"
-#include "entities/components/position.hpp"
-#include "entities/components/sprite.hpp"
+#include "components/building-data.hpp"
+#include "components/interactable.hpp"
+#include "components/movement.hpp"
+#include "components/position.hpp"
 #include <boost/test/unit_test.hpp>
 #include <flecs.h>
 
@@ -57,7 +57,7 @@ BOOST_AUTO_TEST_CASE(has_component)
     BOOST_TEST(!e.has<Transform>());
     e.set<Transform>({});
     BOOST_TEST(e.has<Transform>());
-    BOOST_TEST(!e.has<Sprite>());
+    BOOST_TEST(!e.has<Interactable>());
 }
 
 BOOST_AUTO_TEST_CASE(remove_component)
@@ -77,22 +77,21 @@ BOOST_AUTO_TEST_CASE(multiple_component_types)
     auto e = world.entity();
 
     e.set<Transform>(Transform{.world_pos = Vec2f(5.F, 5.F)});
-    e.set<Sprite>(Sprite{.texture_name = "tex",
-                         .origin = Vec2f(8.F, 8.F),
-                         .color = {.r = 1.F, .g = 1.F, .b = 1.F, .a = 1.F},
-                         .scale = 1.F,
-                         .visible = true});
+    e.set<Interactable>(Interactable{
+        .interact_radius = 48.F,
+        .can_talk = false,
+    });
     e.set<Movement>(Movement{
         .max_speed = 150.F,
         .velocity = {},
     });
 
     BOOST_TEST(e.has<Transform>());
-    BOOST_TEST(e.has<Sprite>());
+    BOOST_TEST(e.has<Interactable>());
     BOOST_TEST(e.has<Movement>());
 
     BOOST_TEST(e.try_get<Transform>()->world_pos.x == 5.F);
-    BOOST_TEST(e.try_get<Sprite>()->texture_name == "tex");
+    BOOST_TEST(e.try_get<Interactable>()->interact_radius == 48.F);
     BOOST_TEST(e.try_get<Movement>()->max_speed == 150.F);
 }
 

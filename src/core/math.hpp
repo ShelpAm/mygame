@@ -27,6 +27,7 @@ struct Vec2f {
     }
     friend Vec2f operator-(Vec2f v) { return {-v.x, -v.y}; }
     friend Vec2f operator*(float s, Vec2f v) { return {v.x * s, v.y * s}; }
+    friend Vec2f operator*(Vec2f u, Vec2f v) { return {u.x * v.x, u.y * v.y}; }
     friend Vec2f operator/(float s, Vec2f v) { return {v.x / s, v.y / s}; }
     friend auto operator<=>(Vec2f const &, Vec2f const &) = default;
 
@@ -62,4 +63,13 @@ template <> struct std::hash<Vec2i> {
     {
         return std::hash<int>{}(v.x) ^ (std::hash<int>{}(v.y) << 1);
     }
+};
+
+struct Rectf {
+    Vec2f pos;
+    Vec2f size;
+
+    constexpr Rectf() = default;
+    constexpr Rectf(Vec2f pos, Vec2f size) : pos(pos), size(size) {}
+    constexpr Rectf(float x, float y, float w, float h) : pos(x, y), size(w, h) {}
 };

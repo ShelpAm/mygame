@@ -14,7 +14,7 @@ BOOST_AUTO_TEST_CASE(resolve_returns_same_pos_when_all_walkable)
 
     // All tiles walkable by default → position unchanged
     Vec2f pos(100.F, 100.F);
-    Vec2f resolved = cs.resolve_tile_collisions(pos, 16.F);
+    Vec2f resolved = cs.resolve_tile_collisions(pos, {{-16.F, -16.F}, {16.F, 16.F}});
     BOOST_TEST(resolved.x == pos.x);
     BOOST_TEST(resolved.y == pos.y);
 }
@@ -27,16 +27,16 @@ BOOST_AUTO_TEST_CASE(resolve_pushes_away_from_blocked_tile)
     CollisionSystem cs;
     cs.set_navigation(&nav);
 
-    // Position (80,80) with radius 16 overlaps blocked tile (1,1)
+    // Position (80,80) with AABB {64–96, 64–96} overlaps blocked tile (1,1)
     Vec2f pos(80.F, 80.F);
-    Vec2f resolved = cs.resolve_tile_collisions(pos, 16.F);
+    Vec2f resolved = cs.resolve_tile_collisions(pos, {{-16.F, -16.F}, {16.F, 16.F}});
 
     // Must be pushed away
     bool was_pushed = (resolved.x != pos.x) || (resolved.y != pos.y);
     BOOST_TEST(was_pushed);
 }
 
-BOOST_AUTO_TEST_CASE(resolve_handles_large_radius)
+BOOST_AUTO_TEST_CASE(resolve_handles_large_collider)
 {
     NavigationSystem nav;
     nav.set_walkable(Vec2i(0, 0), false);
@@ -46,7 +46,7 @@ BOOST_AUTO_TEST_CASE(resolve_handles_large_radius)
     cs.set_navigation(&nav);
 
     Vec2f pos(10.F, 10.F);
-    Vec2f resolved = cs.resolve_tile_collisions(pos, 32.F);
+    Vec2f resolved = cs.resolve_tile_collisions(pos, {{-32.F, -32.F}, {32.F, 32.F}});
 
     bool was_pushed = (resolved.x != pos.x) || (resolved.y != pos.y);
     BOOST_TEST(was_pushed);
@@ -61,7 +61,7 @@ BOOST_AUTO_TEST_CASE(resolve_pushes_from_inside_blocked_tile)
     cs.set_navigation(&nav);
 
     Vec2f pos(20.F, 20.F);
-    Vec2f resolved = cs.resolve_tile_collisions(pos, 10.F);
+    Vec2f resolved = cs.resolve_tile_collisions(pos, {{-10.F, -10.F}, {10.F, 10.F}});
 
     // Inside blocked tile → pushed out
     bool was_pushed = (resolved.x != pos.x) || (resolved.y != pos.y);
@@ -78,7 +78,7 @@ BOOST_AUTO_TEST_CASE(resolve_does_not_skip_tile_boundary)
 
     // Position far from the blocked tile — should be unchanged
     Vec2f pos(800.F, 800.F);
-    Vec2f resolved = cs.resolve_tile_collisions(pos, 16.F);
+    Vec2f resolved = cs.resolve_tile_collisions(pos, {{-16.F, -16.F}, {16.F, 16.F}});
     BOOST_TEST(resolved.x == pos.x);
     BOOST_TEST(resolved.y == pos.y);
 }

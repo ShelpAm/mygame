@@ -14,6 +14,7 @@ find_package(spdlog REQUIRED)
 find_package(SDL3_image REQUIRED)
 find_package(SDL3_ttf REQUIRED)
 find_package(flecs REQUIRED)
+find_package(reflectcpp REQUIRED)
 
 # ---- Helper: link Dear ImGui backends from Conan package ----
 function(add_imgui_backends)
@@ -61,6 +62,8 @@ set(LIB_SOURCES
     src/systems/collision-system.cpp
     src/systems/quest-manager.cpp
     src/systems/formation.cpp
+    src/systems/animation-system.cpp
+    src/systems/animation-controller-system.cpp
     src/knowledge/knowledge-graph.cpp
     src/knowledge/rumor-propagator.cpp
     src/world/world-state.cpp
@@ -68,6 +71,7 @@ set(LIB_SOURCES
     src/dialogue/dialogue-engine.cpp
     src/dialogue/topic-registry.cpp
     src/dialogue/relationship-table.cpp
+    src/entities/entity-factory.cpp
     src/factions/faction-network.cpp
     src/factions/event-simulator.cpp
     src/save/save-manager.cpp
@@ -95,19 +99,24 @@ set(LIB_HEADERS
     src/dialogue/dialogue-engine.hpp
     src/dialogue/relationship-table.hpp
     src/dialogue/topic-registry.hpp
-    src/entities/components/building-data.hpp
-    src/entities/components/collider.hpp
-    src/entities/components/combat-stats.hpp
-    src/entities/components/defense-structure.hpp
-    src/entities/components/interactable.hpp
-    src/entities/components/movement.hpp
-    src/entities/components/npc-state.hpp
-    src/entities/components/player.hpp
-    src/entities/components/position.hpp
-    src/entities/components/soldier-ai.hpp
-    src/entities/components/sprite.hpp
-    src/entities/components/vision.hpp
-    src/entities/components/visual-fx.hpp
+    src/entities/entity-factory.hpp
+    src/components/building-data.hpp
+    src/components/collider.hpp
+    src/components/combat-stats.hpp
+    src/components/defense-structure.hpp
+    src/components/interactable.hpp
+    src/components/movement.hpp
+    src/components/npc-state.hpp
+    src/components/player.hpp
+    src/components/position.hpp
+    src/components/soldier-ai.hpp
+    src/components/survival-state.hpp
+    src/components/vision.hpp
+    src/components/visual-fx.hpp
+    src/components/entity-kind.hpp
+    src/components/interpolation-target.hpp
+    src/components/visual/animation.hpp
+    src/components/visual/sprite.hpp
     src/factions/event-simulator.hpp
     src/factions/faction-network.hpp
     src/knowledge/knowledge-graph.hpp
@@ -122,12 +131,13 @@ set(LIB_HEADERS
     src/net/sync-io.hpp
     src/net/sync-registry.hpp
     src/save/save-manager.hpp
-    src/survival/condition-tracker.hpp
     src/systems/camera-system.hpp
     src/systems/collision-system.hpp
     src/systems/combat-system.hpp
     src/systems/combat-utils.hpp
     src/systems/formation.hpp
+    src/systems/animation-system.hpp
+    src/systems/animation-controller-system.hpp
     src/systems/navigation-system.hpp
     src/systems/quest-manager.hpp
     src/systems/render-system.hpp
@@ -156,6 +166,7 @@ target_link_libraries(TheSunsetStraits_lib PUBLIC
     Boost::json                 # test code uses Boost.JSON
     spdlog::spdlog              # test code includes spdlog headers
     flecs::flecs_static         # test code creates flecs::world
+    reflectcpp::reflectcpp      # used in public headers (entity-factory.hpp)
 )
 target_link_libraries(TheSunsetStraits_lib PRIVATE
     Boost::boost                # core Boost headers (non-JSON)

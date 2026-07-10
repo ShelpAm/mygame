@@ -1,6 +1,6 @@
 #pragma once
 
-#include "entities/components/npc-state.hpp"
+#include "components/npc-state.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include <string>
 #include <unordered_map>

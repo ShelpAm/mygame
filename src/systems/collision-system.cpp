@@ -5,87 +5,66 @@
 #include <cassert>
 #include <cmath>
 
-Vec2f CollisionSystem::resolve_tile_collisions(Vec2f pos, float radius)
+Vec2f CollisionSystem::resolve_tile_collisions(Vec2f foot_pos, Collider const &c) const
 {
     assert(navigation_);
 
-    Vec2f resolved = pos;
+    Vec2f aabb_min = foot_pos + c.min;
+    Vec2f aabb_max = foot_pos + c.max;
 
-    int min_tx = static_cast<int>(std::floor((pos.x - radius) / tile_size));
-    int max_tx = static_cast<int>(std::floor((pos.x + radius) / tile_size));
-    int min_ty = static_cast<int>(std::floor((pos.y - radius) / tile_size));
-    int max_ty = static_cast<int>(std::floor((pos.y + radius) / tile_size));
+    // Iterate to resolve cascading overlaps (pushing out of one tile may
+    // cause overlap with a neighbour).
+    int constexpr kMaxIters = 3;
+    for (int iter = 0; iter < kMaxIters; ++iter) {
+        int min_tx = static_cast<int>(std::floor(aabb_min.x / tile_size));
+        int max_tx = static_cast<int>(std::floor(aabb_max.x / tile_size));
+        int min_ty = static_cast<int>(std::floor(aabb_min.y / tile_size));
+        int max_ty = static_cast<int>(std::floor(aabb_max.y / tile_size));
 
-    for (int ty = min_ty; ty <= max_ty; ++ty) {
-        for (int tx = min_tx; tx <= max_tx; ++tx) {
-            if (navigation_->is_walkable({tx, ty}))
-                continue;
+        bool pushed = false;
 
-            float closest_x = std::max(tx * tile_size, std::min(resolved.x, (tx + 1) * tile_size));
-            float closest_y = std::max(ty * tile_size, std::min(resolved.y, (ty + 1) * tile_size));
+        for (int ty = min_ty; ty <= max_ty; ++ty) {
+            for (int tx = min_tx; tx <= max_tx; ++tx) {
+                if (navigation_->is_walkable({tx, ty}))
+                    continue;
 
-            float dx = resolved.x - closest_x;
-            float dy = resolved.y - closest_y;
-            float dist = std::hypot(dx, dy);
+                float tile_left = tx * tile_size;
+                float tile_right = (tx + 1) * tile_size;
+                float tile_top = ty * tile_size;
+                float tile_bottom = (ty + 1) * tile_size;
 
-            if (dist < radius) {
-                if (dist > 0.001f) {
-                    float overlap = radius - dist;
-                    resolved.x += (dx / dist) * overlap;
-                    resolved.y += (dy / dist) * overlap;
+                // AABB-AABB overlap — compute penetration on each axis.
+                float pen_left  = aabb_max.x - tile_left;      // push left  by this
+                float pen_right = tile_right - aabb_min.x;     // push right by this
+                float pen_up    = aabb_max.y - tile_top;       // push up    by this
+                float pen_down  = tile_bottom - aabb_min.y;    // push down  by this
+
+                // Both axes must overlap to be inside the tile.
+                if (pen_left <= 0.F || pen_right <= 0.F || pen_up <= 0.F || pen_down <= 0.F)
+                    continue;
+
+                // Shortest penetration → push along that axis.
+                float min_x = std::min(pen_left, pen_right);
+                float min_y = std::min(pen_up, pen_down);
+
+                if (min_x < min_y) {
+                    float push = (pen_left < pen_right) ? -pen_left : pen_right;
+                    aabb_min.x += push;
+                    aabb_max.x += push;
+                    foot_pos.x += push;
+                } else {
+                    float push = (pen_up < pen_down) ? -pen_up : pen_down;
+                    aabb_min.y += push;
+                    aabb_max.y += push;
+                    foot_pos.y += push;
                 }
-                else {
-                    // Entity centre inside blocked tile — push toward nearest
-                    // neighbouring walkable tile, or nearest edge as fallback
-                    float best_push = std::numeric_limits<float>::max();
-                    float push_x = 0.f, push_y = 0.f;
-                    Vec2i const neighbors[] = {
-                        {tx + 1, ty}, {tx - 1, ty}, {tx, ty + 1}, {tx, ty - 1}};
-                    for (auto n : neighbors) {
-                        if (!navigation_->is_walkable(n))
-                            continue;
-                        float edge_x = 0.f, edge_y = 0.f;
-                        if (n.x > tx)
-                            edge_x = (tx + 1) * tile_size + radius;
-                        else if (n.x < tx)
-                            edge_x = tx * tile_size - radius;
-                        if (n.y > ty)
-                            edge_y = (ty + 1) * tile_size + radius;
-                        else if (n.y < ty)
-                            edge_y = ty * tile_size - radius;
-                        float px = edge_x != 0.f ? edge_x - resolved.x : 0.f;
-                        float py = edge_y != 0.f ? edge_y - resolved.y : 0.f;
-                        float push = std::hypot(px, py);
-                        if (push < best_push) {
-                            best_push = push;
-                            push_x = px;
-                            push_y = py;
-                        }
-                    }
-                    if (best_push < std::numeric_limits<float>::max()) {
-                        resolved.x += push_x;
-                        resolved.y += push_y;
-                    }
-                    else {
-                        // No walkable neighbour: fall back to nearest edge
-                        float to_left = resolved.x - tx * tile_size;
-                        float to_right = (tx + 1) * tile_size - resolved.x;
-                        float to_top = resolved.y - ty * tile_size;
-                        float to_bottom = (ty + 1) * tile_size - resolved.y;
-                        float min_push = std::min({to_left, to_right, to_top, to_bottom});
-                        if (min_push == to_left)
-                            resolved.x = tx * tile_size - radius;
-                        else if (min_push == to_right)
-                            resolved.x = (tx + 1) * tile_size + radius;
-                        else if (min_push == to_top)
-                            resolved.y = ty * tile_size - radius;
-                        else
-                            resolved.y = (ty + 1) * tile_size + radius;
-                    }
-                }
+                pushed = true;
             }
         }
+
+        if (!pushed)
+            break;
     }
 
-    return resolved;
+    return foot_pos;
 }

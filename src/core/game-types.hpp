@@ -74,8 +74,7 @@ enum class SessionMode : std::uint8_t { local, host, client };
 
 struct AnimationClip {
     std::string name;
-    std::vector<std::string> frame_names;
-    std::vector<float> frame_durations;  // one per frame, in seconds
-    bool loop = true;
+    std::vector<std::string> frame_textures; // texture name of frames
+    std::vector<float> frame_durations;      // one per frame, in seconds
     bool faces_right = true;
 };

@@ -5,9 +5,10 @@
 #include "dialogue/dialogue-engine.hpp"
 #include "dialogue/relationship-table.hpp"
 #include "dialogue/topic-registry.hpp"
-#include "entities/components/collider.hpp"
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/player.hpp"
+#include "components/collider.hpp"
+#include "components/combat-stats.hpp"
+#include "components/player.hpp"
+#include "entities/entity-factory.hpp"
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "systems/combat-system.hpp"
@@ -74,6 +75,7 @@ class GameMode {
     EntityId spawn_player(Vec2f pos, Team team);
     EntityId spawn_recruit(EntityId leader);
     EntityId spawn_recruit_ranged(EntityId leader);
+    void respawn_player(EntityId pid);
     void cycle_stance(EntityId leader);
     void cycle_formation(EntityId player, uint8_t role_mask);
 
@@ -83,7 +85,6 @@ class GameMode {
     void apply_player_input(EntityId entity, Vec2f dir);
     void apply_damage(EntityId target, int damage, bool killed);
     void heal_entity(EntityId entity, int amount);
-    void respawn_player(EntityId pid);
 
     void sync_entity_state(EntityId entity, Vec2f pos, int hp, int max_hp, bool alive);
 
@@ -126,16 +127,13 @@ class GameMode {
                        std::string const &personality,
                        std::vector<NPCKnowledgeEntry> const &known_facts);
     void spawn_guards(EntityId captain_eid, int count);
-    /// @brief When a player changes formation or new soldier joins in the
-    /// formation, this function recalculates the positions of all soldiers in
-    /// the formation.
-    ///
-    /// Formations are determined by the captain, the role and the target at the
-    /// same time.
     void relayout_formation(EntityId captain_id);
     void end_dialogue(EntityId player);
+    void check_event_spawns();
     void spawn_enemy_wave(int count, Vec2f center, float spread, Team team);
-    std::vector<EntityId> npc_entities() const;
+    EntityId find_nearest_interactable(EntityId player, Vec2f player_pos);
+
+    EntityFactory factory_;
 
     flecs::world world_;
 
@@ -187,9 +185,5 @@ class GameMode {
     bool pending_town_left_ = false;
     MapData const *map_data_ = nullptr;
 
-    void check_event_spawns();
-    void spawn_building_entities();
-    void spawn_town_npcs();
-    EntityId find_nearest_interactable(EntityId player, Vec2f player_pos);
     void mark_dirty(EntityId eid) { dirty_entities_.insert(eid); }
 };

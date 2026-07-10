@@ -53,6 +53,8 @@ conan install . --output-folder=build/Debug --build=missing -s build_type=Debug
 - Don't pre-optimize. Focus on correctness and clarity first. Use profiling to identify bottlenecks before optimizing, which is my work.
 - Don't hardcode anything if there is a config for it, use it.
 
+- 错误应该暴露而不是无视，找出并修复才是对的
+
 ## Architecture Overview
 
 ### Game Loop

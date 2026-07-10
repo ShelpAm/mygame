@@ -2,11 +2,11 @@
 
 #include "core/game-types.hpp"
 #include "core/math.hpp"
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/movement.hpp"
-#include "entities/components/position.hpp"
-#include "entities/components/soldier-ai.hpp"
-#include "survival/condition-tracker.hpp"
+#include "components/combat-stats.hpp"
+#include "components/movement.hpp"
+#include "components/position.hpp"
+#include "components/soldier-ai.hpp"
+#include "components/survival-state.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/navigation-system.hpp"
 #include <flecs.h>

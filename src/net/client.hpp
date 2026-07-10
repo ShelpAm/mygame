@@ -1,22 +1,26 @@
 #pragma once
 
 #include "animation/animation-data.hpp"
-#include "animation/visual.hpp"
 #include "core/game-types.hpp"
 #include "core/math.hpp"
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/movement.hpp"
-#include "entities/components/soldier-ai.hpp"
-#include "entities/components/sprite.hpp"
-#include "entities/components/vision.hpp"
+#include "components/combat-stats.hpp"
+#include "components/entity-kind.hpp"
+#include "components/interpolation-target.hpp"
+#include "components/movement.hpp"
+#include "components/soldier-ai.hpp"
+#include "components/vision.hpp"
+#include "components/survival-state.hpp"
+#include "components/visual/animation.hpp"
+#include "components/visual/sprite.hpp"
 #include "net/session.hpp"
-#include "survival/condition-tracker.hpp"
+#include "systems/animation-controller-system.hpp"
+#include "systems/animation-system.hpp"
 #include "systems/quest-manager.hpp"
 #include "world/location-store.hpp"
 #include "world/world-state.hpp"
+#include <flecs.h>
 #include <functional>
 #include <memory>
-#include <SDL3/SDL.h>
 #include <string>
 #include <vector>
 
@@ -29,48 +33,6 @@ struct ProjectileVisual {
     float speed = 400.f;
     float total_dist = 0.f;
     float traveled = 0.f;
-};
-
-struct SnapshotEntity {
-    Vec2f position;
-    uint8_t kind = 0;
-    Vec2f facing{0, -1};
-    SDL_FColor color{0.3f, 0.5f, 0.9f, 1.f};
-    float scale = 1.f;
-    std::string texture_name = "entity";
-    Team team = Team::neutral;
-    bool alive = true;
-};
-
-struct RemoteEntity {
-    EntityId id = 0;
-    uint8_t kind = 0; // EntityKind: 1=player, 2=soldier, 3=npc, 4=enemy, 5=structure
-
-    Vec2f position;   // interpolated (for rendering)
-    Vec2f target_pos; // server-authoritative target
-
-    CombatStats cs;
-
-    // Movement (synced from Movement component)
-    Movement mov;
-
-    // Facing direction (synced from Transform::facing)
-    Vec2f facing{0, -1};
-
-    // Interactable
-    bool interactable = false;
-
-    // Soldier state (synced from SoldierAI component)
-    SoldierStance soldier_stance = SoldierStance::defensive;
-    SoldierRole soldier_role = SoldierRole::melee;
-
-    // Vision (synced from Vision component)
-    Vision vis;
-
-    // Visual (derived from kind + team)
-    Visual visual;
-    bool hit_flash = false;
-    uint8_t building_type = 0; // BuildingData::Type (only valid when kind==structure)
 };
 
 class Client {
@@ -91,7 +53,9 @@ class Client {
     }
 
     EntityId player_id() const { return player_id_; }
-    Team player_team() const { return player_cs_.team; }
+
+    /// Read team from the ECS player entity.
+    Team player_team() const;
 
     // Verifies authority of server
     static awaitable<bool> authenticate_transport(std::shared_ptr<Session> t);
@@ -119,7 +83,9 @@ class Client {
     void set_location_defs(std::vector<LocationDefinition> const *defs) { location_defs_ = defs; }
     std::vector<LocationDefinition> const *location_defs() const { return location_defs_; }
 
+    /// Read position from the ECS player entity.
     Vec2f player_position() const;
+
     std::uint64_t rtt_ms() const { return estimated_rtt_ms_; }
     std::uint64_t last_sync_age() const
     {
@@ -131,7 +97,6 @@ class Client {
 
     awaitable<void> attach_transport(std::shared_ptr<Session> t);
 
-    /// @brief Asynchronously disconnects from the current session, if exists.
     void close_current_session()
     {
         if (session_) {
@@ -145,20 +110,20 @@ class Client {
         return session_ ? session_->remote_info() : std::string{"`session is null`"};
     }
 
-    void interpolate_entities(float dt);
     void record_sync_received();
-    std::vector<RemoteEntity> &remote_entities() { return remote_entities_; }
-    std::vector<RemoteEntity> const &remote_entities() const { return remote_entities_; }
-    // std::vector<SnapshotEntity> &snapshots() { return snapshots_; }
-    // std::vector<SnapshotEntity> const &snapshots() const { return snapshots_;
-    // }
+
+    flecs::world &world() { return world_; }
+    flecs::world const &world() const { return world_; }
+
     WorldState &world_state() { return world_state_; }
     WorldState const &world_state() const { return world_state_; }
 
     PlayerVisibility &player_visibility() { return player_visibility_; }
     PlayerVisibility const &player_visibility() const { return player_visibility_; }
 
-    SurvivalState const &survival() const { return player_survival_; }
+    /// Read survival from the ECS player entity.
+    SurvivalState const &survival() const;
+
     void set_quests(QuestManager const *q) { quests_ = q; }
     QuestManager const &quests() const { return *quests_; }
     std::vector<CombatEvent> &combat_events() { return combat_events_; }
@@ -173,57 +138,51 @@ class Client {
     DialogueState const &dialogue() const { return dialogue_; }
     DialogueState &dialogue() { return dialogue_; }
 
-    /// Called when server kicks this client — typically rebinds to local session
     std::function<void()> on_kicked_;
     ResourceManager const *resources_ = nullptr;
 
-    /// Resource manager for animation clip lookups.
     void set_resources(ResourceManager const *res) { resources_ = res; }
 
   private:
-    // Only the read_loop in attach_transport may construct this token
     struct detach_token {
         explicit detach_token() = default;
     };
-
-    // For developer of this class:
-    //   Don't call this directly, use kick() or close the connection instead.
     void detach_transport(detach_token, Session *);
+
+    // Client-side ECS world — synchronised from server state
+    flecs::world world_;
+    AnimationSystem anim_sys_;
+    AnimationControllerSystem anim_ctrl_sys_;
+    flecs::entity interp_sys_;
+    flecs::entity anim_ctrl_pipeline_;
+    flecs::entity anim_sys_pipeline_;
 
     WorldState world_state_;
     PlayerVisibility player_visibility_;
-    SurvivalState player_survival_;
     QuestManager const *quests_ = nullptr;
 
     EntityId player_id_ = invalid_entity;
-    CombatStats player_cs_;
-    Vec2f player_pos_, player_target_pos_;
-
-    /// Find the player's RemoteEntity (or nullptr if not synced yet).
-    RemoteEntity const *find_player() const;
+    /// The server-assigned entity ID for the player (sent in return_pid).
+    /// Used when constructing outbound messages so the server can identify
+    /// which entity to act on.  player_id_ holds the local ECS entity ID.
+    EntityId server_player_id_ = invalid_entity;
 
     // Network diagnostics
     std::chrono::steady_clock::time_point last_sync_recv_tick_{};
     std::uint64_t estimated_rtt_ms_ = 0;
     std::chrono::steady_clock::time_point last_active_send_tick_{};
 
-    // std::queue<TransportGuard> transport_guards_; // Because there could be
-    // some connections keeping unclosed, we set a queue here to wait them.
-
     std::shared_ptr<Session> session_;
-    std::vector<RemoteEntity> remote_entities_;
-    // std::vector<SnapshotEntity> snapshots_;
     std::vector<CombatEvent> combat_events_;
     std::vector<ProjectileVisual> projectile_visuals_;
     std::vector<std::string> chat_history_;
-    uint8_t selected_roles_ = 0xFF; // all selected by default
+    uint8_t selected_roles_ = 0xFF;
     int formation_idx_ = 0;
     DialogueState dialogue_;
     std::vector<LocationDefinition> const *location_defs_ = nullptr;
     std::vector<DiscoveredTown> discovered_towns_;
     std::string current_town_id_;
 
-    // Deferred sync processing (io_context thread → main thread)
     deferred_concurrent_channel<void(boost::system::error_code, std::shared_ptr<Session>,
                                      TransportMessage)>
         messages_;
@@ -233,6 +192,4 @@ class Client {
     void apply_sync_delta(std::vector<uint8_t> const &data);
     void handle_entity_update(std::vector<uint8_t> const &payload);
     void handle_dialogue_sync(std::vector<uint8_t> const &data);
-
-    RemoteEntity *find_entity(EntityId id);
 };

@@ -14,6 +14,9 @@
 #include <boost/asio.hpp>
 #include <boost/json.hpp>
 #include <filesystem>
+#include <fstream>
+#include <rfl.hpp>
+#include <rfl/yaml.hpp>
 #include <format>
 #include <fstream>
 #include <imgui.h>
@@ -173,99 +176,73 @@ void App::init_server()
 
 void App::load_textures()
 {
-    struct ChibiPack {
-        std::string_view dir, anim, prefix;
-        int count;
-    };
-    struct FramePack {
-        std::string_view sub, prefix;
-        int count;
-    };
-    struct SheetPack {
-        std::string_view file, prefix;
+    // reflect-cpp structs matching textures.yaml (shared schema with
+    // register_default_clips in animation-data.cpp).
+    struct AnimEntry {
+        std::string name, prefix;
         int frames;
+        float dur;
+        std::optional<std::string> file;
+    };
+    struct Group {
+        std::string base;
+        std::optional<int> sheet;
+        std::vector<AnimEntry> anims;
+    };
+    struct TilesCfg {
+        std::string base, ext, name_prefix;
+        int count;
+    };
+    struct Singles {
+        TilesCfg tiles;
+        std::string entity_dead;
+    };
+    struct Cfg {
+        std::map<std::string, Group> groups;
+        Singles singles;
     };
 
-    // Load original CHIBI KNIGHT frames (used by player entity)
-    constexpr std::string_view base = "assets/textures/CHIBI KNIGHT-PNG/CHIBI KNIGHT-PNG";
-    std::array chibi_anims{
-        ChibiPack{"01-Idle_", "Idle", "knight_idle", 8},
-        ChibiPack{"02-Run_", "Run", "knight_run", 8},
-        ChibiPack{"03-Attack_", "Attack", "knight_attack", 8},
-        ChibiPack{"05-Hurt_", "Hurt", "knight_hurt", 8},
-        ChibiPack{"06-Die_", "Die", "knight_die", 8},
+    auto read_file = [](std::string const &p) {
+        std::ifstream f(p);
+        return std::string{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
     };
-    for (auto const &a : chibi_anims) {
-        for (int i = 0; i < a.count; ++i) {
-            auto name = std::format("{}_{}", a.prefix, i);
-            auto path = std::format("{}/{}/2D_KNIGHT__{}_{:03d}.png", base, a.dir, a.anim, i);
-            resources_->load_texture(renderer_, name, path);
-        }
+
+    auto yaml_str = read_file("assets/data/textures.yaml");
+    auto result = rfl::yaml::read<Cfg>(yaml_str);
+    if (!result) {
+        spdlog::error("load_textures: failed to parse textures.yaml: {}", result.error().what());
+        return;
     }
+    auto const &cfg = result.value();
 
-    for (auto i : std::views::iota(0, 16)) {
-        auto s = std::to_string(i);
-        resources_->load_texture(renderer_, "tile_" + s, "./assets/textures/tilemap/" + s + ".png");
-    }
-
-    resources_->load_texture(renderer_, "entity_dead", "./assets/textures/entity-dead.png");
-
-    // ── Archer Pack (individual frames) ──────────────────────────────────
-    {
-        constexpr std::string_view ap = "assets/textures/Tiny World Archer Pack V0.1.0";
-        std::array archer_anims{
-            FramePack{"Idle", "archer_idle", 4},     FramePack{"Walk", "archer_walk", 5},
-            FramePack{"Attack", "archer_attack", 6}, FramePack{"Hit", "archer_hit", 5},
-            FramePack{"Die", "archer_die", 19},
-        };
-        for (auto const &a : archer_anims) {
-            for (int i = 0; i < a.count; ++i) {
-                auto path = std::format("{}/{}/{}_sprite_{}.png", ap, a.sub, a.sub, i + 1);
-                resources_->load_texture(renderer_, std::format("{}_{}", a.prefix, i), path);
+    for (auto const &[grp, g] : cfg.groups) {
+        for (auto const &a : g.anims) {
+            if (g.sheet) {
+                std::string file = a.file.value_or(a.name);
+                resources_->load_spritesheet(renderer_, a.prefix,
+                    g.base + "/" + file + ".png", *g.sheet);
+            } else {
+                for (int i = 0; i < a.frames; ++i) {
+                    auto name = a.prefix + "_" + std::to_string(i);
+                    resources_->load_texture(renderer_, name,
+                        g.base + "/" + name + ".png");
+                }
             }
         }
     }
 
-    // ── Goblin Pack (spritesheet, 32 px per frame) ───────────────────────
-    {
-        constexpr std::string_view gp = "assets/textures/Tiny World Knife Goblin Pack V0.1.0";
-        std::array goblin_anims{
-            SheetPack{"Idle", "goblin_idle", 4},     SheetPack{"Walk", "goblin_walk", 5},
-            SheetPack{"Attack", "goblin_attack", 8}, SheetPack{"Hit", "goblin_hit", 5},
-            SheetPack{"Die", "goblin_die", 17},
-        };
-        for (auto const &a : goblin_anims)
-            resources_->load_spritesheet(renderer_, std::string{a.prefix},
-                                         std::format("{}/{}.png", gp, a.file), 32);
+    // Tilemap textures
+    auto const &t = cfg.singles.tiles;
+    for (int i = 0; i < t.count; ++i) {
+        auto id = std::to_string(i);
+        resources_->load_texture(renderer_, t.name_prefix + id,
+                                 t.base + "/" + id + t.ext);
     }
 
-    // ── Knight Pack (spritesheet) ────────────────────────────────────────
-    {
-        constexpr std::string_view kp = "assets/textures/Tiny World Knight Pack V0.1.2";
-        std::array knight_anims{
-            SheetPack{"Idle", "twk_idle", 4},     SheetPack{"Walk", "twk_walk", 5},
-            SheetPack{"Attack", "twk_attack", 6}, SheetPack{"Hit", "twk_hit", 5},
-            SheetPack{"Die", "twk_die", 19},
-        };
-        for (auto const &a : knight_anims)
-            resources_->load_spritesheet(renderer_, std::string{a.prefix},
-                                         std::format("{}/{}.png", kp, a.file), 32);
-    }
+    resources_->load_texture(renderer_, "entity_dead", cfg.singles.entity_dead);
 
-    // ── Villager Pack (spritesheet, 32 px per frame) ─────────────────────
-    {
-        constexpr std::string_view vp =
-            "assets/textures/Tiny World FREE Starter Pack v0.1.3/Character/Villager";
-        std::array villager_anims{
-            SheetPack{"Idle", "villager_idle", 4},
-            SheetPack{"Walk", "villager_walk", 5},
-            SheetPack{"Hit", "villager_hit", 5},
-            SheetPack{"Die", "villager_die", 14},
-        };
-        for (auto const &a : villager_anims)
-            resources_->load_spritesheet(renderer_, std::string{a.prefix},
-                                         std::format("{}/{}.png", vp, a.file), 32);
-    }
+    // Load sprite definitions (sprite layer: maps sprite name → texture + clip)
+    resources_->load_sprites("assets/data/sprites.yaml");
 }
 
 void App::start_host_session(int port)

@@ -2,6 +2,14 @@
 
 #include "core/game-types.hpp"
 #include "core/math.hpp"
+#include "components/combat-stats.hpp"
+#include "components/interactable.hpp"
+#include "components/movement.hpp"
+#include "components/position.hpp"
+#include "components/soldier-ai.hpp"
+#include "components/survival-state.hpp"
+#include "components/vision.hpp"
+#include "net/sync-io.hpp"
 #include "world/world-state.hpp"
 #include <cstdint>
 #include <flecs.h>
@@ -30,6 +38,31 @@ struct SyncPayload {
 
 /// Map a flecs entity to its EntityKind value.
 uint8_t entity_kind(flecs::entity e);
+
+// ── Component serialisation free functions ──────────────────────────────────
+// These replace the write_sync/read_sync methods that were previously inline
+// in each component header, decoupling ECS data from the network sync format.
+
+void serialize_transform(SyncWriter &w, Transform const &t);
+void deserialize_transform(SyncReader &r, Transform &t);
+
+void serialize_combat_stats(SyncWriter &w, CombatStats const &cs);
+void deserialize_combat_stats(SyncReader &r, CombatStats &cs);
+
+void serialize_movement(SyncWriter &w, Movement const &m);
+void deserialize_movement(SyncReader &r, Movement &m);
+
+void serialize_soldier_ai(SyncWriter &w, SoldierAI const &ai);
+void deserialize_soldier_ai(SyncReader &r, SoldierAI &ai);
+
+void serialize_interactable(SyncWriter &w, Interactable const &i);
+void deserialize_interactable(SyncReader &r, Interactable &i);
+
+void serialize_survival_state(SyncWriter &w, SurvivalState const &s);
+void deserialize_survival_state(SyncReader &r, SurvivalState &s);
+
+void serialize_vision(SyncWriter &w, Vision const &v);
+void deserialize_vision(SyncReader &r, Vision &v);
 
 /// Binary-serialise one entity into the buffer.
 void serialize_entity(flecs::entity e, std::vector<uint8_t> &out);

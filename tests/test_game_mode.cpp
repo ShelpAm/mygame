@@ -1,7 +1,7 @@
 #include "core/game-mode.hpp"
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/player.hpp"
-#include "entities/components/position.hpp"
+#include "components/combat-stats.hpp"
+#include "components/player.hpp"
+#include "components/position.hpp"
 #include <boost/test/unit_test.hpp>
 
 BOOST_AUTO_TEST_SUITE(game_mode_tests)

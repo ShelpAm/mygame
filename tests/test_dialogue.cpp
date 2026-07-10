@@ -1,7 +1,7 @@
 #include "dialogue/dialogue-engine.hpp"
 #include "dialogue/relationship-table.hpp"
 #include "dialogue/topic-registry.hpp"
-#include "entities/components/npc-state.hpp"
+#include "components/npc-state.hpp"
 #include <boost/test/unit_test.hpp>
 BOOST_AUTO_TEST_SUITE(dialogue_tests)
 

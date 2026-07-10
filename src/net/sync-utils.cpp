@@ -1,17 +1,17 @@
 #include "net/sync-utils.hpp"
-#include "entities/components/building-data.hpp"
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/defense-structure.hpp"
-#include "entities/components/interactable.hpp"
-#include "entities/components/movement.hpp"
-#include "entities/components/npc-state.hpp"
-#include "entities/components/player.hpp"
-#include "entities/components/position.hpp"
-#include "entities/components/soldier-ai.hpp"
-#include "entities/components/vision.hpp"
+#include "components/building-data.hpp"
+#include "components/combat-stats.hpp"
+#include "components/defense-structure.hpp"
+#include "components/interactable.hpp"
+#include "components/movement.hpp"
+#include "components/npc-state.hpp"
+#include "components/player.hpp"
+#include "components/position.hpp"
+#include "components/soldier-ai.hpp"
+#include "components/vision.hpp"
 #include "net/net-packet.hpp"
 #include "net/sync-io.hpp"
-#include "survival/condition-tracker.hpp"
+#include "components/survival-state.hpp"
 #include "world/map-data.hpp"
 #include <cassert>
 #include <stdexcept>
@@ -68,30 +68,30 @@ void serialize_entity(flecs::entity e, std::vector<uint8_t> &out)
     }
 
     // position (bit 1)
-    e.get<Transform>().write_sync(w);
+    serialize_transform(w, e.get<Transform>());
 
     // combat (bit 2)
-    e.get<CombatStats>().write_sync(w);
+    serialize_combat_stats(w, e.get<CombatStats>());
 
     // movement (bit 3)
     if (mask & SyncComponent::movement)
-        e.get<Movement>().write_sync(w);
+        serialize_movement(w, e.get<Movement>());
 
     // soldier_ai (bit 4)
     if (mask & SyncComponent::soldier_ai)
-        e.get<SoldierAI>().write_sync(w);
+        serialize_soldier_ai(w, e.get<SoldierAI>());
 
     // interact (bit 5) — presence flag
     if (mask & SyncComponent::interact)
-        e.get<Interactable>().write_sync(w);
+        serialize_interactable(w, e.get<Interactable>());
 
     // survival (bit 6)
     if (mask & SyncComponent::survival)
-        e.get<SurvivalState>().write_sync(w);
+        serialize_survival_state(w, e.get<SurvivalState>());
 
     // vision (bit 7)
     if (mask & SyncComponent::vision)
-        e.get<Vision>().write_sync(w);
+        serialize_vision(w, e.get<Vision>());
 }
 
 // ── write_world_header ───────────────────────────────────────────────────────
@@ -204,6 +204,99 @@ bool is_visible(SyncState const &ss, EntityId player_eid, Vec2f world_pos)
     if (it == ss.player_visible_tiles.end())
         return false;
     return it->second.contains(world_to_tile(world_pos));
+}
+
+// ── Component serialisation free functions ───────────────────────────────────
+
+void serialize_transform(SyncWriter &w, Transform const &t)
+{
+    w.write(t.world_pos);
+    w.write(t.facing);
+}
+void deserialize_transform(SyncReader &r, Transform &t)
+{
+    t.world_pos = r.read<Vec2f>();
+    t.facing = r.read<Vec2f>();
+}
+
+void serialize_combat_stats(SyncWriter &w, CombatStats const &cs)
+{
+    w.write(cs.hp);
+    w.write(cs.max_hp);
+    w.write(cs.alive);
+    w.write(static_cast<uint8_t>(cs.team));
+    w.write(cs.attack);
+    w.write(cs.defense);
+    w.write(cs.attack_range);
+}
+void deserialize_combat_stats(SyncReader &r, CombatStats &cs)
+{
+    cs.hp = r.read<int>();
+    cs.max_hp = r.read<int>();
+    cs.alive = r.read<bool>();
+    cs.team = static_cast<Team>(r.read<uint8_t>());
+    cs.attack = r.read<int>();
+    cs.defense = r.read<int>();
+    cs.attack_range = r.read<float>();
+}
+
+void serialize_movement(SyncWriter &w, Movement const &m)
+{
+    w.write(m.velocity);
+}
+void deserialize_movement(SyncReader &r, Movement &m)
+{
+    m.velocity = r.read<Vec2f>();
+}
+
+void serialize_soldier_ai(SyncWriter &w, SoldierAI const &ai)
+{
+    w.write(ai.formation_offset);
+    w.write(ai.in_combat);
+    w.write(static_cast<uint8_t>(ai.role));
+    w.write(static_cast<uint8_t>(ai.stance));
+}
+void deserialize_soldier_ai(SyncReader &r, SoldierAI &ai)
+{
+    ai.formation_offset = r.read<Vec2f>();
+    ai.in_combat = r.read<bool>();
+    ai.role = static_cast<SoldierRole>(r.read<uint8_t>());
+    ai.stance = static_cast<SoldierStance>(r.read<uint8_t>());
+}
+
+void serialize_interactable(SyncWriter &w, Interactable const & /*i*/)
+{
+    w.write(uint8_t{1});
+}
+void deserialize_interactable(SyncReader & /*r*/, Interactable & /*i*/)
+{
+    // Presence flag consumed externally
+}
+
+void serialize_survival_state(SyncWriter &w, SurvivalState const &s)
+{
+    w.write(s.food);
+    w.write(s.water);
+    w.write(s.health);
+    w.write(s.energy);
+}
+void deserialize_survival_state(SyncReader &r, SurvivalState &s)
+{
+    s.food = r.read<float>();
+    s.water = r.read<float>();
+    s.health = r.read<float>();
+    s.energy = r.read<float>();
+}
+
+void serialize_vision(SyncWriter &w, Vision const &v)
+{
+    w.write<int32_t>(v.range);
+    w.write<float>(v.arc);
+}
+void deserialize_vision(SyncReader &r, Vision &v)
+{
+    v.range = r.read<int32_t>();
+    v.arc = r.read<float>();
 }
 
 } // namespace sync_util

@@ -1,8 +1,8 @@
 #include "core/resource-manager.hpp"
 
+#include <format>
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
-#include <format>
 #include <spdlog/spdlog.h>
 
 ResourceManager::~ResourceManager()
@@ -41,8 +41,8 @@ void ResourceManager::load_spritesheet(SDL_Renderer *renderer, std::string const
 {
     SDL_Surface *sheet = IMG_Load(path.c_str());
     if (!sheet)
-        throw std::runtime_error(
-            std::format("ResourceManager: failed to load spritesheet {}: {}", path, SDL_GetError()));
+        throw std::runtime_error(std::format("ResourceManager: failed to load spritesheet {}: {}",
+                                             path, SDL_GetError()));
 
     int const frame_h = sheet->h;
     int const count = sheet->w / frame_w;
@@ -69,9 +69,8 @@ void ResourceManager::load_spritesheet(SDL_Renderer *renderer, std::string const
         if (!tex) {
             SDL_DestroySurface(frame);
             SDL_DestroySurface(sheet);
-            throw std::runtime_error(
-                std::format("ResourceManager: failed to create texture for frame {}: {}", i,
-                            SDL_GetError()));
+            throw std::runtime_error(std::format(
+                "ResourceManager: failed to create texture for frame {}: {}", i, SDL_GetError()));
         }
         textures_[key] = tex;
         SDL_DestroySurface(frame);
@@ -80,10 +79,24 @@ void ResourceManager::load_spritesheet(SDL_Renderer *renderer, std::string const
     SDL_DestroySurface(sheet);
 }
 
-SDL_Texture *ResourceManager::texture(std::string const &name)
+SDL_Texture *ResourceManager::texture(std::string const &name) const
 {
     auto it = textures_.find(name);
-    return it != textures_.end() ? it->second : nullptr;
+    if (it == textures_.end())
+        throw std::runtime_error("couldn't find texture " + name);
+    return it->second;
+}
+
+Vec2f ResourceManager::texture_size(std::string const &name) const
+{
+    auto *tex = texture(name);
+    if (!tex)
+        throw std::runtime_error("ResourceManager: texture not found: " + name);
+
+    float w{};
+    float h{};
+    SDL_GetTextureSize(tex, &w, &h);
+    return {w, h};
 }
 
 void ResourceManager::clear()
@@ -103,4 +116,57 @@ AnimationClip const *ResourceManager::clip(std::string const &name) const
 {
     auto it = clips_.find(name);
     return it != clips_.end() ? &it->second : nullptr;
+}
+
+// ── Sprite layer ──────────────────────────────────────────────────────────
+
+#include <filesystem>
+#include <fstream>
+#include <rfl.hpp>
+#include <rfl/yaml.hpp>
+
+void ResourceManager::load_sprites(std::string const &path)
+{
+    namespace fs = std::filesystem;
+    if (!fs::exists(path)) {
+        spdlog::warn("ResourceManager: sprites.yaml not found at {}", path);
+        return;
+    }
+
+    auto read_file = [](std::string const &p) {
+        std::ifstream f(p);
+        return std::string{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+    };
+
+    auto content = read_file(path);
+    if (content.empty()) {
+        spdlog::warn("ResourceManager: sprites.yaml is empty");
+        return;
+    }
+
+    struct SpriteEntry {
+        std::string texture;
+        std::array<float, 4> clip;
+    };
+    struct SpriteFileConfig {
+        std::map<std::string, SpriteEntry> sprites;
+    };
+
+    auto result = rfl::yaml::read<SpriteFileConfig>(content);
+    if (!result) {
+        spdlog::error("ResourceManager: failed to parse sprites.yaml: {}", result.error().what());
+        return;
+    }
+
+    auto const &cfg = result.value();
+    for (auto const &[name, entry] : cfg.sprites) {
+        sprites_[name] = {entry.texture, entry.clip};
+    }
+    spdlog::info("ResourceManager: loaded {} sprite definitions from sprites.yaml", sprites_.size());
+}
+
+SpriteDef const *ResourceManager::resolve_sprite(std::string const &sprite_name) const
+{
+    auto it = sprites_.find(sprite_name);
+    return it != sprites_.end() ? &it->second : nullptr;
 }

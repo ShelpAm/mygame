@@ -2,7 +2,6 @@
 
 #include "core/game-types.hpp"
 #include "core/math.hpp"
-#include "net/sync-io.hpp"
 #include <cstddef>
 #include <vector>
 
@@ -98,19 +97,4 @@ struct SoldierAI {
     // follow_target(8) + formation_offset(8) + in_combat(1) + role(1) +
     // stance(1) = 19 bytes
     static constexpr uint16_t kSyncWireSize = 19;
-
-    void write_sync(SyncWriter &w) const
-    {
-        w.write(formation_offset);
-        w.write(in_combat);
-        w.write(static_cast<uint8_t>(role));
-        w.write(static_cast<uint8_t>(stance));
-    }
-    void read_sync(SyncReader &r)
-    {
-        formation_offset = r.read<Vec2f>();
-        in_combat = r.read<bool>();
-        role = static_cast<SoldierRole>(r.read<uint8_t>());
-        stance = static_cast<SoldierStance>(r.read<uint8_t>());
-    }
 };

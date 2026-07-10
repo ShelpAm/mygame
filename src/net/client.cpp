@@ -1,21 +1,213 @@
 #include "net/client.hpp"
 #include "animation/animation-data.hpp"
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/movement.hpp"
-#include "entities/components/position.hpp"
-#include "entities/components/soldier-ai.hpp"
-#include "entities/components/vision.hpp"
+#include "components/building-data.hpp"
+#include "components/combat-stats.hpp"
+#include "components/collider.hpp"
+#include "components/entity-kind.hpp"
+#include "components/interpolation-target.hpp"
+#include "components/movement.hpp"
+#include "components/position.hpp"
+#include "components/soldier-ai.hpp"
+#include "components/survival-state.hpp"
+#include "components/vision.hpp"
+#include "components/visual/animation.hpp"
+#include "components/visual/sprite.hpp"
+#include "components/visual-fx.hpp"
+#include "core/resource-manager.hpp"
 #include "net/net-packet.hpp"
 #include "net/sync-io.hpp"
-#include "survival/condition-tracker.hpp"
+#include "net/sync-utils.hpp"
 #include "systems/formation.hpp"
+#include <array>
 #include <cassert>
 #include <cstring>
+#include <fstream>
 #include <optional>
+#include <rfl.hpp>
+#include <rfl/yaml.hpp>
 #include <spdlog/spdlog.h>
+#include <unordered_map>
+
+// ── helpers to initialise Sprite from sync data ─────────────────────────────
+
+namespace {
+
+struct SpriteDef {
+    std::array<float, 2> origin;
+    float scale;
+    // Optional collider AABB (client-side debug rendering).
+    bool has_collider = false;
+    Vec2f collider_min{};
+    Vec2f collider_max{};
+};
+
+// Loaded once from entities.yaml — maps EntityKind value → SpriteDef.
+static std::unordered_map<uint8_t, SpriteDef> const &sprite_defs()
+{
+    static auto const cache = [] {
+        std::unordered_map<uint8_t, SpriteDef> m;
+        auto read_file = [](std::string const &p) {
+            std::ifstream f(p);
+            return std::string{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+        };
+        try {
+            auto yaml = read_file("assets/data/entities.yaml");
+            auto result = rfl::yaml::read<rfl::Generic>(yaml);
+            if (!result) return m;
+
+            using Obj = rfl::Generic::Object;
+            auto &root = std::get<Obj>(result.value().get());
+            for (auto const &[name, val] : root) {
+                auto &obj = std::get<Obj>(val.get());
+                auto vit = std::find_if(obj.begin(), obj.end(),
+                    [](auto const &p) { return p.first == "visual"; });
+                if (vit == obj.end()) continue;
+                auto &vobj = std::get<Obj>(vit->second.get());
+                auto oit = std::find_if(vobj.begin(), vobj.end(),
+                    [](auto const &p) { return p.first == "origin"; });
+                auto sit = std::find_if(vobj.begin(), vobj.end(),
+                    [](auto const &p) { return p.first == "scale"; });
+                if (oit == vobj.end() || sit == vobj.end()) continue;
+
+                auto &arr = std::get<std::vector<rfl::Generic>>(oit->second.get());
+                if (arr.size() < 2) continue;
+                auto try_float = [](rfl::Generic const &g) -> float {
+                    auto const &v = g.get();
+                    if (auto *d = std::get_if<double>(&v)) return static_cast<float>(*d);
+                    if (auto *i = std::get_if<int64_t>(&v)) return static_cast<float>(*i);
+                    return 0.f;
+                };
+                float ox = try_float(arr[0]);
+                float oy = try_float(arr[1]);
+                float sc = try_float(sit->second);
+                SpriteDef sd{{{ox, oy}}, sc};
+
+                // Parse optional collider AABB from the entity config.
+                auto cit = std::find_if(obj.begin(), obj.end(),
+                    [](auto const &p) { return p.first == "collider"; });
+                if (cit != obj.end()) {
+                    if (auto *cobj = std::get_if<Obj>(&cit->second.get())) {
+                        auto min_it = std::find_if(cobj->begin(), cobj->end(),
+                            [](auto const &p) { return p.first == "min"; });
+                        auto max_it = std::find_if(cobj->begin(), cobj->end(),
+                            [](auto const &p) { return p.first == "max"; });
+                        if (min_it != cobj->end() && max_it != cobj->end()) {
+                            if (auto *min_a = std::get_if<std::vector<rfl::Generic>>(&min_it->second.get())) {
+                                if (min_a->size() >= 2) {
+                                    sd.has_collider = true;
+                                    sd.collider_min.x = try_float((*min_a)[0]);
+                                    sd.collider_min.y = try_float((*min_a)[1]);
+                                }
+                            }
+                            if (auto *max_a = std::get_if<std::vector<rfl::Generic>>(&max_it->second.get())) {
+                                if (max_a->size() >= 2) {
+                                    sd.collider_max.x = try_float((*max_a)[0]);
+                                    sd.collider_max.y = try_float((*max_a)[1]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (name == "player")                    m[EntityKind::player] = sd;
+                else if (name.rfind("soldier_",0)==0)    m[EntityKind::soldier] = sd;
+                else if (name == "npc_friendly")         m[EntityKind::npc] = sd;
+                else if (name == "npc_hostile")          m[EntityKind::enemy] = sd;
+                else if (name == "building")             m[EntityKind::structure] = sd;
+            }
+        } catch (std::exception const &e) {
+            spdlog::error("sprite_defs: {}", e.what());
+        }
+        return m;
+    }();
+    return cache;
+}
+
+void init_sprite_from_kind(Sprite &s, uint8_t kind, uint8_t /*building_type*/,
+                           Team team, SoldierRole role)
+{
+    auto const &defs = sprite_defs();
+    auto it = defs.find(kind);
+    if (it != defs.end()) {
+        auto const &d = it->second;
+        s.origin = {d.origin[0], d.origin[1]};
+        s.scale = d.scale;
+    }
+}
+
+} // anonymous namespace
+
+/// Maps a server-side entity ID to the local ECS entity. Set on every entity
+/// during parse_entity so the client can look up entities referenced by server
+/// ID (entity_removed, combat_event, etc.).
+struct ServerEntity {
+    EntityId value;
+};
+
+// ── Client implementation ────────────────────────────────────────────────────
 
 Client::Client() : messages_(Session::io(), 128)
 {
+    world_.component<Transform>();
+    world_.component<CombatStats>();
+    world_.component<Movement>();
+    world_.component<SoldierAI>();
+    world_.component<Vision>();
+    world_.component<Interactable>();
+    world_.component<SurvivalState>();
+    world_.component<KindTag>();
+    world_.component<InterpolationTarget>();
+    world_.component<Animation>();
+    world_.component<Sprite>();
+    world_.component<ServerEntity>();
+
+    interp_sys_ = world_.system<Transform, InterpolationTarget>("Interpolation")
+        .kind(flecs::OnUpdate)
+        .each([](flecs::entity e, Transform &t, InterpolationTarget &target) {
+            if (auto *kt = e.try_get<KindTag>())
+                if (kt->value == EntityKind::structure)
+                    return; // structures don't move
+            float rate = std::min(1.f, e.world().delta_time() * 30.f);
+            t.world_pos += (target.position - t.world_pos) * rate;
+            t.facing += (target.facing - t.facing) * rate;
+        });
+
+    // ── Animation pipeline (injected from outside, no flecs coupling in the systems) ──
+    //
+    // Both AnimationControllerSystem and AnimationSystem stay clean — they
+    // accept (world, dt) via a plain update() call.  The pipeline registration
+    // lives here in Client, wiring them into world_.progress() via lambda
+    // delegates so the ordering is explicit at the application level.
+
+    anim_ctrl_pipeline_ = world_.system<>("AnimationController")
+        .kind(flecs::OnUpdate)
+        .run([this](flecs::iter &it) {
+            flecs::world w = it.world();
+            anim_ctrl_sys_.update(w, *resources_, it.delta_time());
+        });
+
+    anim_sys_pipeline_ = world_.system<>("AnimationSystem")
+        .kind(flecs::OnUpdate)
+        .run([this](flecs::iter &it) {
+            flecs::world w = it.world();
+            anim_sys_.update(w, *resources_, it.delta_time());
+        });
+
+    // Ordering: interpolation → clip-switching → frame advancement
+    anim_ctrl_pipeline_.depends_on(interp_sys_);
+    anim_sys_pipeline_.depends_on(anim_ctrl_pipeline_);
+
+    // Floating text update: drift upward, fade alpha, auto-destruct on expiry.
+    world_.system<FloatingText, Transform>("FloatingTextUpdate")
+        .kind(flecs::OnUpdate)
+        .each([](flecs::entity e, FloatingText &ft, Transform &t) {
+            float dt = e.world().delta_time();
+            ft.elapsed += dt;
+            t.world_pos += ft.velocity * dt;
+            if (ft.elapsed >= ft.lifetime)
+                e.destruct();
+        });
+
     spdlog::info("Client: initialized");
 }
 
@@ -23,6 +215,8 @@ Client::~Client()
 {
     spdlog::info("Client: destructing this");
 }
+
+// ── Transport ────────────────────────────────────────────────────────────────
 
 awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
 {
@@ -36,7 +230,6 @@ awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
     session_ = t;
     spdlog::info("Client: transport ({}) attached", t->remote_info());
 
-    // Note to ensure that `c` should outlive this coro.
     auto reading_loop = [](Client *c, std::shared_ptr<Session> t) -> awaitable<void> {
         try {
             while (true) {
@@ -56,14 +249,12 @@ awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
             }
         }
         catch (boost::system::system_error const &e) {
-            // If passive, notify. If active, transport_guard_ may be guarding
-            // others.
             c->detach_transport(detach_token{}, t.get());
             if (e.code() == asio::error::operation_aborted || e.code() == asio::error::eof ||
                 e.code() == asio::experimental::error::channel_closed ||
                 e.code() == asio::experimental::error::channel_cancelled) {
                 spdlog::debug("Client: transport {} closed because {}", t->remote_info(), e.what());
-                co_return; // Normal exits
+                co_return;
             }
             throw;
         }
@@ -74,14 +265,61 @@ awaitable<void> Client::attach_transport(std::shared_ptr<Session> t)
 void Client::detach_transport(detach_token, Session *s)
 {
     spdlog::info("Client: transport {} detached", s->remote_info());
-    // Don't reset here, because this maybe no longer that session.
-    // session_.reset();
 
     player_id_ = invalid_entity;
-    remote_entities_.clear();
+    server_player_id_ = invalid_entity;
     combat_events_.clear();
     chat_history_.clear();
+    // Clear client ECS world
+    world_.defer([this] { world_.each([](flecs::entity e) { e.destruct(); }); });
 }
+
+// ── Accessors reading from ECS player entity ────────────────────────────────
+
+Vec2f Client::player_position() const
+{
+    if (player_id_ == invalid_entity)
+        throw std::runtime_error("player_position: player ID not set");
+    auto e = world_.entity(player_id_);
+    auto *t = e.is_alive() ? e.try_get<Transform>() : nullptr;
+    if (!t)
+        throw std::runtime_error("player_position: player entity not alive");
+    return t->world_pos;
+}
+
+Team Client::player_team() const
+{
+    auto e = world_.entity(player_id_);
+    auto *cs = e.is_alive() ? e.try_get<CombatStats>() : nullptr;
+    return cs ? cs->team : Team::neutral;
+}
+
+bool Client::is_player_dead()
+{
+    if (player_id_ == invalid_entity)
+        throw std::runtime_error("is_player_dead: player ID not set");
+    auto e = world_.entity(player_id_);
+    auto *cs = e.is_alive() ? e.try_get<CombatStats>() : nullptr;
+    return !cs || !cs->alive;
+}
+
+CombatStats const *Client::player_stats()
+{
+    if (player_id_ == invalid_entity)
+        return nullptr;
+    auto e = world_.entity(player_id_);
+    return e.is_alive() ? e.try_get<CombatStats>() : nullptr;
+}
+
+SurvivalState const &Client::survival() const
+{
+    static const SurvivalState empty;
+    auto e = world_.entity(player_id_);
+    auto *s = e.is_alive() ? e.try_get<SurvivalState>() : nullptr;
+    return s ? *s : empty;
+}
+
+// ── Input helpers ────────────────────────────────────────────────────────────
 
 void Client::send_join_request()
 {
@@ -101,51 +339,43 @@ void Client::send_player_direction(Vec2f dir)
     last_active_send_tick_ = std::chrono::steady_clock::now();
     Session::spawn([](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
         co_await t->write({ClientMsgType::player_input, payload});
-    }(session_, make_player_input(player_id_, dir.x, dir.y, SDL_GetTicks())));
+    }(session_, make_player_input(server_player_id_, dir.x, dir.y, SDL_GetTicks())));
 }
 
 void Client::send_recruit()
 {
     assert(session_);
-    co_spawn(
-        Session::io(),
+    co_spawn(Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::recruit_soldier, payload});
-        }(session_, make_entity_id_payload(player_id_)),
-        detached);
+        }(session_, make_entity_id_payload(server_player_id_)), detached);
 }
 
 void Client::send_recruit_ranged()
 {
     assert(session_);
-    co_spawn(
-        Session::io(),
+    co_spawn(Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::recruit_ranged, payload});
-        }(session_, make_entity_id_payload(player_id_)),
-        detached);
+        }(session_, make_entity_id_payload(server_player_id_)), detached);
 }
 
 void Client::send_soldier_command()
 {
     assert(session_);
-    co_spawn(
-        Session::io(),
+    co_spawn(Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::soldier_command, payload});
-        }(session_, make_entity_id_payload(player_id_)),
-        detached);
+        }(session_, make_entity_id_payload(server_player_id_)), detached);
 }
 
 void Client::send_respawn()
 {
     assert(session_);
-    co_spawn(
-        Session::io(),
+    co_spawn(Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::respawn, payload});
-        }(session_, make_entity_id_payload(player_id_)),
-        detached);
+        }(session_, make_entity_id_payload(server_player_id_)), detached);
 }
 
 void Client::send_cycle_formation()
@@ -153,34 +383,28 @@ void Client::send_cycle_formation()
     assert(session_);
     int n = (int)formation_registry().size();
     formation_idx_ = (formation_idx_ + 1) % n;
-    co_spawn(
-        Session::io(),
+    co_spawn(Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::formation, payload});
-        }(session_, make_formation_payload(player_id_, selected_roles_)),
-        detached);
+        }(session_, make_formation_payload(server_player_id_, selected_roles_)), detached);
 }
 
 void Client::send_interact()
 {
     assert(session_);
-    co_spawn(
-        Session::io(),
+    co_spawn(Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::interact, payload});
-        }(session_, make_entity_id_payload(player_id_)),
-        detached);
+        }(session_, make_entity_id_payload(server_player_id_)), detached);
 }
 
 void Client::send_rest()
 {
     assert(session_);
-    co_spawn(
-        Session::io(),
+    co_spawn(Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::rest, payload});
-        }(session_, make_entity_id_payload(player_id_)),
-        detached);
+        }(session_, make_entity_id_payload(server_player_id_)), detached);
 }
 
 void Client::send_chat(std::string const &msg)
@@ -201,17 +425,17 @@ void Client::send_dialogue_action(std::string const &action)
     }(session_, std::vector<uint8_t>(action.begin(), action.end())));
 }
 
+// ── Message handling ─────────────────────────────────────────────────────────
+
 void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg)
 {
     auto st = static_cast<ServerMsgType>(msg.type);
 
-    // Quick handlers: tiny writes that don't touch remote_entities_
     if (st == ServerMsgType::return_pid) {
         assert(msg.payload.size() >= 9);
         memcpy(&player_id_, msg.payload.data(), 8);
-        player_cs_.team = static_cast<Team>(msg.payload[8]);
-        spdlog::info("Client: Returned player ID from server: {} team: {}", player_id_,
-                     player_cs_.team);
+        server_player_id_ = player_id_;
+        spdlog::info("Client: Returned player ID from server: {}", player_id_);
         return;
     }
     if (st == ServerMsgType::chat) {
@@ -234,17 +458,19 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
         break;
     case ServerMsgType::entity_removed:
         if (msg.payload.size() >= 8) {
-            EntityId eid{};
-            memcpy(&eid, msg.payload.data(), 8);
-            std::erase_if(remote_entities_, [eid](RemoteEntity const &re) { return re.id == eid; });
+            EntityId server_id{};
+            memcpy(&server_id, msg.payload.data(), 8);
+            world_.query<ServerEntity>().each([&](flecs::entity e, ServerEntity const &se) {
+                if (se.value == server_id)
+                    e.destruct();
+            });
         }
         break;
     case ServerMsgType::kicked: {
         std::string reason(msg.payload.begin(), msg.payload.end());
         spdlog::info("Client: kicked by server: {}", reason);
         session_->close();
-        if (on_kicked_)
-            on_kicked_();
+        if (on_kicked_) on_kicked_();
         break;
     }
     case ServerMsgType::entity_update:
@@ -272,47 +498,315 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
     }
     case ServerMsgType::town_discovered: {
         auto td = parse_town_discovered(msg.payload);
-        // Avoid duplicates
         auto it = std::ranges::find_if(discovered_towns_,
                                        [&](auto const &t) { return t.loc_id == td.loc_id; });
-        if (it == discovered_towns_.end()) {
+        if (it == discovered_towns_.end())
             discovered_towns_.push_back({td.loc_id, td.locale_key, false});
-        }
         current_town_id_ = td.loc_id;
         break;
     }
-    case ServerMsgType::town_left: {
+    case ServerMsgType::town_left:
         current_town_id_.clear();
         break;
-    }
     default:
         break;
     }
 }
 
-void Client::handle_entity_update(std::vector<uint8_t> const &payload)
+// ── ECS sync helpers ─────────────────────────────────────────────────────────
+
+namespace {
+using namespace sync_util;
+
+void parse_world_header(SyncReader &r, WorldState &ws)
 {
-    if (payload.size() < 25)
-        return;
-    auto u = parse_entity_update(payload);
-    for (auto &rp : remote_entities_) {
-        if (rp.id == u.id) {
-            rp.target_pos = {u.x, u.y};
-            rp.cs.hp = u.hp;
-            rp.cs.max_hp = u.max_hp;
-            rp.cs.alive = u.alive;
-            return;
+    if (r.remaining() < 9) return;
+    ws.set_day(r.read<int32_t>());
+    ws.set_season(r.read<uint8_t>());
+    ws.set_time_of_day(r.read<float>());
+}
+
+/// Create or update a client ECS entity from the wire reader.
+/// Returns player-only extras (attack, defense, etc.) for the caller.
+struct PlayerExtras {
+    int attack = 0;
+    int defense = 0;
+    float attack_range = 80.f;
+    SurvivalState survival;
+    bool has_survival = false;
+};
+
+PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const &resources)
+{
+    PlayerExtras pe{};
+
+    EntityId id = r.read<uint64_t>();
+    uint16_t mask = r.read<uint16_t>();
+
+    // Create a fresh client entity and remember the server's entity ID on it.
+    // We do NOT try to reuse the server's flecs entity_t value because the two
+    // worlds have independent entity ID spaces and the same numeric ID may
+    // refer to a dead generation on the client side.
+    // Check if we already have a local entity for this server ID
+    EntityId local_id = invalid_entity;
+    w.query<ServerEntity>().each([&](flecs::entity ee, ServerEntity const &se) {
+        if (se.value == id) local_id = ee.id();
+    });
+    auto e = local_id != invalid_entity
+                 ? w.entity(local_id)
+                 : w.entity().set(ServerEntity{id});
+
+    // Track values across mask bits so we can initialise Animation below.
+    uint8_t kind = 0;
+    uint8_t building_type = 0;
+    Team team = Team::neutral;
+    SoldierRole role = SoldierRole::melee;
+
+    if (mask & SyncComponent::entity_kind) {
+        kind = r.read<uint8_t>();
+        if (kind == EntityKind::structure) {
+            building_type = r.read<uint8_t>();
+            e.set(BuildingData{static_cast<BuildingData::Type>(building_type), "", ""});
+        }
+        e.set(KindTag{kind});
+        e.set(CombatStats{}); // ensure entity exists
+    }
+
+    if (mask & SyncComponent::position) {
+        Transform pos;
+        deserialize_transform(r, pos);
+        e.set(Transform{pos.world_pos, pos.facing});
+        e.set(InterpolationTarget{pos.world_pos, pos.facing});
+    }
+
+    if (mask & SyncComponent::combat) {
+        CombatStats cs;
+        deserialize_combat_stats(r, cs);
+        e.set(cs);
+        team = cs.team;
+        pe.attack = cs.attack;
+        pe.defense = cs.defense;
+        pe.attack_range = cs.attack_range;
+    }
+
+    if (mask & SyncComponent::movement) {
+        Movement mov;
+        deserialize_movement(r, mov);
+        e.set(mov);
+    }
+
+    if (mask & SyncComponent::soldier_ai) {
+        SoldierAI ai;
+        deserialize_soldier_ai(r, ai);
+        role = ai.role;
+        ai.path_.clear();
+        ai.path_index_ = 0;
+        e.set(ai);
+    }
+
+		if (mask & SyncComponent::interact) {
+			if (r.read<uint8_t>())
+				e.set(Interactable{});
+			else
+				e.remove<Interactable>();
+		}
+
+		if (mask & SyncComponent::survival) {
+			deserialize_survival_state(r, pe.survival);
+			pe.has_survival = true;
+			e.set(pe.survival);
+		}
+
+		if (mask & SyncComponent::vision) {
+			Vision v;
+			deserialize_vision(r, v);
+			e.set(v);
+		}
+
+    // Initialise visual components for newly-created entities.
+    // We wait until all sync data is available so the clip lookup has
+    // kind, team and role.  The transitional bridge may later switch
+    // clips based on movement/combat state.
+    if (!e.has<Animation>()) {
+        Sprite s;
+        init_sprite_from_kind(s, kind, building_type, team, role);
+        e.set(std::move(s));
+
+        // Set collider from YAML for client-side debug rendering.
+        {
+            auto const &defs = sprite_defs();
+            auto it = defs.find(kind);
+            if (it != defs.end() && it->second.has_collider)
+                e.set(Collider{it->second.collider_min, it->second.collider_max});
+        }
+
+        // Look up the default "idle" clip so AnimationSystem has
+        // a valid clip from the very first frame.
+        // Clip key prefix mirrors kind_key() in animation-data.cpp.
+        char const *prefix = nullptr;
+        switch (kind) {
+        case EntityKind::player:    prefix = "player"; break;
+        case EntityKind::soldier:
+            prefix = (static_cast<int>(role) == 1) ? "archer"
+                   : (team >= Team::enemy)          ? "goblin"
+                                                    : "knight";
+            break;
+        case EntityKind::enemy:     prefix = "goblin"; break;
+        case EntityKind::npc:       prefix = "villager"; break;
+        case EntityKind::structure: prefix = "structure"; break;
+        default:                    prefix = ""; break;
+        }
+        std::string key = std::string(prefix) + "_idle";
+        Animation an;
+        an.clip = resources.clip(key);
+        // Last-resort fallback for any entity kind that has no clip registered
+        if (!an.clip)
+            an.clip = resources.clip("structure_idle");
+        e.set(std::move(an));
+
+        // Resolve the initial sprite name (first frame of the idle clip)
+        // through sprites.yaml to populate texture_name and clipping rect.
+        if (auto *cli = e.try_get<Animation>()) {
+            if (cli->clip && !cli->clip->frame_textures.empty()) {
+                auto const &sprite_name = cli->clip->frame_textures[0];
+                auto *def = resources.resolve_sprite(sprite_name);
+                if (def) {
+                    Sprite updated;
+                    auto const &defs = sprite_defs();
+                    auto it = defs.find(kind);
+                    if (it != defs.end()) {
+                        updated.origin = {it->second.origin[0], it->second.origin[1]};
+                        updated.scale = it->second.scale;
+                    }
+                    updated.texture_name = def->texture;
+                    updated.offset = {def->clip[0], def->clip[1]};
+                    updated.size   = {def->clip[2], def->clip[3]};
+                    e.set(std::move(updated));
+                }
+            }
         }
     }
-    RemoteEntity re;
-    re.id = u.id;
-    re.position = {u.x, u.y};
-    re.target_pos = {u.x, u.y};
-    re.cs.hp = u.hp;
-    re.cs.max_hp = u.max_hp;
-    re.cs.alive = u.alive;
-    remote_entities_.push_back(re);
+
+    return pe;
 }
+
+} // anonymous namespace
+
+void Client::apply_sync_full(std::vector<uint8_t> const &data)
+{
+    SyncReader r{data.data(), data.size()};
+    parse_world_header(r, world_state_);
+
+    {
+        auto count = r.read<uint16_t>();
+        for (uint16_t i = 0; i < count; ++i)
+            player_visibility_.explore_single(Vec2i(r.read<int32_t>(), r.read<int32_t>()));
+    }
+
+    while (!r.done()) {
+        if (r.remaining() < 10) break;
+        parse_entity(r, world_, *resources_);
+    }
+
+    // Resolve the player's server ID to the local entity ID.
+    // (player_id_ was set from the return_pid message to the server's entity_t)
+    EntityId server_pid = player_id_;
+    world_.query<ServerEntity>().each([&](flecs::entity e, ServerEntity const &se) {
+        if (se.value == server_pid) {
+            player_id_ = e.id();
+        }
+    });
+}
+
+void Client::apply_sync_delta(std::vector<uint8_t> const &data)
+{
+    SyncReader r{data.data(), data.size()};
+    parse_world_header(r, world_state_);
+
+    {
+        auto count = r.read<uint16_t>();
+        for (uint16_t i = 0; i < count; ++i)
+            player_visibility_.explore_single(Vec2i(r.read<int32_t>(), r.read<int32_t>()));
+    }
+
+    while (!r.done()) {
+        if (r.remaining() < 10) break;
+        parse_entity(r, world_, *resources_);
+    }
+}
+
+void Client::handle_entity_update(std::vector<uint8_t> const &payload)
+{
+    if (payload.size() < 25) return;
+    auto u = parse_entity_update(payload);
+
+    // Find local entity by server ID
+    EntityId local_id = invalid_entity;
+    world_.query<ServerEntity>().each([&](flecs::entity e, ServerEntity const &se) {
+        if (se.value == u.id)
+            local_id = e.id();
+    });
+    if (local_id == invalid_entity)
+        return;
+
+    auto e = world_.entity(local_id);
+    e.set(Transform{Vec2f{u.x, u.y}});
+    CombatStats cs;
+    cs.hp = u.hp;
+    cs.max_hp = u.max_hp;
+    cs.alive = u.alive;
+    e.set(cs);
+    if (!e.has<Animation>()) {
+        e.set(Sprite{});
+        e.set(Animation{});
+    }
+}
+
+void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int damage,
+                                 bool killed)
+{
+    EntityId target = (defender_id == 0) ? player_id_ : defender_id;
+    if (target == invalid_entity) {
+        spdlog::warn("handle_combat_event: target entity is invalid");
+        return;
+    }
+
+    // Resolve server entity IDs to local IDs (non-player entities)
+    auto to_local = [&](EntityId server_id) -> EntityId {
+        if (server_id == player_id_) return server_id; // already local
+        EntityId result = invalid_entity;
+        world_.query<ServerEntity>().each([&](flecs::entity e, ServerEntity const &se) {
+            if (se.value == server_id)
+                result = e.id();
+        });
+        return result;
+    };
+    target = to_local(target);
+    EntityId local_attacker = attacker_id != 0 ? to_local(attacker_id) : 0;
+
+    if (target == invalid_entity) return;
+
+    auto apply_hit = [&](EntityId eid) {
+        auto e = world_.entity(eid);
+        if (!e.is_alive()) return;
+        auto &cs = e.get_mut<CombatStats>();
+        cs.hp -= damage;
+        if (killed) cs.alive = false;
+        e.set(HitFlash{0.15f, 0.3f});
+    };
+
+    apply_hit(target);
+
+    if (local_attacker != 0) {
+        auto ae = world_.entity(local_attacker);
+        if (ae.is_alive())
+            ae.set(HitFlash{0.15f, 0.3f});
+    }
+
+    combat_events_.push_back({attacker_id, defender_id, damage, killed});
+}
+
+// ── Per-frame update ─────────────────────────────────────────────────────────
 
 void Client::update(float dt)
 {
@@ -323,49 +817,24 @@ void Client::update(float dt)
     }
 
     if (connected()) {
-        interpolate_entities(dt);
-        if (auto const *e = find_player())
-            player_visibility_.set_visible_arc(world_to_tile(player_pos_), e->vis.range, e->facing,
-                                               e->vis.arc);
+        // Run client ECS systems (interpolation → controller → animation via pipeline)
+        world_.progress(dt);
 
-        // Manage snapshots based on tile visibility
-        // auto const &visible = player_visibility_.visible;
-
-        // Create/update snapshots for entities not on visible tiles
-        // (entities in remote_entities_ were synced when visible, so their
-        //  tiles are implicitly explored)
-        // for (auto &re : remote_entities_) {
-        //     auto tile = world_to_tile(re.position);
-        //     if (!visible.contains(tile)) {
-        //         auto it = std::find_if(
-        //             snapshots_.begin(), snapshots_.end(),
-        //             [&tile](SnapshotEntity const &s) {
-        //                 return world_to_tile(s.position) == tile;
-        //             });
-        //         SnapshotEntity *sn = nullptr;
-        //         if (it != snapshots_.end()) {
-        //             sn = &*it;
-        //         } else {
-        //             snapshots_.emplace_back();
-        //             sn = &snapshots_.back();
-        //         }
-        //         sn->position = re.position;
-        //         sn->kind = re.kind;
-        //         sn->facing = re.facing;
-        //         sn->color = re.color;
-        //         sn->scale = re.scale;
-        //         sn->team = re.cs.team;
-        //         sn->alive = re.cs.alive;
-        //         sn->texture_name = re.texture_name;
-        //     }
-        // }
-
-        for (auto &re : remote_entities_) {
-            auto clip_name = determine_clip_name(re.visual, re.mov.velocity, re.cs.alive, dt);
-            switch_clip(re.visual, clip_name, re.kind, (uint8_t)re.cs.team,
-                        (uint8_t)re.soldier_role, *resources_);
-            tick_animation(re.visual, re.mov.velocity, dt);
+        // Update player visibility from ECS player entity
+        auto pe = world_.entity(player_id_);
+        if (pe.is_alive()) {
+            auto *t = pe.try_get<Transform>();
+            auto *v = pe.try_get<Vision>();
+            if (t) {
+                if (v)
+                    player_visibility_.set_visible_arc(world_to_tile(t->world_pos), v->range,
+                                                       t->facing, v->arc);
+                else
+                    player_visibility_.set_visible_arc(world_to_tile(t->world_pos), 6,
+                                                       t->facing, 360.f);
+            }
         }
+
     }
 
     // Tick projectile visuals
@@ -380,339 +849,7 @@ void Client::update(float dt)
     }
 }
 
-Vec2f Client::player_position() const
-{
-    if (player_id_ == invalid_entity)
-        throw std::runtime_error("player_position: player ID not set");
-    return player_pos_;
-}
-
-bool Client::is_player_dead()
-{
-    if (player_id_ == invalid_entity)
-        throw std::runtime_error("is_player_dead: player ID not set");
-    return !player_cs_.alive;
-}
-
-RemoteEntity const *Client::find_player() const
-{
-    for (auto const &re : remote_entities_)
-        if (re.id == player_id_)
-            return &re;
-    return nullptr;
-}
-
-CombatStats const *Client::player_stats()
-{
-    if (player_id_ == invalid_entity)
-        return nullptr;
-    static CombatStats stats;
-    stats.hp = player_cs_.hp;
-    stats.max_hp = player_cs_.max_hp;
-    stats.alive = player_cs_.alive;
-    stats.attack = player_cs_.attack;
-    stats.defense = player_cs_.defense;
-    stats.attack_range = player_cs_.attack_range;
-    return &stats;
-}
-
-RemoteEntity *Client::find_entity(EntityId id)
-{
-    for (auto &re : remote_entities_)
-        if (re.id == id)
-            return &re;
-    return nullptr;
-}
-
-static void set_visual_from_kind(RemoteEntity &re, ResourceManager const &resources)
-{
-    switch (re.kind) {
-    case EntityKind::player:
-        re.visual.color = {0.3f, 0.8f, 0.3f, 1.f};
-        re.visual.scale = 1.f;
-        re.visual.origin = {275, 590};
-        break;
-    case EntityKind::soldier:
-        re.visual.color = re.cs.team == Team::enemy ? SDL_FColor{0.8f, 0.3f, 0.1f, 1.f}
-                                                    : SDL_FColor{0.3f, 0.5f, 0.9f, 1.f};
-        re.visual.scale = 2.2f;
-        re.visual.origin = {16, 28};
-        break;
-    case EntityKind::npc:
-        re.visual.color = {0.8f, 0.6f, 0.2f, 1.f};
-        re.visual.scale = 2.2f;
-        re.visual.origin = {16, 28};
-        break;
-    case EntityKind::enemy:
-        re.visual.color = {0.9f, 0.2f, 0.1f, 1.f};
-        re.visual.scale = 2.5f;
-        re.visual.origin = {16, 28};
-        break;
-    case EntityKind::structure: {
-        re.visual.scale = 1.2f;
-        switch (re.building_type) {
-        case 0:
-            re.visual.color = {0.45f, 0.40f, 0.35f, 1.f};
-            break;
-        case 1:
-            re.visual.color = {0.3f, 0.7f, 0.3f, 1.f};
-            break;
-        case 2:
-            re.visual.color = {0.3f, 0.5f, 0.8f, 1.f};
-            break;
-        case 3:
-            re.visual.color = {0.9f, 0.7f, 0.2f, 1.f};
-            break;
-        case 4:
-            re.visual.color = {0.85f, 0.3f, 0.15f, 1.f};
-            break;
-        default:
-            re.visual.color = {0.5f, 0.5f, 0.5f, 1.f};
-            break;
-        }
-        break;
-    }
-    default:
-        break;
-    }
-    re.visual.color.a = 1.f;
-    switch_clip(re.visual, "idle", re.kind, (uint8_t)re.cs.team, (uint8_t)re.soldier_role,
-                resources);
-}
-
-namespace {
-
-// Per-entity parse result — RemoteEntity plus optional player-only data.
-struct ParsedEntity {
-    RemoteEntity re;
-    int attack = 0;
-    int defense = 0;
-    float attack_range = 80.f;
-    SurvivalState survival; // only valid when has_survival is set
-    bool has_survival = false;
-};
-
-// Parse a single entity from the bitmask stream.
-std::optional<ParsedEntity> parse_one_entity(SyncReader &r, ResourceManager const &resources)
-{
-    if (r.remaining() < 10) // id(8) + mask(2)
-        return std::nullopt;
-    ParsedEntity pe;
-    auto &re = pe.re;
-    re.id = r.read<uint64_t>();
-    uint16_t mask = r.read<uint16_t>();
-
-    if (mask & SyncComponent::entity_kind) {
-        re.kind = r.read<uint8_t>();
-        if (re.kind == EntityKind::structure)
-            re.building_type = r.read<uint8_t>();
-        else
-            re.building_type = 0;
-    }
-    if (mask & SyncComponent::position) {
-        Transform pos;
-        pos.read_sync(r);
-        re.target_pos = pos.world_pos;
-        re.facing = pos.facing;
-    }
-    if (mask & SyncComponent::combat) {
-        CombatStats cs;
-        cs.read_sync(r);
-        re.cs.hp = cs.hp;
-        re.cs.max_hp = cs.max_hp;
-        re.cs.alive = cs.alive;
-        re.cs.team = cs.team;
-        pe.attack = cs.attack;
-        pe.defense = cs.defense;
-        pe.attack_range = cs.attack_range;
-    }
-    if (mask & SyncComponent::movement) {
-        Movement mov;
-        mov.read_sync(r);
-        re.mov.velocity = mov.velocity;
-    }
-    if (mask & SyncComponent::soldier_ai) {
-        SoldierAI ai;
-        ai.read_sync(r);
-        re.soldier_stance = ai.stance;
-        re.soldier_role = ai.role;
-    }
-    if (mask & SyncComponent::interact)
-        re.interactable = r.read<uint8_t>();
-    if (mask & SyncComponent::survival) {
-        pe.survival.read_sync(r);
-        pe.has_survival = true;
-    }
-    if (mask & SyncComponent::vision) {
-        Vision v;
-        v.read_sync(r);
-        re.vis.range = v.range;
-        re.vis.arc = v.arc;
-    }
-
-    set_visual_from_kind(re, resources);
-    return pe;
-}
-
-} // namespace
-
-// Skip the 9-byte world-state header: day(4), season(1), time_of_day(4)
-static void parse_world_header(SyncReader &r, WorldState &ws)
-{
-    if (r.remaining() < 9)
-        return;
-    ws.set_day(r.read<int32_t>());
-    ws.set_season(r.read<uint8_t>());
-    ws.set_time_of_day(r.read<float>());
-}
-
-void Client::apply_sync_full(std::vector<uint8_t> const &data)
-{
-    SyncReader r{data.data(), data.size()};
-
-    parse_world_header(r, world_state_);
-
-    // Parse explored tiles (server-authoritative)
-    {
-        auto count = r.read<uint16_t>();
-        for (uint16_t i = 0; i < count; ++i)
-            player_visibility_.explore_single(Vec2i(r.read<int32_t>(), r.read<int32_t>()));
-    }
-
-    while (!r.done()) {
-        auto opt = parse_one_entity(r, *resources_);
-        if (!opt)
-            break;
-        auto &pe = *opt;
-        auto &re = pe.re;
-
-        if (re.id == player_id_) {
-            player_target_pos_ = re.target_pos;
-            player_cs_.hp = re.cs.hp;
-            player_cs_.max_hp = re.cs.max_hp;
-            player_cs_.alive = re.cs.alive;
-            player_cs_.team = re.cs.team;
-            player_cs_.attack = pe.attack;
-            player_cs_.defense = pe.defense;
-            player_cs_.attack_range = pe.attack_range;
-            if (pe.has_survival)
-                player_survival_ = pe.survival;
-        }
-
-        // Upsert into remote_entities
-        auto *rp = find_entity(re.id);
-        if (!rp) {
-            re.position = re.target_pos;
-            remote_entities_.push_back(re);
-        }
-        else {
-            rp->kind = re.kind;
-            rp->target_pos = re.target_pos;
-            rp->cs.hp = re.cs.hp;
-            rp->cs.max_hp = re.cs.max_hp;
-            rp->cs.alive = re.cs.alive;
-            rp->cs.team = re.cs.team;
-            rp->mov.velocity = re.mov.velocity;
-            rp->facing = re.facing;
-            rp->interactable = re.interactable;
-            set_visual_from_kind(*rp, *resources_);
-        }
-    }
-    // Entities not in this sync stay — snapshot management is handled
-    // per-frame in update() based on tile visibility
-}
-
-void Client::apply_sync_delta(std::vector<uint8_t> const &data)
-{
-    SyncReader r{data.data(), data.size()};
-
-    parse_world_header(r, world_state_);
-
-    // Parse explored tiles (server-authoritative)
-    {
-        auto count = r.read<uint16_t>();
-        for (uint16_t i = 0; i < count; ++i) {
-            auto x = r.read<int32_t>();
-            auto y = r.read<int32_t>();
-            player_visibility_.explore_single({x, y});
-        }
-    }
-
-    while (!r.done()) {
-        auto opt = parse_one_entity(r, *resources_);
-        if (!opt)
-            break;
-        auto &pe = *opt;
-        auto &re = pe.re;
-
-        if (re.id == player_id_) {
-            player_target_pos_ = re.target_pos;
-            player_cs_.hp = re.cs.hp;
-            player_cs_.max_hp = re.cs.max_hp;
-            player_cs_.alive = re.cs.alive;
-            player_cs_.team = re.cs.team;
-            player_cs_.attack = pe.attack;
-            player_cs_.defense = pe.defense;
-            player_cs_.attack_range = pe.attack_range;
-            if (pe.has_survival)
-                player_survival_ = pe.survival;
-        }
-
-        auto *rp = find_entity(re.id);
-        if (!rp) {
-            re.position = re.target_pos;
-            remote_entities_.push_back(std::move(re));
-        }
-        else {
-            rp->kind = re.kind;
-            rp->target_pos = re.target_pos;
-            rp->cs.hp = re.cs.hp;
-            rp->cs.max_hp = re.cs.max_hp;
-            rp->cs.alive = re.cs.alive;
-            rp->cs.team = re.cs.team;
-            rp->mov.velocity = re.mov.velocity;
-            rp->facing = re.facing;
-            rp->interactable = re.interactable;
-            set_visual_from_kind(*rp, *resources_);
-        }
-    }
-}
-
-void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int damage,
-                                 bool killed)
-{
-    EntityId target = (defender_id == 0) ? player_id_ : defender_id;
-    if (target == invalid_entity) {
-        spdlog::warn("handle_combat_event: target entity is invalid");
-        return;
-    }
-
-    if (target == player_id_) {
-        player_cs_.hp -= damage;
-        if (killed)
-            player_cs_.alive = false;
-    }
-    else {
-        auto *rp = find_entity(target);
-        if (!rp) {
-            spdlog::warn("handle_combat_event: entity {} not found", target);
-            return;
-        }
-        rp->cs.hp -= damage;
-        if (killed)
-            rp->cs.alive = false;
-        rp->visual.hurt_timer = 0.3f;
-    }
-
-    // Trigger attack animation on attacker
-    if (attacker_id != 0) {
-        auto *atk = find_entity(attacker_id);
-        if (atk)
-            atk->visual.attack_timer = 0.3f;
-    }
-
-    combat_events_.push_back({attacker_id, defender_id, damage, killed});
-}
+// ── Diagnostics ──────────────────────────────────────────────────────────────
 
 void Client::record_sync_received()
 {
@@ -722,26 +859,13 @@ void Client::record_sync_received()
     if (last_active_send_tick_.time_since_epoch().count() > 0) {
         auto rtt = static_cast<uint32_t>(
             duration_cast<milliseconds>(now - last_active_send_tick_).count());
-        // Exponentially smoothed average (alpha ≈ 0.3)
         estimated_rtt_ms_ =
             estimated_rtt_ms_ == 0 ? rtt : estimated_rtt_ms_ * 7 / 10 + rtt * 3 / 10;
         last_active_send_tick_ = {};
     }
 }
 
-void Client::interpolate_entities(float dt)
-{
-    float t = std::min(1.f, dt * 30.f);
-    player_pos_.x += (player_target_pos_.x - player_pos_.x) * t;
-    player_pos_.y += (player_target_pos_.y - player_pos_.y) * t;
-
-    for (auto &e : remote_entities_) {
-        if (e.kind == EntityKind::structure)
-            continue;
-        e.position.x += (e.target_pos.x - e.position.x) * t;
-        e.position.y += (e.target_pos.y - e.position.y) * t;
-    }
-}
+// ── Dialogue sync ────────────────────────────────────────────────────────────
 
 void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
 {
@@ -770,8 +894,7 @@ void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
             dl.variant_index = l.variant_index;
             for (auto &kv : l.slots)
                 dl.slots.emplace(std::move(kv.first), std::move(kv.second));
-        }
-        else {
+        } else {
             dl.text_key = l.use_raw ? "" : l.text;
             dl.raw_text = l.use_raw ? l.text : "";
             dl.use_raw = l.use_raw;
@@ -781,6 +904,8 @@ void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
     dialogue_.available_topics = std::move(s.topics);
     dialogue_.available_actions = std::move(s.actions);
 }
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
 
 awaitable<bool> Client::authenticate_transport(std::shared_ptr<Session> t)
 {
@@ -792,8 +917,7 @@ awaitable<bool> Client::authenticate_transport(std::shared_ptr<Session> t)
                       static_cast<ServerMsgType>(res.type), res.payload);
         co_return res.type == static_cast<std::uint32_t>(ServerMsgType::auth) &&
             res.payload == auth_payload();
-    }
-    catch (...) {
+    } catch (...) {
         co_return false;
     }
 }

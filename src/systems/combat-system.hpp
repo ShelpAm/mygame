@@ -2,7 +2,7 @@
 
 #include "core/game-types.hpp"
 #include "core/math.hpp"
-#include "entities/components/combat-stats.hpp"
+#include "components/combat-stats.hpp"
 #include <flecs.h>
 #include <functional>
 #include <unordered_map>

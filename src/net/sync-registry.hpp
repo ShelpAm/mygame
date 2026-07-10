@@ -1,13 +1,13 @@
 #pragma once
 
-#include "entities/components/combat-stats.hpp"
-#include "entities/components/interactable.hpp"
-#include "entities/components/movement.hpp"
-#include "entities/components/position.hpp"
-#include "entities/components/soldier-ai.hpp"
-#include "entities/components/vision.hpp"
+#include "components/combat-stats.hpp"
+#include "components/interactable.hpp"
+#include "components/movement.hpp"
+#include "components/position.hpp"
+#include "components/soldier-ai.hpp"
+#include "components/vision.hpp"
 #include "net/net-packet.hpp"
-#include "survival/condition-tracker.hpp"
+#include "components/survival-state.hpp"
 #include <cstdint>
 #include <vector>
 
