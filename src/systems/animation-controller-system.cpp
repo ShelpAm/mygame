@@ -12,7 +12,7 @@
 
 void AnimationControllerSystem::update(flecs::world &world,
                                         ResourceManager const &resources,
-                                        float /*delta_time*/)
+                                        float delta_time)
 {
     world.query<Animation, Sprite, Movement, CombatStats, KindTag>().each(
         [&](flecs::entity e, Animation &anim, Sprite &s, Movement const &mov,
@@ -51,4 +51,11 @@ void AnimationControllerSystem::update(flecs::world &world,
             else if (mov.velocity.x < -1.f)
                 s.flip = clip ? clip->faces_right : false;
         });
+
+    // Tick down HitFlash timers and clean up expired ones
+    world.each([delta_time](flecs::entity e, HitFlash &hf) {
+        hf.remaining -= delta_time;
+        if (hf.remaining <= 0.f)
+            e.remove<HitFlash>();
+    });
 }
