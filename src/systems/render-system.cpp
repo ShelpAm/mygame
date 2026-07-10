@@ -33,7 +33,6 @@ void RenderSystem::render(Client &client)
     render_town(client);
     render_entities(client, client.player_position());
     render_projectiles(client);
-    // render_health_bars(client, client.player_position());
     render_damage_numbers(client, client.combat_events());
     render_fog_overlay(client.player_visibility());
 }
@@ -251,7 +250,6 @@ void RenderSystem::render_entities(Client const &client, Vec2f local_player_pos)
         }
 
         // health bar
-
         float barW = 32.F;
         float barH = 4.F;
         // 居中对齐：左上角 X + (图片缩放宽 - 血条宽) / 2
@@ -309,8 +307,7 @@ void RenderSystem::render_projectiles(Client const &client)
     }
 }
 
-void RenderSystem::render_damage_numbers(Client &client,
-                                         std::vector<CombatEvent> const &events)
+void RenderSystem::render_damage_numbers(Client &client, std::vector<CombatEvent> const &events)
 {
     auto &world = client.world();
 

@@ -122,11 +122,6 @@ class GameMode {
     void set_location_defs(std::vector<LocationDefinition> const &defs) { location_defs_ = &defs; }
 
   private:
-    EntityId spawn_soldier(EntityId captain_id, SoldierRole role);
-    EntityId spawn_npc(std::string const &id, std::string const &name, float x, float y,
-                       std::string const &personality,
-                       std::vector<NPCKnowledgeEntry> const &known_facts);
-    void spawn_guards(EntityId captain_eid, int count);
     void relayout_formation(EntityId captain_id);
     void end_dialogue(EntityId player);
     void check_event_spawns();

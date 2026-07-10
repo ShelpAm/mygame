@@ -69,6 +69,8 @@ void GameMode::init_world()
     //   SurvivalDecay → SoldierAI → CombatResolution
 
     combat_.set_dirty_callback([this](EntityId eid) { mark_dirty(eid); });
+    factory_.set_dirty_callback([this](EntityId eid) { mark_dirty(eid); });
+    factory_.set_relationship_table(&relationships_);
 
     factory_.spawn_building_entities(*location_defs_, *map_data_);
     factory_.spawn_town_npcs();
@@ -190,7 +192,7 @@ void GameMode::load_npcs()
                         e.source = std::string(ko.at("source").as_string());
                     facts.push_back(std::move(e));
                 }
-            auto npc_eid = spawn_npc(id, name, x, y, pers, facts);
+            auto npc_eid = factory_.spawn_npc(id, name, x, y, pers, facts);
             // Parse location_id if present
             if (obj.contains("location_id") && npc_eid != invalid_entity) {
                 std::string loc_id = std::string(obj.at("location_id").as_string());
@@ -200,7 +202,11 @@ void GameMode::load_npcs()
             }
             if (obj.contains("captain") && obj.at("captain").as_bool()) {
                 int gc = static_cast<int>(obj.at("guards").as_int64());
-                spawn_guards(npc_eid, gc);
+                for (int gi = 0; gi < gc; ++gi)
+                factory_.spawn_soldier(npc_eid, SoldierRole::guard, 0.F,
+                    [this](EntityId cid, SoldierRole r, EntityId tid) -> Formation & {
+                        return formation(cid, r, tid);
+                    });
             }
             relayout_formation(npc_eid);
         }
@@ -410,115 +416,20 @@ void GameMode::init_systems()
     player_visibility_sys_.depends_on(death_marker_sys_);
 }
 
-EntityId GameMode::spawn_npc(std::string const &id, std::string const &name, float x, float y,
-                             std::string const &personality,
-                             std::vector<NPCKnowledgeEntry> const &known_facts)
-{
-    auto e = world_.entity();
-    auto eid = e.id();
-
-    NPCState npc;
-    npc.npc_id = id;
-    npc.display_name = name;
-    npc.personality = personality;
-    for (auto const &kf : known_facts)
-        npc.knowledge[kf.fact_id] = {
-            .fact_id = kf.fact_id,
-            .npc_version = kf.version,
-            .locale_key = kf.locale_key,
-            .confidence = kf.confidence,
-            .witnessed = kf.witnessed,
-            .source_npc_id = kf.source,
-        };
-
-    e.set(Transform{.world_pos = {x, y}, .facing = Vec2f{-x, -y}.normalized()});
-    e.set(Interactable{.interact_radius = 64.F, .can_talk = true});
-    e.set(npc);
-    e.set(CombatStats{
-        .team = personality == "hostile" ? Team::enemy : Team::neutral,
-        .max_hp = 50,
-        .hp = 50,
-        .attack = 2,
-        .defense = 4,
-        .attack_range = 48.F,
-    });
-    e.set(Collider{{-14.F, -14.F}, {14.F, 14.F}});
-
-    relationships_.set_relation(id, {});
-    mark_dirty(eid);
-    return eid;
-}
-
-EntityId GameMode::spawn_soldier(EntityId captain_id, SoldierRole role)
-{
-    auto defaults = soldier_role_stats(role);
-    auto target = world_.entity(captain_id);
-
-    // Count how many soldiers share this new soldier's formation
-    // (across all roles), so they are laid out as one group.
-    auto &new_fm = formation(captain_id, role, captain_id);
-    std::size_t num_soldiers = 0; // Count of soldiers in this formation
-
-    auto mysoldiers =
-        world_.query_builder<SoldierAI, CombatStats>().with<BelongsTo>(captain_id).build();
-    mysoldiers.each([&](flecs::entity, SoldierAI &ai, CombatStats &cs) {
-        if (!cs.alive)
-            return;
-        auto &fm = formation(captain_id, ai.role, target.id());
-        if (std::string_view{fm.name()} == new_fm.name())
-            ++num_soldiers;
-    });
-    auto target_trans = target.get<Transform>();
-    auto offsets = new_fm.compute_offsets({
-        .count = num_soldiers + 1,
-        .target_facing = target_trans.facing,
-        .target_position = target_trans.world_pos,
-        .time = elapsed_,
-    });
-    auto pos = world_.entity(captain_id).get<Transform>().world_pos;
-
-    auto e = world_.entity()
-                 .add<BelongsTo>(captain_id)
-                 .add<Follows>(captain_id)
-                 .set(Transform{.world_pos = pos, .facing = target_trans.facing})
-                 .set(Movement{.max_speed = defaults.max_speed, .velocity{}})
-                 .set(CombatStats{
-                     .team = world_.entity(captain_id).get<CombatStats>().team,
-                     .max_hp = defaults.max_hp,
-                     .hp = defaults.hp,
-                     .attack = defaults.attack,
-                     .defense = defaults.defense,
-                     .attack_range = defaults.attack_range,
-                 })
-                 .set(Collider{{-14.F, -14.F}, {14.F, 14.F}})
-                 .set(SoldierAI{
-                     .follow_distance = 2.F,
-                     .formation_offset = {}, // Leaves empty, compute in `relayout_formation`.
-                     .engage_range = defaults.engage_range,
-                     .role = role,
-                     .stance = defaults.stance,
-                     .path_ = {},
-                 });
-    mark_dirty(e.id());
-    relayout_formation(captain_id);
-    return e.id();
-}
-
 EntityId GameMode::spawn_recruit(EntityId leader)
 {
-    return spawn_soldier(leader, SoldierRole::melee);
+    return factory_.spawn_soldier(leader, SoldierRole::melee, 0.F,
+        [this](EntityId cid, SoldierRole r, EntityId tid) -> Formation & {
+            return formation(cid, r, tid);
+        });
 }
 
 EntityId GameMode::spawn_recruit_ranged(EntityId leader)
 {
-    return spawn_soldier(leader, SoldierRole::ranged);
-}
-
-void GameMode::spawn_guards(EntityId captain_eid, int count)
-{
-    for (int g = 0; g < count; ++g) {
-        spawn_soldier(captain_eid, SoldierRole::guard);
-    }
+    return factory_.spawn_soldier(leader, SoldierRole::ranged, 0.F,
+        [this](EntityId cid, SoldierRole r, EntityId tid) -> Formation & {
+            return formation(cid, r, tid);
+        });
 }
 
 void GameMode::cycle_stance(EntityId leader)
@@ -1003,21 +914,7 @@ void GameMode::set_navigation(NavigationSystem const *nav)
 
 EntityId GameMode::spawn_player(Vec2f pos, Team team)
 {
-    auto e = world_.entity()
-                 .add<PlayerTag>()
-                 .set(Transform{.world_pos = pos})
-                 .set(CombatStats{.team = team,
-                                  .max_hp = 200,
-                                  .hp = 200,
-                                  .attack = 4,
-                                  .defense = 3,
-                                  .attack_range = 48.F})
-                 .set(Movement{.max_speed = 200, .velocity = {}})
-                 .set(SurvivalState{})
-                 .set(Collider{{-14.F, -14.F}, {14.F, 14.F}})
-                 .set(Vision{});
-    mark_dirty(e.id());
-    return e.id();
+    return factory_.spawn_player(pos, team);
 }
 
 void GameMode::respawn_player(EntityId pid)
