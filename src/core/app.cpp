@@ -184,16 +184,6 @@ void App::load_textures()
         return std::string{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
     };
 
-    auto yaml_str = read_file("assets/data/textures.yaml");
-    auto result = rfl::yaml::read<Generic>(yaml_str);
-    if (!result) {
-        spdlog::error("load_textures: failed to parse textures.yaml: {}", result.error().what());
-        return;
-    }
-
-    auto const &root = result.value();
-    auto const &root_obj = std::get<Obj>(root.get());
-
     // ── helpers to extract typed values from an Object ────────────────────
     auto get_str = [](Obj const &o, std::string const &key) -> std::optional<std::string> {
         for (auto const &[k, v] : o)
@@ -210,40 +200,76 @@ void App::load_textures()
         return std::nullopt;
     };
 
-    // ── groups: animated character sprite groups ──────────────────────────
-    for (auto const &[gk, gv] : root_obj) {
-        if (gk != "groups")
-            continue;
-        for (auto const &[grp_name, grp_val] : std::get<Obj>(gv.get())) {
-            auto const &grp = std::get<Obj>(grp_val.get());
-            auto base = get_str(grp, "base");
-            if (!base) {
-                spdlog::warn("load_textures: group '{}' has no 'base', skipping", grp_name);
-                continue;
-            }
-            auto sheet = get_int(grp, "sheet");
+    // ── Read textures.yaml for base paths and singles ─────────────────────
+    struct TexGroup {
+        std::string base;
+        std::optional<int> sheet;
+    };
+    std::unordered_map<std::string, TexGroup> tex_groups;
 
-            // anims array
+    auto parse = [&](std::string const &path) -> std::optional<Obj> {
+        auto yaml_str = read_file(path);
+        if (yaml_str.empty()) return std::nullopt;
+        auto result = rfl::yaml::read<Generic>(yaml_str);
+        if (!result) {
+            spdlog::error("load_textures: failed to parse {}: {}", path, result.error().what());
+            return std::nullopt;
+        }
+        return std::get<Obj>(result.value().get());
+    };
+
+    auto root_obj = parse("assets/data/textures.yaml");
+    if (!root_obj) return;
+
+    for (auto const &[gk, gv] : *root_obj) {
+        if (gk != "groups") continue;
+        for (auto const &[name, val] : std::get<Obj>(gv.get())) {
+            auto const &g = std::get<Obj>(val.get());
+            auto base = get_str(g, "base");
+            if (!base) continue;
+            TexGroup tg{*base, get_int(g, "sheet")};
+            tex_groups.emplace(name, std::move(tg));
+        }
+    }
+
+    // ── Read clips.yaml for frame counts and spritesheet files ────────────
+    struct AnimLoad {
+        std::string prefix;
+        int frames;
+        std::optional<std::string> file; // spritesheet sub-file
+    };
+
+    auto clip_obj = parse("assets/data/clips.yaml");
+    if (!clip_obj) return;
+
+    for (auto const &[gk, gv] : *clip_obj) {
+        if (gk != "groups") continue;
+        for (auto const &[grp_name, grp_val] : std::get<Obj>(gv.get())) {
+            // Look up the texture group for this name
+            auto ti = tex_groups.find(grp_name);
+            if (ti == tex_groups.end()) continue;
+            auto const &tg = ti->second;
+
+            // Extract anims
+            auto const &grp = std::get<Obj>(grp_val.get());
             for (auto const &[ak, av] : grp) {
-                if (ak != "anims")
-                    continue;
+                if (ak != "anims") continue;
                 for (auto const &a_val : std::get<std::vector<Generic>>(av.get())) {
                     auto const &a = std::get<Obj>(a_val.get());
                     auto prefix = get_str(a, "prefix");
                     auto frames = get_int(a, "frames");
-                    if (!prefix || !frames)
-                        continue;
+                    auto file = get_str(a, "file");
+                    if (!prefix || !frames) continue;
 
-                    if (sheet) {
-                        auto file = get_str(a, "file").value_or(
-                                       get_str(a, "name").value_or(*prefix));
+                    if (tg.sheet) {
+                        std::string fname = file.value_or(*prefix);
                         resources_->load_spritesheet(renderer_, *prefix,
-                            *base + "/" + file + ".png", *sheet);
+                            tg.base + "/" + fname + ".png", *tg.sheet);
                     } else {
                         for (int i = 0; i < *frames; ++i) {
                             auto name = *prefix + "_" + std::to_string(i);
                             resources_->load_texture(renderer_, name,
-                                *base + "/" + name + ".png");
+                                tg.base + "/" + name + ".png");
                         }
                     }
                 }
@@ -252,9 +278,8 @@ void App::load_textures()
     }
 
     // ── singles: simple named textures ────────────────────────────────────
-    for (auto const &[sk, sv] : root_obj) {
-        if (sk != "singles")
-            continue;
+    for (auto const &[sk, sv] : *root_obj) {
+        if (sk != "singles") continue;
         for (auto const &[name, val] : std::get<Obj>(sv.get())) {
             // String → single texture file
             if (auto *path = std::get_if<std::string>(&val.get())) {
