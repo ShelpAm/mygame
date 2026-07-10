@@ -14,7 +14,7 @@
 static void add_frames(AnimationClip &clip, std::string const &base, int count, float dur)
 {
     for (int i = 0; i < count; ++i) {
-        clip.frame_textures.push_back(base + "_" + std::to_string(i));
+        clip.frame_sprites.push_back(base + "_" + std::to_string(i));
         clip.frame_durations.push_back(dur);
     }
 }
@@ -117,9 +117,9 @@ void register_default_clips(ResourceManager &resources)
     resources.register_clip("structure_idle", {"idle", {"tile_0"}, {0.f}, false});
 
     // 1-frame clips per building type so they resolve to the correct sprite
-    resources.register_clip("inn_idle",        {"idle", {"inn"},        {0.f}, false});
-    resources.register_clip("market_idle",     {"idle", {"market"},     {0.f}, false});
-    resources.register_clip("temple_idle",     {"idle", {"temple"},     {0.f}, false});
+    resources.register_clip("inn_idle", {"idle", {"inn"}, {0.f}, false});
+    resources.register_clip("market_idle", {"idle", {"market"}, {0.f}, false});
+    resources.register_clip("temple_idle", {"idle", {"temple"}, {0.f}, false});
     resources.register_clip("blacksmith_idle", {"idle", {"blacksmith"}, {0.f}, false});
 }
 
@@ -144,8 +144,7 @@ static char const *kind_key(uint8_t entity_kind, uint8_t team, uint8_t role)
     }
 }
 
-std::string determine_clip_name(float hurt_timer, float attack_timer,
-                                 Vec2f velocity, bool alive)
+std::string determine_clip_name(float hurt_timer, float attack_timer, Vec2f velocity, bool alive)
 {
     if (!alive)
         return "die";
@@ -158,9 +157,8 @@ std::string determine_clip_name(float hurt_timer, float attack_timer,
     return "idle";
 }
 
-AnimationClip const *get_clip(std::string const &clip_name,
-                               uint8_t entity_kind, uint8_t team, uint8_t role,
-                               ResourceManager const &resources)
+AnimationClip const *get_clip(std::string const &clip_name, uint8_t entity_kind, uint8_t team,
+                              uint8_t role, ResourceManager const &resources)
 {
     char const *key_prefix = kind_key(entity_kind, team, role);
     if (!key_prefix)

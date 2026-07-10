@@ -679,8 +679,8 @@ PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const 
         // Resolve the initial sprite name (first frame of the idle clip)
         // through sprites.yaml to populate texture_name and clipping rect.
         if (auto *cli = e.try_get<Animation>()) {
-            if (cli->clip && !cli->clip->frame_textures.empty()) {
-                auto const &sprite_name = cli->clip->frame_textures[0];
+            if (cli->clip && !cli->clip->frame_sprites.empty()) {
+                auto const &sprite_name = cli->clip->frame_sprites[0];
                 auto *def = resources.resolve_sprite(sprite_name);
                 if (def) {
                     Sprite updated;

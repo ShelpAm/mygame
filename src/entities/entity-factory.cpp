@@ -395,7 +395,6 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
         // Assign types: one of each special first, then generic for the rest.
         std::vector<BuildingData::Type> assignments;
         assignments.reserve(groups.size());
-        size_t si = 0;
         for (size_t gi = 0; gi < groups.size(); ++gi)
             assignments.push_back(gi < std::size(special_types) ? special_types[gi]
                                                                 : BuildingData::Type::generic);
@@ -423,7 +422,6 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
 
 void EntityFactory::spawn_town_npcs()
 {
-    auto &root_t = std::get<Obj>(entities_cfg_.get());
     int count = 0;
 
     struct ServiceBldg {
