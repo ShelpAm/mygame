@@ -176,31 +176,8 @@ void App::init_server()
 
 void App::load_textures()
 {
-    // reflect-cpp structs matching textures.yaml (shared schema with
-    // register_default_clips in animation-data.cpp).
-    struct AnimEntry {
-        std::string name, prefix;
-        int frames;
-        float dur;
-        std::optional<std::string> file;
-    };
-    struct Group {
-        std::string base;
-        std::optional<int> sheet;
-        std::vector<AnimEntry> anims;
-    };
-    struct TilesCfg {
-        std::string base, ext, name_prefix;
-        int count;
-    };
-    struct Singles {
-        TilesCfg tiles;
-        std::string entity_dead;
-    };
-    struct Cfg {
-        std::map<std::string, Group> groups;
-        Singles singles;
-    };
+    using Generic = rfl::Generic;
+    using Obj = Generic::Object;
 
     auto read_file = [](std::string const &p) {
         std::ifstream f(p);
@@ -208,38 +185,97 @@ void App::load_textures()
     };
 
     auto yaml_str = read_file("assets/data/textures.yaml");
-    auto result = rfl::yaml::read<Cfg>(yaml_str);
+    auto result = rfl::yaml::read<Generic>(yaml_str);
     if (!result) {
         spdlog::error("load_textures: failed to parse textures.yaml: {}", result.error().what());
         return;
     }
-    auto const &cfg = result.value();
 
-    for (auto const &[grp, g] : cfg.groups) {
-        for (auto const &a : g.anims) {
-            if (g.sheet) {
-                std::string file = a.file.value_or(a.name);
-                resources_->load_spritesheet(renderer_, a.prefix,
-                    g.base + "/" + file + ".png", *g.sheet);
-            } else {
-                for (int i = 0; i < a.frames; ++i) {
-                    auto name = a.prefix + "_" + std::to_string(i);
-                    resources_->load_texture(renderer_, name,
-                        g.base + "/" + name + ".png");
+    auto const &root = result.value();
+    auto const &root_obj = std::get<Obj>(root.get());
+
+    // ── helpers to extract typed values from an Object ────────────────────
+    auto get_str = [](Obj const &o, std::string const &key) -> std::optional<std::string> {
+        for (auto const &[k, v] : o)
+            if (k == key)
+                if (auto *s = std::get_if<std::string>(&v.get()))
+                    return *s;
+        return std::nullopt;
+    };
+    auto get_int = [](Obj const &o, std::string const &key) -> std::optional<int> {
+        for (auto const &[k, v] : o)
+            if (k == key)
+                if (auto *i = std::get_if<int64_t>(&v.get()))
+                    return static_cast<int>(*i);
+        return std::nullopt;
+    };
+
+    // ── groups: animated character sprite groups ──────────────────────────
+    for (auto const &[gk, gv] : root_obj) {
+        if (gk != "groups")
+            continue;
+        for (auto const &[grp_name, grp_val] : std::get<Obj>(gv.get())) {
+            auto const &grp = std::get<Obj>(grp_val.get());
+            auto base = get_str(grp, "base");
+            if (!base) {
+                spdlog::warn("load_textures: group '{}' has no 'base', skipping", grp_name);
+                continue;
+            }
+            auto sheet = get_int(grp, "sheet");
+
+            // anims array
+            for (auto const &[ak, av] : grp) {
+                if (ak != "anims")
+                    continue;
+                for (auto const &a_val : std::get<std::vector<Generic>>(av.get())) {
+                    auto const &a = std::get<Obj>(a_val.get());
+                    auto prefix = get_str(a, "prefix");
+                    auto frames = get_int(a, "frames");
+                    if (!prefix || !frames)
+                        continue;
+
+                    if (sheet) {
+                        auto file = get_str(a, "file").value_or(
+                                       get_str(a, "name").value_or(*prefix));
+                        resources_->load_spritesheet(renderer_, *prefix,
+                            *base + "/" + file + ".png", *sheet);
+                    } else {
+                        for (int i = 0; i < *frames; ++i) {
+                            auto name = *prefix + "_" + std::to_string(i);
+                            resources_->load_texture(renderer_, name,
+                                *base + "/" + name + ".png");
+                        }
+                    }
                 }
             }
         }
     }
 
-    // Tilemap textures
-    auto const &t = cfg.singles.tiles;
-    for (int i = 0; i < t.count; ++i) {
-        auto id = std::to_string(i);
-        resources_->load_texture(renderer_, t.name_prefix + id,
-                                 t.base + "/" + id + t.ext);
+    // ── singles: simple named textures ────────────────────────────────────
+    for (auto const &[sk, sv] : root_obj) {
+        if (sk != "singles")
+            continue;
+        for (auto const &[name, val] : std::get<Obj>(sv.get())) {
+            // String → single texture file
+            if (auto *path = std::get_if<std::string>(&val.get())) {
+                resources_->load_texture(renderer_, name, *path);
+                continue;
+            }
+            // Object → structured texture set (tiles etc.)
+            if (auto *obj = std::get_if<Obj>(&val.get())) {
+                if (auto base = get_str(*obj, "base")) {
+                    auto ext = get_str(*obj, "ext").value_or(".png");
+                    auto count = get_int(*obj, "count").value_or(1);
+                    auto name_pfx = get_str(*obj, "name_prefix").value_or(name + "_");
+                    for (int i = 0; i < count; ++i) {
+                        resources_->load_texture(renderer_, name_pfx + std::to_string(i),
+                            *base + "/" + std::to_string(i) + ext);
+                    }
+                }
+                continue;
+            }
+        }
     }
-
-    resources_->load_texture(renderer_, "entity_dead", cfg.singles.entity_dead);
 
     // Load sprite definitions (sprite layer: maps sprite name → texture + clip)
     resources_->load_sprites("assets/data/sprites.yaml");

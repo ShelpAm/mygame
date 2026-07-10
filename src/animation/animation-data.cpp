@@ -26,41 +26,13 @@ static void register_group(ResourceManager &resources, std::string const &prefix
         resources.register_clip(prefix + "_" + c.name, c);
 }
 
-// ── reflect-cpp structs for textures.yaml ────────────────────────────────────
-
-struct AnimEntry {
-    std::string name;
-    std::string prefix;
-    int frames;
-    float dur;
-    std::optional<std::string> file;
-};
-
-struct Group {
-    std::string base;
-    std::optional<int> sheet;
-    std::vector<AnimEntry> anims;
-};
-
-struct TilesConfig {
-    std::string base;
-    std::string ext;
-    int count;
-    std::string name_prefix;
-};
-
-struct AnimConfig {
-    std::map<std::string, Group> groups;
-    struct Singles {
-        TilesConfig tiles;
-        std::string entity_dead;
-    } singles;
-};
-
 // ── YAML loader ───────────────────────────────────────────────────────────
 
 void register_default_clips(ResourceManager &resources)
 {
+    using Generic = rfl::Generic;
+    using Obj = Generic::Object;
+
     auto path = std::filesystem::path("assets/data/textures.yaml");
     if (!std::filesystem::exists(path)) {
         spdlog::error("register_default_clips: textures.yaml not found");
@@ -77,23 +49,68 @@ void register_default_clips(ResourceManager &resources)
         return;
     }
 
-    auto result = rfl::yaml::read<AnimConfig>(content);
+    auto result = rfl::yaml::read<Generic>(content);
     if (!result) {
         spdlog::error("register_default_clips: failed to parse textures.yaml: {}",
                       result.error().what());
         return;
     }
-    auto const &config = result.value();
 
-    for (auto const &[grp_name, group] : config.groups) {
-        std::vector<AnimationClip> clips;
-        for (auto const &anim : group.anims) {
-            clips.emplace_back();
-            auto &clip = clips.back();
-            clip.name = anim.name;
-            add_frames(clip, anim.prefix, anim.frames, anim.dur);
+    auto const &root = result.value();
+    auto const &root_obj = std::get<Obj>(root.get());
+
+    auto get_str = [](Obj const &o, std::string const &key) -> std::optional<std::string> {
+        for (auto const &[k, v] : o)
+            if (k == key)
+                if (auto *s = std::get_if<std::string>(&v.get()))
+                    return *s;
+        return std::nullopt;
+    };
+    auto get_int = [](Obj const &o, std::string const &key) -> std::optional<int> {
+        for (auto const &[k, v] : o)
+            if (k == key)
+                if (auto *i = std::get_if<int64_t>(&v.get()))
+                    return static_cast<int>(*i);
+        return std::nullopt;
+    };
+    auto get_dur = [](Obj const &o, std::string const &key) -> std::optional<float> {
+        for (auto const &[k, v] : o)
+            if (k == key) {
+                if (auto *d = std::get_if<double>(&v.get()))
+                    return static_cast<float>(*d);
+                if (auto *i = std::get_if<int64_t>(&v.get()))
+                    return static_cast<float>(*i);
+            }
+        return std::nullopt;
+    };
+
+    // ── groups ──
+    for (auto const &[gk, gv] : root_obj) {
+        if (gk != "groups")
+            continue;
+        for (auto const &[grp_name, grp_val] : std::get<Obj>(gv.get())) {
+            auto const &grp = std::get<Obj>(grp_val.get());
+
+            std::vector<AnimationClip> clips;
+            for (auto const &[ak, av] : grp) {
+                if (ak != "anims")
+                    continue;
+                for (auto const &a_val : std::get<std::vector<Generic>>(av.get())) {
+                    auto const &a = std::get<Obj>(a_val.get());
+                    auto name = get_str(a, "name");
+                    auto prefix = get_str(a, "prefix");
+                    auto frames = get_int(a, "frames");
+                    auto dur = get_dur(a, "dur");
+                    if (!name || !prefix || !frames || !dur)
+                        continue;
+                    clips.emplace_back();
+                    auto &clip = clips.back();
+                    clip.name = *name;
+                    add_frames(clip, *prefix, *frames, *dur);
+                }
+            }
+            register_group(resources, grp_name, clips);
         }
-        register_group(resources, grp_name, clips);
     }
 
     // 1-frame static clip for structures and other non-animated entities
