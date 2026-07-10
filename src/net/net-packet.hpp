@@ -35,6 +35,7 @@ enum Value : uint8_t {
     npc = 3,
     enemy = 4,
     structure = 5,
+    building = 6,
 };
 }
 

@@ -91,20 +91,6 @@ void RenderSystem::render_town(Client const &client) const
 
     auto const &discovered = client.discovered_towns();
 
-    // Build a map: building_group → building_type from synced structure entities.
-    // Multi-tile buildings share the same group ID on the map, so all their
-    // tiles get the correct colour (not just the entity's centre tile).
-    std::unordered_map<int, uint8_t> group_types;
-    auto bldg_query = client.world().query<Transform, BuildingData>();
-    bldg_query.each([&](flecs::entity, Transform const &t, BuildingData const &bd) {
-        Vec2i tile = world_to_tile(t.world_pos);
-        if (map_data_->in_bounds(tile.x, tile.y)) {
-            int gid = map_data_->tile(tile.x, tile.y).building_group;
-            if (gid > 0)
-                group_types[gid] = static_cast<uint8_t>(bd.type);
-        }
-    });
-
     for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
         for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
             Vec2i tile(x, y);
@@ -112,10 +98,10 @@ void RenderSystem::render_town(Client const &client) const
                 continue;
 
             TileType type = map_data_->tile(x, y).type;
-            if (type == TileType::grass || type == TileType::water || type == TileType::mountain)
+            if (type == TileType::grass || type == TileType::water || type == TileType::mountain || type == TileType::building)
                 continue;
 
-            // Draw overlay for building/road
+            // Draw overlay for road/wall
             Vec2f center = center_of_tile(tile);
             Vec2f screen = camera_->world_to_screen(center);
             auto const zoom = camera_->zoom();
@@ -123,48 +109,7 @@ void RenderSystem::render_town(Client const &client) const
             SDL_FRect overlay{
                 .x = screen.x - size / 2.F, .y = screen.y - size / 2.F, .w = size, .h = size};
 
-            if (type == TileType::building) {
-                // Colour per building group — look up the group's type
-                int gid = map_data_->tile(x, y).building_group;
-                uint8_t bt = (gid > 0 && group_types.contains(gid)) ? group_types.at(gid) : 0;
-                SDL_Color col;
-                char const *label = nullptr;
-                using BDT = BuildingData::Type;
-                switch (static_cast<BDT>(bt)) {
-                case BDT::inn:
-                    col = {.r = 76, .g = 179, .b = 76, .a = 240};
-                    label = "Inn";
-                    break;
-                case BDT::market:
-                    col = {.r = 76, .g = 125, .b = 204, .a = 240};
-                    label = "Market";
-                    break;
-                case BDT::temple:
-                    col = {.r = 229, .g = 178, .b = 51, .a = 240};
-                    label = "Temple";
-                    break;
-                case BDT::blacksmith:
-                    col = {.r = 217, .g = 76, .b = 38, .a = 240};
-                    label = "Smithy";
-                    break;
-                default:
-                    col = {.r = 130, .g = 90, .b = 50, .a = 240};
-                    break;
-                }
-                SDL_SetRenderDrawColor(renderer_, col.r, col.g, col.b, col.a);
-                SDL_RenderFillRect(renderer_, &overlay);
-                // Thin border
-                SDL_SetRenderDrawColor(renderer_, 240, 220, 180, 200);
-                SDL_RenderRect(renderer_, &overlay);
-                // Label
-                if (label) {
-                    auto lp = center_of_tile(tile);
-                    auto ls = camera_->world_to_screen(lp);
-                    font_->draw({ls.x, ls.y - tile_size / 2.F},
-                                SDL_Color{.r = 255, .g = 255, .b = 255, .a = 255}, label);
-                }
-            }
-            else if (type == TileType::road) {
+            if (type == TileType::road) {
                 SDL_SetRenderDrawColor(renderer_, 180, 160, 110, 200);
                 SDL_RenderFillRect(renderer_, &overlay);
             }
@@ -211,7 +156,7 @@ void RenderSystem::render_entities(Client const &client, Vec2f local_player_pos)
     // --- 1. Live entities via ECS query ---
     auto query = client.world().query<Transform, Sprite, CombatStats>();
     query.each([&](flecs::entity e, Transform const &t, Sprite const &s, CombatStats const &cs) {
-        // Skip structures
+        // Skip structures (but not buildings)
         auto const *kt = e.try_get<KindTag>();
         if (kt && kt->value == EntityKind::structure)
             return;

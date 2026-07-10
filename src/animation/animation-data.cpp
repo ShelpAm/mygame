@@ -115,6 +115,12 @@ void register_default_clips(ResourceManager &resources)
 
     // 1-frame static clip for structures and other non-animated entities
     resources.register_clip("structure_idle", {"idle", {"tile_0"}, {0.f}, false});
+
+    // 1-frame clips per building type so they resolve to the correct sprite
+    resources.register_clip("inn_idle",        {"idle", {"inn"},        {0.f}, false});
+    resources.register_clip("market_idle",     {"idle", {"market"},     {0.f}, false});
+    resources.register_clip("temple_idle",     {"idle", {"temple"},     {0.f}, false});
+    resources.register_clip("blacksmith_idle", {"idle", {"blacksmith"}, {0.f}, false});
 }
 
 // ── Runtime animation logic ─────────────────────────────────────────────

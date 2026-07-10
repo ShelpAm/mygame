@@ -28,8 +28,10 @@ uint8_t entity_kind(flecs::entity e)
         return EntityKind::npc;
     if (e.has<SoldierAI>())
         return EntityKind::soldier;
-    if (e.has<DefenseStructure>() || e.has<BuildingData>())
+    if (e.has<DefenseStructure>())
         return EntityKind::structure;
+    if (e.has<BuildingData>())
+        return EntityKind::building;
     return EntityKind::enemy;
 }
 
@@ -61,8 +63,8 @@ void serialize_entity(flecs::entity e, std::vector<uint8_t> &out)
     uint8_t kind = entity_kind(e);
     w.write(kind);
 
-    // For structures, also send building type
-    if (kind == EntityKind::structure) {
+    // For structures / buildings, also send the type
+    if (kind == EntityKind::structure || kind == EntityKind::building) {
         auto const *bd = e.try_get<BuildingData>();
         w.write(static_cast<uint8_t>(bd ? static_cast<uint8_t>(bd->type) : 0));
     }

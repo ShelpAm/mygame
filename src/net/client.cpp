@@ -113,7 +113,10 @@ static std::unordered_map<uint8_t, SpriteDef> const &sprite_defs()
                 else if (name.rfind("soldier_",0)==0)    m[EntityKind::soldier] = sd;
                 else if (name == "npc_friendly")         m[EntityKind::npc] = sd;
                 else if (name == "npc_hostile")          m[EntityKind::enemy] = sd;
-                else if (name == "building")             m[EntityKind::structure] = sd;
+                else if (name == "building") {
+                    m[EntityKind::structure] = sd;
+                    m[EntityKind::building]  = sd;
+                }
             }
         } catch (std::exception const &e) {
             spdlog::error("sprite_defs: {}", e.what());
@@ -564,7 +567,7 @@ PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const 
 
     if (mask & SyncComponent::entity_kind) {
         kind = r.read<uint8_t>();
-        if (kind == EntityKind::structure) {
+        if (kind == EntityKind::structure || kind == EntityKind::building) {
             building_type = r.read<uint8_t>();
             e.set(BuildingData{static_cast<BuildingData::Type>(building_type), "", ""});
         }
@@ -654,6 +657,15 @@ PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const 
         case EntityKind::enemy:     prefix = "goblin"; break;
         case EntityKind::npc:       prefix = "villager"; break;
         case EntityKind::structure: prefix = "structure"; break;
+        case EntityKind::building:
+            switch (static_cast<BuildingData::Type>(building_type)) {
+            case BuildingData::Type::inn:        prefix = "inn"; break;
+            case BuildingData::Type::market:     prefix = "market"; break;
+            case BuildingData::Type::temple:     prefix = "temple"; break;
+            case BuildingData::Type::blacksmith: prefix = "blacksmith"; break;
+            default:                             prefix = "structure"; break;
+            }
+            break;
         default:                    prefix = ""; break;
         }
         std::string key = std::string(prefix) + "_idle";
