@@ -1,6 +1,7 @@
 #include "systems/animation-controller-system.hpp"
 
 #include "animation/animation-data.hpp"
+#include "components/building-data.hpp"
 #include "components/combat-stats.hpp"
 #include "components/entity-kind.hpp"
 #include "components/movement.hpp"
@@ -33,9 +34,13 @@ void AnimationControllerSystem::update(flecs::world &world,
             if (auto *ai = e.try_get<SoldierAI>())
                 role = static_cast<uint8_t>(ai->role);
 
+            uint8_t subtype = 0;
+            if (auto *bd = e.try_get<BuildingData>())
+                subtype = static_cast<uint8_t>(bd->type);
+
             auto *clip = get_clip(clip_name, kt.value,
                                   static_cast<uint8_t>(cs.team),
-                                  role, resources);
+                                  role, resources, subtype);
 
             if (clip && clip != anim.clip) {
                 anim.clip = clip;

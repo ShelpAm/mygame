@@ -19,7 +19,9 @@ std::string determine_clip_name(float hurt_timer, float attack_timer,
                                  Vec2f velocity, bool alive);
 
 /// Look up the animation clip for a given entity kind / team / role / clip_name.
+/// subtype is used for building_type (inn/market/etc.) or other sub-categories.
 /// Returns nullptr if no clip is registered.
 AnimationClip const *get_clip(std::string const &clip_name,
                                uint8_t entity_kind, uint8_t team, uint8_t role,
-                               ResourceManager const &resources);
+                               ResourceManager const &resources,
+                               uint8_t subtype = 0);

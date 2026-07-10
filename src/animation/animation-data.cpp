@@ -1,5 +1,6 @@
 #include "animation/animation-data.hpp"
 #include "core/resource-manager.hpp"
+#include "components/building-data.hpp"
 #include "net/net-packet.hpp" // EntityKind, kind_key
 #include <algorithm>
 #include <cmath>
@@ -125,7 +126,8 @@ void register_default_clips(ResourceManager &resources)
 
 // ── Runtime animation logic ─────────────────────────────────────────────
 
-static char const *kind_key(uint8_t entity_kind, uint8_t team, uint8_t role)
+static char const *kind_key(uint8_t entity_kind, uint8_t team, uint8_t role,
+                             uint8_t subtype = 0)
 {
     using namespace EntityKind;
     switch (entity_kind) {
@@ -139,6 +141,16 @@ static char const *kind_key(uint8_t entity_kind, uint8_t team, uint8_t role)
         return "villager";
     case structure:
         return "structure";
+    case building: {
+        using BDT = BuildingData::Type;
+        switch (static_cast<BDT>(subtype)) {
+        case BDT::inn:        return "inn";
+        case BDT::market:     return "market";
+        case BDT::temple:     return "temple";
+        case BDT::blacksmith: return "blacksmith";
+        default:              return "structure";
+        }
+    }
     default:
         return "";
     }
@@ -158,9 +170,9 @@ std::string determine_clip_name(float hurt_timer, float attack_timer, Vec2f velo
 }
 
 AnimationClip const *get_clip(std::string const &clip_name, uint8_t entity_kind, uint8_t team,
-                              uint8_t role, ResourceManager const &resources)
+                              uint8_t role, ResourceManager const &resources, uint8_t subtype)
 {
-    char const *key_prefix = kind_key(entity_kind, team, role);
+    char const *key_prefix = kind_key(entity_kind, team, role, subtype);
     if (!key_prefix)
         return nullptr;
 

@@ -645,32 +645,10 @@ PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const 
 
         // Look up the default "idle" clip so AnimationSystem has
         // a valid clip from the very first frame.
-        // Clip key prefix mirrors kind_key() in animation-data.cpp.
-        char const *prefix = nullptr;
-        switch (kind) {
-        case EntityKind::player:    prefix = "player"; break;
-        case EntityKind::soldier:
-            prefix = (static_cast<int>(role) == 1) ? "archer"
-                   : (team >= Team::enemy)          ? "goblin"
-                                                    : "knight";
-            break;
-        case EntityKind::enemy:     prefix = "goblin"; break;
-        case EntityKind::npc:       prefix = "villager"; break;
-        case EntityKind::structure: prefix = "structure"; break;
-        case EntityKind::building:
-            switch (static_cast<BuildingData::Type>(building_type)) {
-            case BuildingData::Type::inn:        prefix = "inn"; break;
-            case BuildingData::Type::market:     prefix = "market"; break;
-            case BuildingData::Type::temple:     prefix = "temple"; break;
-            case BuildingData::Type::blacksmith: prefix = "blacksmith"; break;
-            default:                             prefix = "structure"; break;
-            }
-            break;
-        default:                    prefix = ""; break;
-        }
-        std::string key = std::string(prefix) + "_idle";
+        // Delegates to kind_key() in animation-data.cpp for the prefix.
         Animation an;
-        an.clip = resources.clip(key);
+        an.clip = get_clip("idle", kind, static_cast<uint8_t>(team),
+                           static_cast<uint8_t>(role), resources, building_type);
         // Last-resort fallback for any entity kind that has no clip registered
         if (!an.clip)
             an.clip = resources.clip("structure_idle");
