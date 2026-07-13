@@ -60,6 +60,14 @@ class Font {
         TTF_DrawRendererText(text_, pos.x, pos.y);
     }
 
+    /// @return Size in pixels of the given string when rendered with this font.
+    Vec2i mesure_string_size(std::string_view str)
+    {
+        Vec2i res;
+        TTF_GetStringSize(font_, str.data(), str.size(), &res.x, &res.y);
+        return res;
+    }
+
   private:
     TTF_Font *font_;
     TTF_TextEngine *engine_;

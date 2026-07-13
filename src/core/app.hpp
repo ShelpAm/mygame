@@ -6,6 +6,7 @@
 #include "core/game-types.hpp"
 #include "core/input-manager.hpp"
 #include "core/locale-manager.hpp"
+#include "game-data.hpp"
 #include "net/client.hpp"
 #include "systems/camera-system.hpp"
 #include "systems/navigation-system.hpp"

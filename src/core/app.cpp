@@ -14,18 +14,18 @@
 #include <boost/asio.hpp>
 #include <boost/json.hpp>
 #include <filesystem>
-#include <fstream>
-#include <rfl.hpp>
-#include <rfl/yaml.hpp>
 #include <format>
 #include <fstream>
 #include <imgui.h>
 #include <ranges>
+#include <rfl.hpp>
+#include <rfl/yaml.hpp>
 #include <spdlog/spdlog.h>
 
 App::App() : camera_system_(window_width_, window_height_)
 {
 }
+
 App::~App()
 {
     shutdown();
@@ -77,8 +77,8 @@ void App::init_graphics()
 
     register_default_clips(*resources_);
 
-    hud_font_ = fonts_->load_font("./assets/fonts/Monaspace Neon Var.ttf", 12.F);
-    auto *cjk_font = fonts_->load_font("./assets/fonts/SourceHanSansCN-Regular.otf", 12.F);
+    hud_font_ = fonts_->load_font("./assets/fonts/Monaspace Neon Var.ttf", 14.F);
+    auto *cjk_font = fonts_->load_font("./assets/fonts/SourceHanSansCN-Regular.otf", 14.F);
     hud_font_->patch_fallback(*cjk_font);
 
     render_system_ = std::make_unique<RenderSystem>(window_, renderer_, resources_.get(),
@@ -186,7 +186,8 @@ void App::load_textures()
 
     auto parse = [&](std::string const &path) -> std::optional<Obj> {
         auto yaml_str = read_file(path);
-        if (yaml_str.empty()) return std::nullopt;
+        if (yaml_str.empty())
+            return std::nullopt;
         auto result = rfl::yaml::read<Generic>(yaml_str);
         if (!result) {
             spdlog::error("load_textures: failed to parse {}: {}", path, result.error().what());
@@ -211,29 +212,33 @@ void App::load_textures()
     };
 
     auto root = parse("assets/data/textures.yaml");
-    if (!root) return;
+    if (!root)
+        return;
 
     // ── groups: individual frame PNGs ─────────────────────────────────────
     // Each {prefix}_{i}.png is loaded from the group's path.
     // Frame counts come from the textures list within each group entry.
     for (auto const &[gk, gv] : *root) {
-        if (gk != "groups") continue;
+        if (gk != "groups")
+            continue;
         for (auto const &[grp_name, grp_val] : std::get<Obj>(gv.get())) {
             auto const &g = std::get<Obj>(grp_val.get());
             auto path = get_str(g, "path");
-            if (!path) continue;
+            if (!path)
+                continue;
 
             for (auto const &[tk, tv] : g) {
-                if (tk != "textures") continue;
+                if (tk != "textures")
+                    continue;
                 for (auto const &t_val : std::get<std::vector<Generic>>(tv.get())) {
                     auto const &t = std::get<Obj>(t_val.get());
                     auto prefix = get_str(t, "prefix");
                     auto frames = get_int(t, "frames");
-                    if (!prefix || !frames) continue;
+                    if (!prefix || !frames)
+                        continue;
                     for (int i = 0; i < *frames; ++i) {
                         auto sprite = *prefix + "_" + std::to_string(i);
-                        resources_->load_texture(renderer_, sprite,
-                            *path + "/" + sprite + ".png");
+                        resources_->load_texture(renderer_, sprite, *path + "/" + sprite + ".png");
                     }
                 }
             }
@@ -242,24 +247,28 @@ void App::load_textures()
 
     // ── spritesheets: one PNG per anim, split horizontally ───────────────
     for (auto const &[gk, gv] : *root) {
-        if (gk != "spritesheets") continue;
+        if (gk != "spritesheets")
+            continue;
         for (auto const &[name, val] : std::get<Obj>(gv.get())) {
             auto const &g = std::get<Obj>(val.get());
             auto path = get_str(g, "path");
             auto fw = get_int(g, "frame_width");
-            if (!path || !fw) continue;
+            if (!path || !fw)
+                continue;
 
             // Find the "sheets" sub-object
             for (auto const &[sk, sv] : g) {
-                if (sk != "sheets") continue;
+                if (sk != "sheets")
+                    continue;
                 for (auto const &[filename, spec] : std::get<Obj>(sv.get())) {
                     auto const &arr = std::get<std::vector<Generic>>(spec.get());
-                    if (arr.size() < 2) continue;
+                    if (arr.size() < 2)
+                        continue;
                     auto prefix = std::get_if<std::string>(&arr[0].get());
                     auto frames = std::get_if<int64_t>(&arr[1].get());
-                    if (!prefix || !frames) continue;
-                    resources_->load_spritesheet(renderer_, *prefix,
-                        *path + "/" + filename, *fw);
+                    if (!prefix || !frames)
+                        continue;
+                    resources_->load_spritesheet(renderer_, *prefix, *path + "/" + filename, *fw);
                 }
             }
         }
@@ -267,7 +276,8 @@ void App::load_textures()
 
     // ── singles: one-off texture files ────────────────────────────────────
     for (auto const &[sk, sv] : *root) {
-        if (sk != "singles") continue;
+        if (sk != "singles")
+            continue;
         for (auto const &[name, val] : std::get<Obj>(sv.get())) {
             if (auto *path = std::get_if<std::string>(&val.get()))
                 resources_->load_texture(renderer_, name, *path);

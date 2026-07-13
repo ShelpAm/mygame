@@ -123,8 +123,10 @@ inline LocationData load_locations_from_json(std::string const &path)
                 LocationDefinition const *from_def = nullptr;
                 LocationDefinition const *to_def = nullptr;
                 for (auto const &loc : out.locations) {
-                    if (loc.id == rd.from_id) from_def = &loc;
-                    if (loc.id == rd.to_id)   to_def = &loc;
+                    if (loc.id == rd.from_id)
+                        from_def = &loc;
+                    if (loc.id == rd.to_id)
+                        to_def = &loc;
                 }
                 if (from_def && to_def) {
                     float dist = (from_def->world_pos - to_def->world_pos).length();

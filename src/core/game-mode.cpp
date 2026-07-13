@@ -1,7 +1,4 @@
 #include "core/game-mode.hpp"
-#include "dialogue/dialogue-engine.hpp"
-#include "dialogue/relationship-table.hpp"
-#include "dialogue/topic-registry.hpp"
 #include "components/building-data.hpp"
 #include "components/collider.hpp"
 #include "components/combat-stats.hpp"
@@ -11,13 +8,16 @@
 #include "components/player.hpp"
 #include "components/position.hpp"
 #include "components/soldier-ai.hpp"
+#include "components/survival-state.hpp"
 #include "components/vision.hpp"
+#include "dialogue/dialogue-engine.hpp"
+#include "dialogue/relationship-table.hpp"
+#include "dialogue/topic-registry.hpp"
 #include "factions/event-simulator.hpp"
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
 #include "knowledge/rumor-propagator.hpp"
 #include "net/server.hpp"
-#include "components/survival-state.hpp"
 #include "systems/collision-system.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/combat-utils.hpp"
@@ -40,7 +40,10 @@ static std::string readFile(std::string const &path)
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
-GameMode::GameMode() : factory_(world_) {}
+GameMode::GameMode() : factory_(world_)
+{
+}
+
 GameMode::~GameMode()
 {
     spdlog::info("GameMode: destructor called");
@@ -49,8 +52,6 @@ GameMode::~GameMode()
 void GameMode::init_world()
 {
     // 开启 REST 服务（默认监听 27750 端口）
-    // ecs_measure_system_time(world_.c_ptr(), true);
-    // world_.app().enable_rest().enable_stats().run();
     world_.import<flecs::stats>();
     world_.set<flecs::Rest>({});
 
@@ -204,10 +205,11 @@ void GameMode::load_npcs()
             if (obj.contains("captain") && obj.at("captain").as_bool()) {
                 int gc = static_cast<int>(obj.at("guards").as_int64());
                 for (int gi = 0; gi < gc; ++gi)
-                factory_.spawn_soldier(npc_eid, SoldierRole::guard, 0.F,
-                    [this](EntityId cid, SoldierRole r, EntityId tid) -> Formation & {
-                        return formation(cid, r, tid);
-                    });
+                    factory_.spawn_soldier(
+                        npc_eid, SoldierRole::guard, 0.F,
+                        [this](EntityId cid, SoldierRole r, EntityId tid) -> Formation & {
+                            return formation(cid, r, tid);
+                        });
             }
             relayout_formation(npc_eid);
         }
@@ -311,80 +313,81 @@ void GameMode::init_systems()
 
     collision_system_ = std::make_unique<CollisionSystem>();
     entity_query_ = world_.query<Transform, Collider>();
-    collision_sys_ = world_.system<Transform, Collider>("Collision")
-                         .kind(flecs::OnUpdate)
-                         .each([this](flecs::entity e, Transform &p, Collider &c) {
-                             Vec2f const original = p.world_pos;
-                             Vec2f pos = original;
+    collision_sys_ =
+        world_.system<Transform, Collider>("Collision")
+            .kind(flecs::OnUpdate)
+            .each([this](flecs::entity e, Transform &p, Collider &c) {
+                Vec2f const original = p.world_pos;
+                Vec2f pos = original;
 
-                             // 1. Tile collision (hard push-out)
-                             pos = collision_system_->resolve_tile_collisions(pos, c);
+                // 1. Tile collision (hard push-out)
+                pos = collision_system_->resolve_tile_collisions(pos, c);
 
-                             // 2. Soft separation — skip structures (they don't move)
-                             Vec2f separation_force = {0.F, 0.F};
-                             bool const is_player = e.has<PlayerTag>();
-                             bool const is_structure = e.has<BuildingData>() || e.has<DefenseStructure>();
+                // 2. Soft separation — skip structures (they don't move)
+                Vec2f separation_force = {0.F, 0.F};
+                bool const is_player = e.has<PlayerTag>();
+                bool const is_structure = e.has<BuildingData>() || e.has<DefenseStructure>();
 
-                             if (!is_structure) {
-                                 Vec2f this_min = pos + c.min;
-                                 Vec2f this_max = pos + c.max;
-                                 entity_query_.each(
-                                     [&](flecs::entity other, Transform const &op, Collider const &oc) {
-                                         if (other == e)
-                                             return;
-                                         if (other.has<BuildingData>() || other.has<DefenseStructure>())
-                                             return;
+                if (!is_structure) {
+                    Vec2f this_min = pos + c.min;
+                    Vec2f this_max = pos + c.max;
+                    entity_query_.each([&](flecs::entity other, Transform const &op,
+                                           Collider const &oc) {
+                        if (other == e)
+                            return;
+                        if (other.has<BuildingData>() || other.has<DefenseStructure>())
+                            return;
 
-                                         Vec2f other_min = op.world_pos + oc.min;
-                                         Vec2f other_max = op.world_pos + oc.max;
+                        Vec2f other_min = op.world_pos + oc.min;
+                        Vec2f other_max = op.world_pos + oc.max;
 
-                                         // AABB overlap check
-                                         if (this_min.x >= other_max.x || this_max.x <= other_min.x)
-                                             return;
-                                         if (this_min.y >= other_max.y || this_max.y <= other_min.y)
-                                             return;
+                        // AABB overlap check
+                        if (this_min.x >= other_max.x || this_max.x <= other_min.x)
+                            return;
+                        if (this_min.y >= other_max.y || this_max.y <= other_min.y)
+                            return;
 
-                                         // Overlap amount on each axis
-                                         float overlap_x = std::min(this_max.x - other_min.x,
-                                                                    other_max.x - this_min.x);
-                                         float overlap_y = std::min(this_max.y - other_min.y,
-                                                                    other_max.y - this_min.y);
+                        // Overlap amount on each axis
+                        float overlap_x =
+                            std::min(this_max.x - other_min.x, other_max.x - this_min.x);
+                        float overlap_y =
+                            std::min(this_max.y - other_min.y, other_max.y - this_min.y);
 
-                                         // Push along the shorter axis
-                                         float weight = other.has<PlayerTag>() ? 15.F : 1.F;
-                                         float const combined_sz =
-                                             (c.max.x - c.min.x) + (oc.max.x - oc.min.x) +
-                                             (c.max.y - c.min.y) + (oc.max.y - oc.min.y);
-                                         float norm = combined_sz > 0.F ? 4.F / combined_sz : 0.F;
+                        // Push along the shorter axis
+                        float weight = other.has<PlayerTag>() ? 15.F : 1.F;
+                        float const combined_sz = (c.max.x - c.min.x) + (oc.max.x - oc.min.x) +
+                                                  (c.max.y - c.min.y) + (oc.max.y - oc.min.y);
+                        float norm = combined_sz > 0.F ? 4.F / combined_sz : 0.F;
 
-                                         if (overlap_x < overlap_y) {
-                                             float dir = (this_max.x - other_min.x <
-                                                          other_max.x - this_min.x) ? -1.F : 1.F;
-                                             separation_force.x += dir * overlap_x * norm * weight;
-                                         } else {
-                                             float dir = (this_max.y - other_min.y <
-                                                          other_max.y - this_min.y) ? -1.F : 1.F;
-                                             separation_force.y += dir * overlap_y * norm * weight;
-                                         }
-                                     });
+                        if (overlap_x < overlap_y) {
+                            float dir =
+                                (this_max.x - other_min.x < other_max.x - this_min.x) ? -1.F : 1.F;
+                            separation_force.x += dir * overlap_x * norm * weight;
+                        }
+                        else {
+                            float dir =
+                                (this_max.y - other_min.y < other_max.y - this_min.y) ? -1.F : 1.F;
+                            separation_force.y += dir * overlap_y * norm * weight;
+                        }
+                    });
 
-                                 // Player is immune to separation push
-                                 if (is_player)
-                                     separation_force = {0.F, 0.F};
+                    // Player is immune to separation push
+                    if (is_player)
+                        separation_force = {0.F, 0.F};
 
-                                 constexpr float kSeparationPushSpeed = 3.5F;
-                                 pos.x += separation_force.x * kSeparationPushSpeed;
-                                 pos.y += separation_force.y * kSeparationPushSpeed;
-                             }
+                    constexpr float kSeparationPushSpeed = 3.5F;
+                    pos.x += separation_force.x * kSeparationPushSpeed;
+                    pos.y += separation_force.y * kSeparationPushSpeed;
+                }
 
-                             // 3. Tile collision re-check
-                             pos = collision_system_->resolve_tile_collisions(pos, c);
+                // 3. Tile collision re-check
+                pos = collision_system_->resolve_tile_collisions(pos, c);
 
-                             if (pos.x != original.x || pos.y != original.y) {
-                                 p.world_pos = pos;
-                                 mark_dirty(e.id());
-                             }
-                         });
+                if (pos.x != original.x || pos.y != original.y) {
+                    p.world_pos = pos;
+                    mark_dirty(e.id());
+                }
+            });
     collision_sys_.depends_on(movement_sys_);
 
     // -- PostUpdate phase: cleanup --
@@ -420,17 +423,17 @@ void GameMode::init_systems()
 EntityId GameMode::spawn_recruit(EntityId leader)
 {
     return factory_.spawn_soldier(leader, SoldierRole::melee, 0.F,
-        [this](EntityId cid, SoldierRole r, EntityId tid) -> Formation & {
-            return formation(cid, r, tid);
-        });
+                                  [this](EntityId cid, SoldierRole r, EntityId tid) -> Formation & {
+                                      return formation(cid, r, tid);
+                                  });
 }
 
 EntityId GameMode::spawn_recruit_ranged(EntityId leader)
 {
     return factory_.spawn_soldier(leader, SoldierRole::ranged, 0.F,
-        [this](EntityId cid, SoldierRole r, EntityId tid) -> Formation & {
-            return formation(cid, r, tid);
-        });
+                                  [this](EntityId cid, SoldierRole r, EntityId tid) -> Formation & {
+                                      return formation(cid, r, tid);
+                                  });
 }
 
 void GameMode::cycle_stance(EntityId leader)
@@ -550,17 +553,16 @@ void GameMode::handle_interaction(EntityId player)
             int bg = map_data_->tile(tx, ty).building_group;
             if (bg == 0)
                 return;
-            world_.query<BuildingData>().each(
-                [&](flecs::entity e, BuildingData &bd) {
-                    if (bd.group_id != bg)
-                        return;
-                    Vec2f dpos = pp->world_pos - e.get<Transform>().world_pos;
-                    float dist = dpos.x * dpos.x + dpos.y * dpos.y;
-                    if (dist < best_dist) {
-                        best_dist = dist;
-                        eid = e.id();
-                    }
-                });
+            world_.query<BuildingData>().each([&](flecs::entity e, BuildingData &bd) {
+                if (bd.group_id != bg)
+                    return;
+                Vec2f dpos = pp->world_pos - e.get<Transform>().world_pos;
+                float dist = dpos.x * dpos.x + dpos.y * dpos.y;
+                if (dist < best_dist) {
+                    best_dist = dist;
+                    eid = e.id();
+                }
+            });
         };
         // Facing direction tile (most precise)
         Vec2i face_tile = world_to_tile(pp->world_pos + pp->facing * (tile_size * 1.2F));
@@ -616,12 +618,12 @@ void GameMode::handle_interaction(EntityId player)
         dlg.active = true;
         dlg.npc_entity = eid;
         dlg.npc_id = "__building__";
-        dlg.npc_name = !building->display_name.empty()
-                           ? building->display_name
-                           : (std::string(label) + " at "
-                              + (current_town_for_player_.contains(player)
-                                     ? current_town_for_player_[player]
-                                     : "town"));
+        dlg.npc_name =
+            !building->display_name.empty()
+                ? building->display_name
+                : (std::string(label) + " at " +
+                   (current_town_for_player_.contains(player) ? current_town_for_player_[player]
+                                                              : "town"));
         dlg.history.clear();
         dlg.available_topics.clear();
         dlg.available_actions = {std::move(action)};
@@ -756,7 +758,8 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
             DialogueLine line;
             line.speaker = DialogueLine::npc;
             line.use_raw = true;
-            line.raw_text = "The temple's sacred light washes over you. Ailments cured, spirit renewed.";
+            line.raw_text =
+                "The temple's sacred light washes over you. Ailments cured, spirit renewed.";
             line.npc_name = dlg.npc_name;
             dlg.history.push_back(std::move(line));
         }
@@ -770,7 +773,8 @@ void GameMode::do_dialogue_action(EntityId player, std::string const &action)
             DialogueLine line;
             line.speaker = DialogueLine::npc;
             line.use_raw = true;
-            line.raw_text = "The blacksmith hammers away. Your weapon is sharper and armor reinforced.";
+            line.raw_text =
+                "The blacksmith hammers away. Your weapon is sharper and armor reinforced.";
             line.npc_name = dlg.npc_name;
             dlg.history.push_back(std::move(line));
         }
@@ -1036,10 +1040,16 @@ void GameMode::apply_player_input(EntityId entity, Vec2f dir)
 
 void GameMode::spawn_enemy_wave(int count, Vec2f center, float spread, Team team)
 {
-    std::vector<EntityId> new_ids;
-    combat_.spawn_enemy_wave(world_, count, center, spread, team, &new_ids);
-    for (auto eid : new_ids)
-        mark_dirty(eid);
+    thread_local std::mt19937 rng{std::random_device{}()};
+    std::uniform_real_distribution<float> angle_dist(0.f, 2.f * std::numbers::pi_v<float>);
+    std::uniform_real_distribution<float> dist_dist(0.f, spread);
+
+    for (int i = 0; i < count; ++i) {
+        float ang = angle_dist(rng);
+        float dist = dist_dist(rng);
+        Vec2f pos{center.x + std::cos(ang) * dist, center.y + std::sin(ang) * dist};
+        factory_.spawn_enemy(pos, team);
+    }
 }
 
 void GameMode::apply_damage(EntityId target, int damage, bool killed)

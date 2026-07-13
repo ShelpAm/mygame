@@ -68,6 +68,9 @@ class EntityFactory {
     /// flecs world.
     void spawn_town_npcs();
 
+    /// Spawn one enemy soldier from the "enemy" entity config.
+    EntityId spawn_enemy(Vec2f pos, Team team);
+
     void spawn(std::string const &kind, Vec2f pos);
 
   private:

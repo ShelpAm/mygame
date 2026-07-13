@@ -1,4 +1,5 @@
 #include "systems/render-system.hpp"
+
 #include "animation/animation-data.hpp"
 #include "components/building-data.hpp"
 #include "components/collider.hpp"
@@ -16,6 +17,7 @@
 #include "systems/navigation-system.hpp"
 #include "world/map-data.hpp"
 #include <cassert>
+#include <math.h>
 #include <ranges>
 #include <string>
 #include <unordered_map>
@@ -36,6 +38,8 @@ void RenderSystem::render(Client &client)
     render_projectiles(client);
     render_damage_numbers(client, client.combat_events());
     render_fog_overlay(client.player_visibility());
+    if (debug_mode_)
+        render_debug(client);
 }
 
 void RenderSystem::init_tile_cache()
@@ -49,9 +53,8 @@ void RenderSystem::init_tile_cache()
     for (int i = 0; i < count; ++i) {
         auto const *def = resources_->resolve_sprite(clip->frame_sprites[i]);
         if (def) {
-            tile_cache_[i] = {def->texture,
-                              {def->clip[0], def->clip[1]},
-                              {def->clip[2], def->clip[3]}};
+            tile_cache_[i] = {
+                def->texture, {def->clip[0], def->clip[1]}, {def->clip[2], def->clip[3]}};
         }
     }
     tile_cache_ready_ = true;
@@ -86,21 +89,6 @@ void RenderSystem::render_tile_map() const
             }
         }
     }
-
-    if (debug_mode_) {
-        // Draw debug text
-        SDL_SetRenderDrawColor(renderer_, 255, 0, 0, 100);
-        // Grid lines
-        for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
-            for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
-                auto tile = Vec2i(x, y);
-                auto lu = lu_of_tile(tile);
-                auto c = camera_->world_to_screen(lu);
-                font_->draw({c.x, c.y}, SDL_Color{.r = 255, .g = 0, .b = 0, .a = 150},
-                            std::format("({}, {})", x, y));
-            }
-        }
-    }
 }
 
 void RenderSystem::render_town(Client const &client) const
@@ -121,7 +109,7 @@ void RenderSystem::render_town(Client const &client) const
                 continue;
 
             TileType type = map_data_->tile(x, y).type;
-            if (type == TileType::grass || type == TileType::water || type == TileType::mountain || type == TileType::building)
+            if (type != TileType::road && type != TileType::wall)
                 continue;
 
             // Draw overlay for road/wall
@@ -133,14 +121,14 @@ void RenderSystem::render_town(Client const &client) const
                 .x = screen.x - size / 2.F, .y = screen.y - size / 2.F, .w = size, .h = size};
 
             if (type == TileType::road) {
-                SDL_SetRenderDrawColor(renderer_, 180, 160, 110, 200);
-                SDL_RenderFillRect(renderer_, &overlay);
+                draw_rectangle({overlay.x, overlay.y}, {overlay.w, overlay.h}, {200, 180, 130, 255},
+                               RectMode::fill);
             }
             else if (type == TileType::wall) {
-                SDL_SetRenderDrawColor(renderer_, 80, 75, 70, 230);
-                SDL_RenderFillRect(renderer_, &overlay);
-                SDL_SetRenderDrawColor(renderer_, 110, 105, 95, 255);
-                SDL_RenderRect(renderer_, &overlay);
+                draw_rectangle({overlay.x, overlay.y}, {overlay.w, overlay.h}, {100, 90, 80, 255},
+                               RectMode::fill);
+                draw_rectangle({overlay.x, overlay.y}, {overlay.w, overlay.h}, {130, 120, 110, 255},
+                               RectMode::line);
             }
         }
     }
@@ -177,13 +165,8 @@ void RenderSystem::render_entities(Client const &client, Vec2f local_player_pos)
     auto const &vis = client.player_visibility();
 
     // --- 1. Live entities via ECS query ---
-    auto query = client.world().query<Transform, Sprite, CombatStats>();
-    query.each([&](flecs::entity e, Transform const &t, Sprite const &s, CombatStats const &cs) {
-        // Skip structures (but not buildings)
-        auto const *kt = e.try_get<KindTag>();
-        if (kt && kt->value == EntityKind::structure)
-            return;
-
+    auto query = client.world().query<Transform, Sprite>();
+    query.each([&](flecs::entity e, Transform const &t, Sprite const &s) {
         // Skip if not explored
         auto tile = world_to_tile(t.world_pos);
         auto tv = vis.query(tile);
@@ -217,48 +200,26 @@ void RenderSystem::render_entities(Client const &client, Vec2f local_player_pos)
         }
 
         // health bar
-        float barW = 32.F;
-        float barH = 4.F;
-        // 居中对齐：左上角 X + (图片缩放宽 - 血条宽) / 2
-        float barX = sprite_top_left.x + (scaled_size.x - barW) * 0.5F;
-        // 顶部对齐：左上角 Y - 血条高 - 间距
-        float barY = sprite_top_left.y - barH - 4.F;
+        if (auto const *cs = client.world().entity(e.id()).try_get<CombatStats>();
+            cs && cs->max_hp > 0) { // skip entities without meaningful combat stats
+            float barW = 32.F;
+            float barH = 4.F;
+            // 居中对齐：左上角 X + (图片缩放宽 - 血条宽) / 2
+            float barX = sprite_top_left.x + (scaled_size.x - barW) * 0.5F;
+            // 顶部对齐：左上角 Y - 血条高 - 间距
+            float barY = sprite_top_left.y - barH - 4.F;
 
-        // Full width
-        draw_rectangle({barX, barY}, {barW, barH}, {40, 10, 10, alpha}, RectMode::fill);
+            // Full width
+            draw_rectangle({barX, barY}, {barW, barH}, {40, 10, 10, alpha}, RectMode::fill);
 
-        // Actual width
-        float ratio = static_cast<float>(cs.hp) / static_cast<float>(cs.max_hp);
-        bool hostile = is_hostile(cs.team, client.player_team());
-        SDL_FColor col_f = hostile ? SDL_FColor{.r = 0.9F, .g = 0.2F, .b = 0.1F, .a = 1.F}
-                                   : SDL_FColor{.r = 0.2F, .g = 0.8F, .b = 0.3F, .a = 1.F};
-        SDL_Color color{static_cast<Uint8>(col_f.r * 255), static_cast<Uint8>(col_f.g * 255),
-                        static_cast<Uint8>(col_f.b * 255), alpha};
-        draw_rectangle({barX, barY}, {barW * ratio, barH}, color, RectMode::fill);
-
-        if (debug_mode_) {
-            font_->draw({screen.x, screen.y - 24.F}, SDL_Color{.r = 255, .g = 0, .b = 0, .a = 150},
-                        std::format("id={} team={} tex={}", e.id(), static_cast<int>(cs.team),
-                                    s.texture_name));
-
-            // Green dot for entity pos
-            constexpr Vec2f tag_size{8.F, 8.F};
-            draw_rectangle(screen - tag_size * 0.5, tag_size, {0, 255, 0, 255}, RectMode::fill);
-
-            // Cyan box for sprite size (respects clip rect)
-            auto origin = s.origin * scaled_size;
-            draw_rectangle(screen - origin, scaled_size, SDL_Color{0, 255, 255, 160},
-                           RectMode::box);
-
-            // Orange box for actual collider (world-space AABB)
-            if (auto const *c = e.try_get<Collider>()) {
-                Vec2f world_min = t.world_pos + c->min;
-                Vec2f world_max = t.world_pos + c->max;
-                Vec2f screen_min = camera_->world_to_screen(world_min);
-                Vec2f screen_max = camera_->world_to_screen(world_max);
-                Vec2f coll_size = screen_max - screen_min;
-                draw_rectangle(screen_min, coll_size, SDL_Color{255, 165, 0, 160}, RectMode::box);
-            }
+            // Actual width
+            float ratio = static_cast<float>(cs->hp) / static_cast<float>(cs->max_hp);
+            bool hostile = is_hostile(cs->team, client.player_team());
+            SDL_FColor col_f = hostile ? SDL_FColor{.r = 0.9F, .g = 0.2F, .b = 0.1F, .a = 1.F}
+                                       : SDL_FColor{.r = 0.2F, .g = 0.8F, .b = 0.3F, .a = 1.F};
+            SDL_Color color{static_cast<Uint8>(col_f.r * 255), static_cast<Uint8>(col_f.g * 255),
+                            static_cast<Uint8>(col_f.b * 255), alpha};
+            draw_rectangle({barX, barY}, {barW * ratio, barH}, color, RectMode::fill);
         }
     });
 }
@@ -268,9 +229,8 @@ void RenderSystem::render_projectiles(Client const &client)
     for (auto const &pv : client.projectile_visuals()) {
         Vec2f screen = camera_->world_to_screen(pv.pos);
         float size = 6.F;
-        SDL_FRect rect{.x = screen.x - size, .y = screen.y - size, .w = size * 2, .h = size * 2};
-        SDL_SetRenderDrawColor(renderer_, 200, 180, 100, 255);
-        SDL_RenderFillRect(renderer_, &rect);
+        draw_rectangle({screen.x - size, screen.y - size}, {size * 2, size * 2},
+                       SDL_Color{.r = 200, .g = 180, .b = 100, .a = 255}, RectMode::fill);
     }
 }
 
@@ -297,14 +257,14 @@ void RenderSystem::render_damage_numbers(Client &client, std::vector<CombatEvent
         }
 
         world.entity()
-            .set<FloatingText>(FloatingText{
+            .set(FloatingText{
                 .text = std::to_string(ev.damage),
                 .lifetime = 0.8F,
                 .elapsed = 0.F,
                 .velocity = {0.F, -40.F},
                 .color = {.r = 1.F, .g = 0.3F, .b = 0.2F, .a = 1.F},
             })
-            .set<Transform>(Transform{pos});
+            .set(Transform{.world_pos = pos});
     }
 
     // Draw all active floating texts.
@@ -333,23 +293,99 @@ void RenderSystem::render_fog_overlay(PlayerVisibility const &vis)
             Vec2f screen = camera_->world_to_screen(lu_of_tile(tile));
             auto const zoom = camera_->zoom();
             constexpr auto padding = 2.F; // 防止tile之间有缝隙
-            SDL_FRect rect{
-                .x = screen.x,
-                .y = screen.y,
-                .w = (tile_size * zoom) + padding,
-                .h = (tile_size * zoom) + padding,
-            };
-
             switch (vis.query(tile)) {
             case TileVisibility::Unexplored:
-                SDL_SetRenderDrawColor(renderer_, 8, 8, 14, 255);
-                SDL_RenderFillRect(renderer_, &rect);
+                draw_rectangle({screen.x, screen.y},
+                               {tile_size * zoom + padding, tile_size * zoom + padding},
+                               SDL_Color{8, 8, 14, 255}, RectMode::fill);
                 break;
             default:
                 break;
             }
         }
     }
+}
+
+void RenderSystem::render_debug(Client const &client) const
+{
+    assert(map_data_);
+    auto const &vis = client.player_visibility();
+    auto vp = camera_->viewport();
+    auto left_up = world_to_tile(Vec2f(vp.x, vp.y));
+    auto right_down = world_to_tile(Vec2f(vp.x + vp.w, vp.y + vp.h));
+    auto const zoom = camera_->zoom();
+
+    constexpr auto red = SDL_Color{.r = 255, .g = 0, .b = 0, .a = 150};
+    constexpr auto cyan = SDL_Color{.r = 0, .g = 255, .b = 255, .a = 150};
+    constexpr auto green = SDL_Color{.r = 0, .g = 255, .b = 0, .a = 150};
+    constexpr auto yellow = SDL_Color{.r = 255, .g = 255, .b = 0, .a = 150};
+    constexpr auto white = SDL_Color{.r = 255, .g = 255, .b = 255, .a = 255};
+    constexpr auto grey = SDL_Color{.r = 0, .g = 0, .b = 0, .a = 100};
+    constexpr auto blk = SDL_Color{.r = 100, .g = 0, .b = 100, .a = 70};
+    constexpr auto magenta = SDL_Color{.r = 255, .g = 0, .b = 255, .a = 150}; // 品红
+
+    // ── Tile grid ────────────────────────────────────────────────────
+    for (int y = left_up.y - 1; y <= right_down.y + 1; ++y) {
+        for (int x = left_up.x - 1; x <= right_down.x + 1; ++x) {
+            Vec2i tile(x, y);
+            auto lu = lu_of_tile(tile);
+            auto c = camera_->world_to_screen(lu);
+
+            // Non-walkable tile highlight
+            if (map_data_->in_bounds(x, y)) {
+                auto const &td = map_data_->tile(x, y);
+                auto tile_sz = Vec2f{tile_size, tile_size} * zoom + Vec2f(2, 2);
+                if (!td.walkable) {
+                    draw_rectangle({c.x, c.y}, tile_sz, red, RectMode::fill);
+                }
+                if (td.blocks_vision) {
+                    draw_rectangle({c.x, c.y}, tile_sz, blk, RectMode::fill);
+                }
+            }
+
+            // Coordinate labels
+            font_->draw({c.x, c.y}, red, std::format("({}, {})", x, y));
+        }
+    }
+
+    // ── Entity overlays ──────────────────────────────────────────────
+    client.world().query<Transform, Sprite>().each(
+        [&](flecs::entity e, Transform const &t, Sprite const &s) {
+            // auto tile = world_to_tile(t.world_pos);
+            // if (vis.query(tile) == TileVisibility::Unexplored)
+            //     return;
+
+            Vec2f screen = camera_->world_to_screen(t.world_pos);
+
+            // Green dot for entity position
+            constexpr Vec2f tag_size{8.F, 8.F};
+            draw_rectangle(screen - tag_size * 0.5, tag_size, green, RectMode::fill);
+
+            // Cyan box for sprite bounds
+            auto tex_sz = resources_->texture_size(s.texture_name);
+            auto scaled_size = s.scale * s.size * tex_sz;
+            auto origin = s.origin * scaled_size;
+            draw_rectangle(screen - origin, scaled_size, cyan, RectMode::line);
+
+            // Orange box for collider (world-space AABB)
+            if (auto const *c = e.try_get<Collider>()) {
+                Vec2f world_min = t.world_pos + c->min;
+                Vec2f world_max = t.world_pos + c->max;
+                Vec2f screen_min = camera_->world_to_screen(world_min);
+                Vec2f screen_max = camera_->world_to_screen(world_max);
+                draw_rectangle(screen_min, screen_max - screen_min, magenta, RectMode::line);
+            }
+
+            // ID / team / texture label
+            auto info = std::format("id={} pos={:.2f},{:.2f} sprite={}", e.id(), t.world_pos.x,
+                                    t.world_pos.y, s.name);
+            if (auto const *cs = e.try_get<CombatStats>()) {
+                info += std::format(" team={}", static_cast<int>(cs->team));
+                info += std::format(" hp={}/{}", cs->hp, cs->max_hp);
+            }
+            font_->draw({screen.x, screen.y}, red, info);
+            draw_text_with_bg(screen, info, white, grey);
+        });
 }
 
 void RenderSystem::draw_rectangle(Vec2f left_up, Vec2f size, SDL_Color color, RectMode mode) const
@@ -368,14 +404,13 @@ void RenderSystem::draw_sprite(Vec2f foot_pos, float scale, std::string const &t
     auto *texture = resources_->texture(tex);
     Vec2f screen = camera_->world_to_screen(foot_pos);
 
-    float tex_w, tex_h;
-    SDL_GetTextureSize(texture, &tex_w, &tex_h);
+    auto tex_size = resources_->texture_size(tex);
 
     // clip_offset/clip_size are normalized (0..1).  Default (0,0,1,1) = full texture.
-    float clip_x = clip_offset.x * tex_w;
-    float clip_y = clip_offset.y * tex_h;
-    float clip_w = clip_size.x * tex_w;
-    float clip_h = clip_size.y * tex_h;
+    float clip_x = clip_offset.x * tex_size.x;
+    float clip_y = clip_offset.y * tex_size.y;
+    float clip_w = clip_size.x * tex_size.x;
+    float clip_h = clip_size.y * tex_size.y;
 
     SDL_FRect srcrect{.x = clip_x, .y = clip_y, .w = clip_w, .h = clip_h};
 
@@ -398,4 +433,18 @@ void RenderSystem::draw_sprite(Vec2f foot_pos, float scale, std::string const &t
 void RenderSystem::draw(Sprite const &s, Vec2f pos, uint8_t alpha) const
 {
     draw_sprite(pos, s.scale, s.texture_name, alpha, s.flip, s.origin, s.offset, s.size);
+}
+
+/// @brief Draws text with a background rectangle for better readability.
+void RenderSystem::draw_text_with_bg(Vec2f pos, std::string const &text, SDL_Color text_color,
+                                     SDL_Color bg_color) const
+{
+    // Draw background rectangle
+    constexpr auto font_size = 12.F;
+    auto text_width = font_->mesure_string_size(text).x;
+    float padding = 4.F;
+    draw_rectangle({pos.x - padding, pos.y - padding},
+                   {static_cast<float>(text_width) + 2 * padding, font_size + 2 * padding},
+                   bg_color, RectMode::fill);
+    font_->draw(pos, text_color, text);
 }

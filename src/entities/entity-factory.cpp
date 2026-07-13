@@ -1,8 +1,13 @@
 #include "entities/entity-factory.hpp"
+#include <array>
+#include <string_view>
+
+using namespace std::string_view_literals;
 
 #include "components/building-data.hpp"
 #include "components/collider.hpp"
 #include "components/combat-stats.hpp"
+#include "components/entity-kind.hpp"
 #include "components/interactable.hpp"
 #include "components/movement.hpp"
 #include "components/npc-state.hpp"
@@ -12,11 +17,13 @@
 #include "components/survival-state.hpp"
 #include "components/vision.hpp"
 #include "dialogue/relationship-table.hpp"
+#include "net/net-packet.hpp"
 #include "systems/formation.hpp"
 #include "world/map-data.hpp"
 #include "world/terrain-generator.hpp"
 
 #include <algorithm>
+#include <climits>
 #include <cstdint>
 #include <fstream>
 #include <random>
@@ -28,6 +35,16 @@
 namespace {
 
 using Obj = rfl::Generic::Object;
+
+/// Helper: read the "clip" field from a config object.
+std::string get_clip(Obj const &o)
+{
+    auto it = std::find_if(o.begin(), o.end(), [](auto const &p) { return p.first == "clip"; });
+    if (it != o.end())
+        if (auto *s = std::get_if<std::string>(&it->second.get()))
+            return *s;
+    return "";
+}
 
 /// Get a sub-object by key from a Generic (must be an Object).
 Obj const &obj_of(rfl::Generic const &g, std::string const &key)
@@ -228,7 +245,8 @@ EntityId EntityFactory::spawn_player(Vec2f pos, Team team)
     auto &cfg = root_obj.at("player");
     auto &cobj = std::get<Obj>(cfg.get());
 
-    auto e = world_.entity().add<PlayerTag>().set(Transform{.world_pos = pos});
+    auto e =
+        world_.entity().set(EntityKind{"player"}).add<PlayerTag>().set(Transform{.world_pos = pos});
 
     if (has_key(cobj, "combat"))
         apply_combat(e, obj_of(cobj, "combat"), team);
@@ -286,6 +304,7 @@ EntityId EntityFactory::spawn_soldier(
 
     auto pos = world_.entity(captain_id).get<Transform>().world_pos;
     auto e = world_.entity()
+                 .set(EntityKind{role_key})
                  .add<BelongsTo>(captain_id)
                  .add<Follows>(captain_id)
                  .set(Transform{.world_pos = pos, .facing = target_trans.facing});
@@ -302,12 +321,7 @@ EntityId EntityFactory::spawn_soldier(
         ai.follow_distance = 2.F;
         ai.engage_range = float_of(ai_cfg, "engage_range", 200.f);
         ai.role = role;
-        ai.stance = parse_stance([&]() -> std::string {
-            for (auto const &[k, v] : ai_cfg)
-                if (k == "stance" && std::get_if<std::string>(&v.get()))
-                    return *std::get_if<std::string>(&v.get());
-            return "defensive";
-        }());
+        ai.stance = parse_stance(ai_cfg.at("stance").to_string().value());
         e.set(ai);
     }
     mark_dirty(e.id());
@@ -322,7 +336,7 @@ EntityId EntityFactory::spawn_npc(std::string const &id, std::string const &name
     auto &root_n = std::get<Obj>(entities_cfg_.get());
     auto &cfg = std::get<Obj>(root_n.at(hostile ? "npc_hostile" : "npc_friendly").get());
 
-    auto e = world_.entity();
+    auto e = world_.entity().set(EntityKind{hostile ? "npc_hostile" : "npc_friendly"});
     auto eid = e.id();
 
     NPCState npc;
@@ -358,10 +372,7 @@ EntityId EntityFactory::spawn_npc(std::string const &id, std::string const &name
 void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> const &loc_defs,
                                             MapData const &map_data)
 {
-    auto &root_b = std::get<Obj>(entities_cfg_.get());
-    auto &bldg_cfg = std::get<Obj>(root_b.at("building").get());
-
-    static constexpr BuildingData::Type special_types[] = {
+    static constexpr std::array<BuildingData::Type, 4> special_types = {
         BuildingData::Type::inn,
         BuildingData::Type::market,
         BuildingData::Type::temple,
@@ -375,6 +386,8 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
         struct GroupData {
             int count = 0;
             float sum_x = 0.F, sum_y = 0.F;
+            int min_x = INT_MAX, max_x = INT_MIN;
+            int min_y = INT_MAX, max_y = INT_MIN;
         };
         std::unordered_map<int, GroupData> groups;
 
@@ -390,6 +403,10 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
                 ++gd.count;
                 gd.sum_x += static_cast<float>(tile.x);
                 gd.sum_y += static_cast<float>(tile.y);
+                gd.min_x = std::min(gd.min_x, tile.x);
+                gd.max_x = std::max(gd.max_x, tile.x);
+                gd.min_y = std::min(gd.min_y, tile.y);
+                gd.max_y = std::max(gd.max_y, tile.y);
             }
 
         // Assign types: one of each special first, then generic for the rest.
@@ -401,20 +418,33 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
 
         size_t ai = 0;
         for (auto const &[g, gd] : groups) {
-            float avg_x = gd.sum_x / static_cast<float>(gd.count);
-            float avg_y = gd.sum_y / static_cast<float>(gd.count);
-            Vec2f world_pos{(avg_x + 0.5F) * tile_size, (avg_y + 0.5F) * tile_size};
+            float const avg_x = gd.sum_x / static_cast<float>(gd.count);
+            float const avg_y = gd.sum_y / static_cast<float>(gd.count);
+            float const group_r = static_cast<float>(gd.max_x - gd.min_x + 1) / 2;
+            auto world_pos = Vec2f{avg_x + 0.5F, avg_y + 0.5F + group_r} * tile_size; // down center
 
             auto btype = assignments[ai++];
+            static constexpr std::array kBuildingKinds{
+                "inn"sv, "market"sv, "temple"sv, "blacksmith"sv,
+            };
+            auto const &kind_name =
+                static_cast<std::size_t>(btype) < std::size(kBuildingKinds)
+                    ? kBuildingKinds[static_cast<std::size_t>(btype)]
+                    : "building"sv;
+            uint8_t w = static_cast<uint8_t>(gd.max_x - gd.min_x + 1);
+            uint8_t h = static_cast<uint8_t>(gd.max_y - gd.min_y + 1);
+
+            // Collider matches the actual footprint in world units.
+            float half_w = static_cast<float>(w) * tile_size * 0.5F;
+            float half_h = static_cast<float>(h) * tile_size * 0.5F;
+            Collider coll{{-half_w, -half_h}, {half_w, half_h}};
 
             auto e = world_.entity()
-                         .set(Transform{.world_pos = world_pos})
-                         .set(BuildingData{btype, loc.id, "", g})
+                         .set(EntityKind{std::string(kind_name)})
+                         .set(Transform{.world_pos = world_pos, .facing = Vec2f{0.F, -1.F}})
+                         .set(BuildingData{btype, loc.id, "", g, w, h})
+                         .set(coll)
                          .set(Interactable{.interact_radius = 48.F, .can_talk = false});
-            if (has_key(bldg_cfg, "combat"))
-                apply_combat(e, obj_of(bldg_cfg, "combat"), Team::neutral);
-            if (auto col = collider_of(bldg_cfg, "collider"))
-                e.set(*col);
             mark_dirty(e.id());
         }
     }
@@ -434,7 +464,8 @@ void EntityFactory::spawn_town_npcs()
 
     world_.query<BuildingData, Transform>().each(
         [&](flecs::entity, BuildingData const &bd, Transform const &bt) {
-            char const *role{}, *pers{};
+            char const *role{};
+            char const *pers{};
             switch (bd.type) {
             case BuildingData::Type::inn:
                 role = "Innkeeper";
@@ -484,6 +515,32 @@ void EntityFactory::spawn_town_npcs()
     }
     spdlog::info("spawn_town_npcs: spawned {} resident NPCs (from {} service buildings)", count,
                  services.size());
+}
+
+EntityId EntityFactory::spawn_enemy(Vec2f pos, Team team)
+{
+    auto &root_obj = std::get<Obj>(entities_cfg_.get());
+    auto it = std::find_if(root_obj.begin(), root_obj.end(),
+                           [](auto const &p) { return p.first == "enemy"; });
+    if (it == root_obj.end()) {
+        spdlog::error("spawn_enemy: 'enemy' config not found in entities.yaml");
+        return invalid_entity;
+    }
+    auto &cfg = std::get<Obj>(it->second.get());
+
+    auto e = world_.entity().set(EntityKind{"enemy"}).set(Transform{.world_pos = pos});
+
+    if (has_key(cfg, "combat"))
+        apply_combat(e, obj_of(cfg, "combat"), team);
+    if (has_key(cfg, "movement"))
+        apply_movement(e, obj_of(cfg, "movement"));
+    if (auto col = collider_of(cfg, "collider"))
+        e.set(*col);
+    if (has_key(cfg, "vision"))
+        apply_vision(e, obj_of(cfg, "vision"));
+
+    mark_dirty(e.id());
+    return e.id();
 }
 
 void EntityFactory::spawn(std::string const &kind, Vec2f pos)

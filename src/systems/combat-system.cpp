@@ -21,27 +21,3 @@ bool CombatSystem::team_near_position(flecs::world &world, Team team, Vec2f pos,
     });
     return found;
 }
-
-void CombatSystem::spawn_enemy_wave(flecs::world &world, int count, Vec2f center, float spread,
-                                    Team team, std::vector<EntityId> *out_ids)
-{
-    thread_local std::mt19937 rng{std::random_device{}()};
-    std::uniform_real_distribution<float> angle_dist(0.f, 2.f * std::numbers::pi_v<float>);
-    std::uniform_real_distribution<float> dist_dist(0.f, spread);
-
-    for (int i = 0; i < count; ++i) {
-        auto e = world.entity();
-        float ang = angle_dist(rng);
-        float dist = dist_dist(rng);
-        float x = center.x + std::cos(ang) * dist;
-        float y = center.y + std::sin(ang) * dist;
-
-        e.set<Transform>(Transform{{x, y}});
-
-        e.set<CombatStats>(CombatStats{
-            .team = team, .max_hp = 8, .hp = 8, .attack = 3, .defense = 1, .attack_range = 80.F});
-        e.set<Collider>(Collider{{-8.f, -32.f}, {8.f, 0.f}});
-        if (out_ids)
-            out_ids->push_back(e.id());
-    }
-}

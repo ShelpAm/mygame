@@ -15,9 +15,6 @@ class CombatSystem {
 
     bool team_near_position(flecs::world &world, Team team, Vec2f pos, float radius) const;
 
-    void spawn_enemy_wave(flecs::world &world, int count, Vec2f center, float spread, Team team,
-                          std::vector<EntityId> *out_ids = nullptr);
-
     void set_dirty_callback(std::function<void(EntityId)> cb) { dirty_cb_ = std::move(cb); }
 
   private:

@@ -1,20 +1,20 @@
 #pragma once
 
+#include "components/collider.hpp"
+#include "components/combat-stats.hpp"
+#include "components/player.hpp"
 #include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "dialogue/dialogue-engine.hpp"
 #include "dialogue/relationship-table.hpp"
 #include "dialogue/topic-registry.hpp"
-#include "components/collider.hpp"
-#include "components/combat-stats.hpp"
-#include "components/player.hpp"
 #include "entities/entity-factory.hpp"
 #include "factions/faction-network.hpp"
 #include "knowledge/knowledge-graph.hpp"
+#include "net/sync-utils.hpp"
 #include "systems/combat-system.hpp"
 #include "systems/combat-utils.hpp"
 #include "systems/quest-manager.hpp"
-#include "net/sync-utils.hpp"
 #include "world/world-state.hpp"
 #include <chrono>
 #include <cstdint>

@@ -1,8 +1,8 @@
 #include "net/client.hpp"
 #include "animation/animation-data.hpp"
 #include "components/building-data.hpp"
-#include "components/combat-stats.hpp"
 #include "components/collider.hpp"
+#include "components/combat-stats.hpp"
 #include "components/entity-kind.hpp"
 #include "components/interpolation-target.hpp"
 #include "components/movement.hpp"
@@ -10,9 +10,9 @@
 #include "components/soldier-ai.hpp"
 #include "components/survival-state.hpp"
 #include "components/vision.hpp"
+#include "components/visual-fx.hpp"
 #include "components/visual/animation.hpp"
 #include "components/visual/sprite.hpp"
-#include "components/visual-fx.hpp"
 #include "core/resource-manager.hpp"
 #include "net/net-packet.hpp"
 #include "net/sync-io.hpp"
@@ -21,124 +21,9 @@
 #include <array>
 #include <cassert>
 #include <cstring>
-#include <fstream>
 #include <optional>
-#include <rfl.hpp>
-#include <rfl/yaml.hpp>
 #include <spdlog/spdlog.h>
 #include <unordered_map>
-
-// ── helpers to initialise Sprite from sync data ─────────────────────────────
-
-namespace {
-
-struct SpriteDef {
-    std::array<float, 2> origin;
-    float scale;
-    // Optional collider AABB (client-side debug rendering).
-    bool has_collider = false;
-    Vec2f collider_min{};
-    Vec2f collider_max{};
-};
-
-// Loaded once from entities.yaml — maps EntityKind value → SpriteDef.
-static std::unordered_map<uint8_t, SpriteDef> const &sprite_defs()
-{
-    static auto const cache = [] {
-        std::unordered_map<uint8_t, SpriteDef> m;
-        auto read_file = [](std::string const &p) {
-            std::ifstream f(p);
-            return std::string{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
-        };
-        try {
-            auto yaml = read_file("assets/data/entities.yaml");
-            auto result = rfl::yaml::read<rfl::Generic>(yaml);
-            if (!result) return m;
-
-            using Obj = rfl::Generic::Object;
-            auto &root = std::get<Obj>(result.value().get());
-            for (auto const &[name, val] : root) {
-                auto &obj = std::get<Obj>(val.get());
-                auto vit = std::find_if(obj.begin(), obj.end(),
-                    [](auto const &p) { return p.first == "visual"; });
-                if (vit == obj.end()) continue;
-                auto &vobj = std::get<Obj>(vit->second.get());
-                auto oit = std::find_if(vobj.begin(), vobj.end(),
-                    [](auto const &p) { return p.first == "origin"; });
-                auto sit = std::find_if(vobj.begin(), vobj.end(),
-                    [](auto const &p) { return p.first == "scale"; });
-                if (oit == vobj.end() || sit == vobj.end()) continue;
-
-                auto &arr = std::get<std::vector<rfl::Generic>>(oit->second.get());
-                if (arr.size() < 2) continue;
-                auto try_float = [](rfl::Generic const &g) -> float {
-                    auto const &v = g.get();
-                    if (auto *d = std::get_if<double>(&v)) return static_cast<float>(*d);
-                    if (auto *i = std::get_if<int64_t>(&v)) return static_cast<float>(*i);
-                    return 0.f;
-                };
-                float ox = try_float(arr[0]);
-                float oy = try_float(arr[1]);
-                float sc = try_float(sit->second);
-                SpriteDef sd{{{ox, oy}}, sc};
-
-                // Parse optional collider AABB from the entity config.
-                auto cit = std::find_if(obj.begin(), obj.end(),
-                    [](auto const &p) { return p.first == "collider"; });
-                if (cit != obj.end()) {
-                    if (auto *cobj = std::get_if<Obj>(&cit->second.get())) {
-                        auto min_it = std::find_if(cobj->begin(), cobj->end(),
-                            [](auto const &p) { return p.first == "min"; });
-                        auto max_it = std::find_if(cobj->begin(), cobj->end(),
-                            [](auto const &p) { return p.first == "max"; });
-                        if (min_it != cobj->end() && max_it != cobj->end()) {
-                            if (auto *min_a = std::get_if<std::vector<rfl::Generic>>(&min_it->second.get())) {
-                                if (min_a->size() >= 2) {
-                                    sd.has_collider = true;
-                                    sd.collider_min.x = try_float((*min_a)[0]);
-                                    sd.collider_min.y = try_float((*min_a)[1]);
-                                }
-                            }
-                            if (auto *max_a = std::get_if<std::vector<rfl::Generic>>(&max_it->second.get())) {
-                                if (max_a->size() >= 2) {
-                                    sd.collider_max.x = try_float((*max_a)[0]);
-                                    sd.collider_max.y = try_float((*max_a)[1]);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (name == "player")                    m[EntityKind::player] = sd;
-                else if (name.rfind("soldier_",0)==0)    m[EntityKind::soldier] = sd;
-                else if (name == "npc_friendly")         m[EntityKind::npc] = sd;
-                else if (name == "npc_hostile")          m[EntityKind::enemy] = sd;
-                else if (name == "building") {
-                    m[EntityKind::structure] = sd;
-                    m[EntityKind::building]  = sd;
-                }
-            }
-        } catch (std::exception const &e) {
-            spdlog::error("sprite_defs: {}", e.what());
-        }
-        return m;
-    }();
-    return cache;
-}
-
-void init_sprite_from_kind(Sprite &s, uint8_t kind, uint8_t /*building_type*/,
-                           Team team, SoldierRole role)
-{
-    auto const &defs = sprite_defs();
-    auto it = defs.find(kind);
-    if (it != defs.end()) {
-        auto const &d = it->second;
-        s.origin = {d.origin[0], d.origin[1]};
-        s.scale = d.scale;
-    }
-}
-
-} // anonymous namespace
 
 /// Maps a server-side entity ID to the local ECS entity. Set on every entity
 /// during parse_entity so the client can look up entities referenced by server
@@ -149,7 +34,7 @@ struct ServerEntity {
 
 // ── Client implementation ────────────────────────────────────────────────────
 
-Client::Client() : messages_(Session::io(), 128)
+Client::Client() : anim_ctrl_sys_(world_), messages_(Session::io(), 128)
 {
     world_.component<Transform>();
     world_.component<CombatStats>();
@@ -158,22 +43,19 @@ Client::Client() : messages_(Session::io(), 128)
     world_.component<Vision>();
     world_.component<Interactable>();
     world_.component<SurvivalState>();
-    world_.component<KindTag>();
+    world_.component<EntityKind>();
     world_.component<InterpolationTarget>();
     world_.component<Animation>();
     world_.component<Sprite>();
     world_.component<ServerEntity>();
 
     interp_sys_ = world_.system<Transform, InterpolationTarget>("Interpolation")
-        .kind(flecs::OnUpdate)
-        .each([](flecs::entity e, Transform &t, InterpolationTarget &target) {
-            if (auto *kt = e.try_get<KindTag>())
-                if (kt->value == EntityKind::structure)
-                    return; // structures don't move
-            float rate = std::min(1.f, e.world().delta_time() * 30.f);
-            t.world_pos += (target.position - t.world_pos) * rate;
-            t.facing += (target.facing - t.facing) * rate;
-        });
+                      .kind(flecs::OnUpdate)
+                      .each([](flecs::entity e, Transform &t, InterpolationTarget &target) {
+                          float rate = std::min(1.f, e.world().delta_time() * 30.f);
+                          t.world_pos += (target.position - t.world_pos) * rate;
+                          t.facing += (target.facing - t.facing) * rate;
+                      });
 
     // ── Animation pipeline (injected from outside, no flecs coupling in the systems) ──
     //
@@ -182,16 +64,14 @@ Client::Client() : messages_(Session::io(), 128)
     // lives here in Client, wiring them into world_.progress() via lambda
     // delegates so the ordering is explicit at the application level.
 
-    anim_ctrl_pipeline_ = world_.system<>("AnimationController")
-        .kind(flecs::OnUpdate)
-        .run([this](flecs::iter &it) {
+    anim_ctrl_pipeline_ =
+        world_.system<>("AnimationController").kind(flecs::OnUpdate).run([this](flecs::iter &it) {
             flecs::world w = it.world();
             anim_ctrl_sys_.update(w, *resources_, it.delta_time());
         });
 
-    anim_sys_pipeline_ = world_.system<>("AnimationSystem")
-        .kind(flecs::OnUpdate)
-        .run([this](flecs::iter &it) {
+    anim_sys_pipeline_ =
+        world_.system<>("AnimationSystem").kind(flecs::OnUpdate).run([this](flecs::iter &it) {
             flecs::world w = it.world();
             anim_sys_.update(w, *resources_, it.delta_time());
         });
@@ -277,8 +157,7 @@ void Client::detach_transport(detach_token, Session *s)
     // Clear client ECS world — only user entities (those with Transform).
     // Delete one at a time without defer to avoid batched reparenting crash.
     std::vector<flecs::entity_t> to_delete;
-    world_.each<Transform>(
-        [&to_delete](flecs::entity e, Transform &) { to_delete.push_back(e); });
+    world_.each<Transform>([&to_delete](flecs::entity e, Transform &) { to_delete.push_back(e); });
     for (auto id : to_delete)
         world_.entity(id).destruct();
 }
@@ -322,7 +201,7 @@ CombatStats const *Client::player_stats()
 
 SurvivalState const &Client::survival() const
 {
-    static const SurvivalState empty;
+    static SurvivalState const empty;
     auto e = world_.entity(player_id_);
     auto *s = e.is_alive() ? e.try_get<SurvivalState>() : nullptr;
     return s ? *s : empty;
@@ -354,37 +233,45 @@ void Client::send_player_direction(Vec2f dir)
 void Client::send_recruit()
 {
     assert(session_);
-    co_spawn(Session::io(),
+    co_spawn(
+        Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::recruit_soldier, payload});
-        }(session_, make_entity_id_payload(server_player_id_)), detached);
+        }(session_, make_entity_id_payload(server_player_id_)),
+        detached);
 }
 
 void Client::send_recruit_ranged()
 {
     assert(session_);
-    co_spawn(Session::io(),
+    co_spawn(
+        Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::recruit_ranged, payload});
-        }(session_, make_entity_id_payload(server_player_id_)), detached);
+        }(session_, make_entity_id_payload(server_player_id_)),
+        detached);
 }
 
 void Client::send_soldier_command()
 {
     assert(session_);
-    co_spawn(Session::io(),
+    co_spawn(
+        Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::soldier_command, payload});
-        }(session_, make_entity_id_payload(server_player_id_)), detached);
+        }(session_, make_entity_id_payload(server_player_id_)),
+        detached);
 }
 
 void Client::send_respawn()
 {
     assert(session_);
-    co_spawn(Session::io(),
+    co_spawn(
+        Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::respawn, payload});
-        }(session_, make_entity_id_payload(server_player_id_)), detached);
+        }(session_, make_entity_id_payload(server_player_id_)),
+        detached);
 }
 
 void Client::send_cycle_formation()
@@ -392,28 +279,34 @@ void Client::send_cycle_formation()
     assert(session_);
     int n = (int)formation_registry().size();
     formation_idx_ = (formation_idx_ + 1) % n;
-    co_spawn(Session::io(),
+    co_spawn(
+        Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::formation, payload});
-        }(session_, make_formation_payload(server_player_id_, selected_roles_)), detached);
+        }(session_, make_formation_payload(server_player_id_, selected_roles_)),
+        detached);
 }
 
 void Client::send_interact()
 {
     assert(session_);
-    co_spawn(Session::io(),
+    co_spawn(
+        Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::interact, payload});
-        }(session_, make_entity_id_payload(server_player_id_)), detached);
+        }(session_, make_entity_id_payload(server_player_id_)),
+        detached);
 }
 
 void Client::send_rest()
 {
     assert(session_);
-    co_spawn(Session::io(),
+    co_spawn(
+        Session::io(),
         [](std::shared_ptr<Session> t, auto payload) -> awaitable<void> {
             co_await t->write({ClientMsgType::rest, payload});
-        }(session_, make_entity_id_payload(server_player_id_)), detached);
+        }(session_, make_entity_id_payload(server_player_id_)),
+        detached);
 }
 
 void Client::send_chat(std::string const &msg)
@@ -478,7 +371,8 @@ void Client::handle_message([[maybe_unused]] Session &from, TransportMessage msg
         std::string reason(msg.payload.begin(), msg.payload.end());
         spdlog::info("Client: kicked by server: {}", reason);
         session_->close();
-        if (on_kicked_) on_kicked_();
+        if (on_kicked_)
+            on_kicked_();
         break;
     }
     case ServerMsgType::entity_update:
@@ -528,18 +422,15 @@ using namespace sync_util;
 
 void parse_world_header(SyncReader &r, WorldState &ws)
 {
-    if (r.remaining() < 9) return;
+    if (r.remaining() < 9)
+        return;
     ws.set_day(r.read<int32_t>());
     ws.set_season(r.read<uint8_t>());
     ws.set_time_of_day(r.read<float>());
 }
 
 /// Create or update a client ECS entity from the wire reader.
-/// Returns player-only extras (attack, defense, etc.) for the caller.
 struct PlayerExtras {
-    int attack = 0;
-    int defense = 0;
-    float attack_range = 80.f;
     SurvivalState survival;
     bool has_survival = false;
 };
@@ -557,25 +448,92 @@ PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const 
     EntityId local_id = invalid_entity;
     if (auto it = s2l.find(id); it != s2l.end())
         local_id = it->second;
-    auto e = local_id != invalid_entity
-                 ? w.entity(local_id)
-                 : w.entity().set(ServerEntity{id});
+    auto e = local_id != invalid_entity ? w.entity(local_id) : w.entity().set(ServerEntity{id});
     s2l[id] = e;
 
     // Track values across mask bits so we can initialise Animation below.
-    uint8_t kind = 0;
+    EntityKindValue kind_value{};
     uint8_t building_type = 0;
-    Team team = Team::neutral;
-    SoldierRole role = SoldierRole::melee;
+    std::string entity_cfg_name;
 
     if (mask & SyncComponent::entity_kind) {
-        kind = r.read<uint8_t>();
-        if (kind == EntityKind::structure || kind == EntityKind::building) {
+        // Read entity config name (entities.yaml key, e.g. "soldier_melee")
+        uint8_t name_len = r.read<uint8_t>();
+        entity_cfg_name.assign(name_len, '\0');
+        for (uint8_t i = 0; i < name_len; ++i)
+            entity_cfg_name[static_cast<size_t>(i)] = static_cast<char>(r.read<uint8_t>());
+        kind_value = to_kind_value({.prototype = entity_cfg_name});
+
+        if (kind_value == EntityKindValue::structure || kind_value == EntityKindValue::building) {
             building_type = r.read<uint8_t>();
-            e.set(BuildingData{static_cast<BuildingData::Type>(building_type), "", ""});
+            uint8_t bw = r.read<uint8_t>();
+            uint8_t bh = r.read<uint8_t>();
+            e.set(BuildingData{static_cast<BuildingData::Type>(building_type), "", "", 0, bw, bh});
         }
-        e.set(KindTag{kind});
-        e.set(CombatStats{}); // ensure entity exists
+        {
+            e.set(EntityKind{entity_cfg_name});
+
+            // ── 视觉组件初始化 ────────────────────────────────────────
+            // 每个同步实体都需要 Sprite + Animation，这样渲染/动画系统
+            // 的 ECS 查询直接匹配，无需额外的解引用/分支。
+            if (!e.has<Animation>()) {
+                Sprite s;
+                std::string clip_group;
+
+                try {
+                    auto const &cfg = resources.entity_config(entity_cfg_name);
+
+                    // 1. clip 组名 — 直接从 entity_cfg_name 对应的配置读取，
+                    // 每种建筑类型（inn / market / temple / blacksmith）各有
+                    // 独立的 entities.yaml 条目，不再需要 subtypes 映射。
+                    clip_group = cfg.clip.value_or("");
+
+                    // 2. 视觉默认值
+                    if (cfg.visual) {
+                        s.origin = {cfg.visual->origin[0], cfg.visual->origin[1]};
+                        s.scale = cfg.visual->scale;
+                    }
+
+                    // 3. 碰撞体
+                    if (cfg.collider)
+                        e.set(Collider{{cfg.collider->min[0], cfg.collider->min[1]},
+                                       {cfg.collider->max[0], cfg.collider->max[1]}});
+                }
+                catch (std::runtime_error const &) {
+                }
+
+                // 4. Animation: idle clip
+                auto const *idle_clip = resources.clip(clip_group + "_idle");
+                std::string fallback{"unavailable_idle"};
+                assert(resources.clip(fallback));
+                if (!idle_clip) {
+                    spdlog::warn(
+                        "parse_entity: clip group '{}' has no idle clip, using fallback '{}'",
+                        clip_group, fallback);
+                    idle_clip = resources.clip(fallback);
+                }
+
+                assert(idle_clip);
+                // 5. Sprite 纹理 / 裁剪矩形 ← 从 idle clip 的第一帧推导
+                if (!idle_clip->frame_sprites.empty()) {
+                    s.name = idle_clip->frame_sprites[0];
+                    if (auto *sdef = resources.resolve_sprite(idle_clip->frame_sprites[0])) {
+                        s.texture_name = sdef->texture;
+                        s.offset = {sdef->clip[0], sdef->clip[1]};
+                        s.size = {sdef->clip[2], sdef->clip[3]};
+                    }
+                }
+                // 6. 建筑: 按 footprint 放大
+                if (kind_value == EntityKindValue::building) {
+                    auto const *bd = e.try_get<BuildingData>();
+                    float f = static_cast<float>(
+                        std::max(bd ? bd->width_tiles : 1, bd ? bd->height_tiles : 1));
+                    s.scale *= f;
+                }
+                e.set(s);
+                e.set(Animation{idle_clip});
+            }
+        }
     }
 
     if (mask & SyncComponent::position) {
@@ -589,10 +547,6 @@ PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const 
         CombatStats cs;
         deserialize_combat_stats(r, cs);
         e.set(cs);
-        team = cs.team;
-        pe.attack = cs.attack;
-        pe.defense = cs.defense;
-        pe.attack_range = cs.attack_range;
     }
 
     if (mask & SyncComponent::movement) {
@@ -604,80 +558,28 @@ PlayerExtras parse_entity(SyncReader &r, flecs::world &w, ResourceManager const 
     if (mask & SyncComponent::soldier_ai) {
         SoldierAI ai;
         deserialize_soldier_ai(r, ai);
-        role = ai.role;
         ai.path_.clear();
         ai.path_index_ = 0;
         e.set(ai);
     }
 
-		if (mask & SyncComponent::interact) {
-			if (r.read<uint8_t>())
-				e.set(Interactable{});
-			else
-				e.remove<Interactable>();
-		}
+    if (mask & SyncComponent::interact) {
+        if (r.read<uint8_t>())
+            e.set(Interactable{});
+        else
+            e.remove<Interactable>();
+    }
 
-		if (mask & SyncComponent::survival) {
-			deserialize_survival_state(r, pe.survival);
-			pe.has_survival = true;
-			e.set(pe.survival);
-		}
+    if (mask & SyncComponent::survival) {
+        deserialize_survival_state(r, pe.survival);
+        pe.has_survival = true;
+        e.set(pe.survival);
+    }
 
-		if (mask & SyncComponent::vision) {
-			Vision v;
-			deserialize_vision(r, v);
-			e.set(v);
-		}
-
-    // Initialise visual components for newly-created entities.
-    // We wait until all sync data is available so the clip lookup has
-    // kind, team and role.  The transitional bridge may later switch
-    // clips based on movement/combat state.
-    if (!e.has<Animation>()) {
-        Sprite s;
-        init_sprite_from_kind(s, kind, building_type, team, role);
-        e.set(std::move(s));
-
-        // Set collider from YAML for client-side debug rendering.
-        {
-            auto const &defs = sprite_defs();
-            auto it = defs.find(kind);
-            if (it != defs.end() && it->second.has_collider)
-                e.set(Collider{it->second.collider_min, it->second.collider_max});
-        }
-
-        // Look up the default "idle" clip so AnimationSystem has
-        // a valid clip from the very first frame.
-        // Delegates to kind_key() in animation-data.cpp for the prefix.
-        Animation an;
-        an.clip = get_clip("idle", kind, static_cast<uint8_t>(team),
-                           static_cast<uint8_t>(role), resources, building_type);
-        // Last-resort fallback for any entity kind that has no clip registered
-        if (!an.clip)
-            an.clip = resources.clip("structure_idle");
-        e.set(std::move(an));
-
-        // Resolve the initial sprite name (first frame of the idle clip)
-        // through sprites.yaml to populate texture_name and clipping rect.
-        if (auto *cli = e.try_get<Animation>()) {
-            if (cli->clip && !cli->clip->frame_sprites.empty()) {
-                auto const &sprite_name = cli->clip->frame_sprites[0];
-                auto *def = resources.resolve_sprite(sprite_name);
-                if (def) {
-                    Sprite updated;
-                    auto const &defs = sprite_defs();
-                    auto it = defs.find(kind);
-                    if (it != defs.end()) {
-                        updated.origin = {it->second.origin[0], it->second.origin[1]};
-                        updated.scale = it->second.scale;
-                    }
-                    updated.texture_name = def->texture;
-                    updated.offset = {def->clip[0], def->clip[1]};
-                    updated.size   = {def->clip[2], def->clip[3]};
-                    e.set(std::move(updated));
-                }
-            }
-        }
+    if (mask & SyncComponent::vision) {
+        Vision v;
+        deserialize_vision(r, v);
+        e.set(v);
     }
 
     return pe;
@@ -697,7 +599,8 @@ void Client::apply_sync_full(std::vector<uint8_t> const &data)
     }
 
     while (!r.done()) {
-        if (r.remaining() < 10) break;
+        if (r.remaining() < 10)
+            break;
         parse_entity(r, world_, *resources_, server_to_local_);
     }
 
@@ -718,14 +621,16 @@ void Client::apply_sync_delta(std::vector<uint8_t> const &data)
     }
 
     while (!r.done()) {
-        if (r.remaining() < 10) break;
+        if (r.remaining() < 10)
+            break;
         parse_entity(r, world_, *resources_, server_to_local_);
     }
 }
 
 void Client::handle_entity_update(std::vector<uint8_t> const &payload)
 {
-    if (payload.size() < 25) return;
+    if (payload.size() < 25)
+        return;
     auto u = parse_entity_update(payload);
 
     // Find local entity by server ID
@@ -763,14 +668,17 @@ void Client::handle_combat_event(EntityId attacker_id, EntityId defender_id, int
     target = to_local(target);
     EntityId local_attacker = attacker_id != 0 ? to_local(attacker_id) : 0;
 
-    if (target == invalid_entity) return;
+    if (target == invalid_entity)
+        return;
 
     auto apply_hit = [&](EntityId eid) {
         auto e = world_.entity(eid);
-        if (!e.is_alive()) return;
+        if (!e.is_alive())
+            return;
         auto &cs = e.get_mut<CombatStats>();
         cs.hp -= damage;
-        if (killed) cs.alive = false;
+        if (killed)
+            cs.alive = false;
         e.set(HitFlash{0.15f, 0.3f});
     };
 
@@ -809,11 +717,10 @@ void Client::update(float dt)
                     player_visibility_.set_visible_arc(world_to_tile(t->world_pos), v->range,
                                                        t->facing, v->arc);
                 else
-                    player_visibility_.set_visible_arc(world_to_tile(t->world_pos), 6,
-                                                       t->facing, 360.f);
+                    player_visibility_.set_visible_arc(world_to_tile(t->world_pos), 6, t->facing,
+                                                       360.f);
             }
         }
-
     }
 
     // Tick projectile visuals
@@ -873,7 +780,8 @@ void Client::handle_dialogue_sync(std::vector<uint8_t> const &data)
             dl.variant_index = l.variant_index;
             for (auto &kv : l.slots)
                 dl.slots.emplace(std::move(kv.first), std::move(kv.second));
-        } else {
+        }
+        else {
             dl.text_key = l.use_raw ? "" : l.text;
             dl.raw_text = l.use_raw ? l.text : "";
             dl.use_raw = l.use_raw;
@@ -896,7 +804,8 @@ awaitable<bool> Client::authenticate_transport(std::shared_ptr<Session> t)
                       static_cast<ServerMsgType>(res.type), res.payload);
         co_return res.type == static_cast<std::uint32_t>(ServerMsgType::auth) &&
             res.payload == auth_payload();
-    } catch (...) {
+    }
+    catch (...) {
         co_return false;
     }
 }

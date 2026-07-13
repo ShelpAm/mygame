@@ -27,18 +27,6 @@ enum Mask : uint16_t {
 };
 } // namespace SyncComponent
 
-// Entity kind values for SyncComponent::entity_kind
-namespace EntityKind {
-enum Value : uint8_t {
-    player = 1,
-    soldier = 2,
-    npc = 3,
-    enemy = 4,
-    structure = 5,
-    building = 6,
-};
-}
-
 inline auto const &auth_payload()
 {
     constexpr std::string_view auth_string = "thesunsetstraits";
@@ -440,18 +428,18 @@ inline TownDiscoveredData parse_town_discovered(std::vector<uint8_t> const &d, s
     memcpy(&id_len, d.data() + off, 2);
     off += 2;
     r.loc_id.assign(d.begin() + static_cast<std::ptrdiff_t>(off),
-                     d.begin() + static_cast<std::ptrdiff_t>(off) + id_len);
+                    d.begin() + static_cast<std::ptrdiff_t>(off) + id_len);
     off += id_len;
     uint16_t key_len;
     memcpy(&key_len, d.data() + off, 2);
     off += 2;
     r.locale_key.assign(d.begin() + static_cast<std::ptrdiff_t>(off),
-                         d.begin() + static_cast<std::ptrdiff_t>(off) + key_len);
+                        d.begin() + static_cast<std::ptrdiff_t>(off) + key_len);
     return r;
 }
 
 inline std::vector<uint8_t> make_town_discovered(std::string const &loc_id,
-                                                  std::string const &locale_key)
+                                                 std::string const &locale_key)
 {
     std::vector<uint8_t> p;
     uint16_t id_len = static_cast<uint16_t>(loc_id.size());

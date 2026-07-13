@@ -4,7 +4,8 @@
 #include "core/resource-manager.hpp"
 #include <cassert>
 
-void AnimationSystem::update(flecs::world &world, ResourceManager const &resources, float delta_time)
+void AnimationSystem::update(flecs::world &world, ResourceManager const &resources,
+                             float delta_time)
 {
     world.query<Animation, Sprite>().each(
         [delta_time, &resources](flecs::entity, Animation &anim, Sprite &s) {
@@ -25,19 +26,19 @@ void AnimationSystem::update(flecs::world &world, ResourceManager const &resourc
             }
 
             // frame_sprites[frame_index] is a sprite name keying into sprites.yaml.
-            s.texture_name = anim.clip->frame_sprites[anim.frame_index];
+            auto const &sprite_name = anim.clip->frame_sprites[anim.frame_index];
+            s.name = sprite_name;
 
-            // Resolve the sprite name through sprites.yaml to get the actual
-            // texture key and clipping rect.
-            auto *def = resources.resolve_sprite(s.texture_name);
-            if (def) {
+            // Resolve through sprites.yaml to get the actual texture key + clip rect.
+            if (auto const *def = resources.resolve_sprite(sprite_name)) {
                 s.texture_name = def->texture;
                 s.offset = {def->clip[0], def->clip[1]};
-                s.size   = {def->clip[2], def->clip[3]};
-            } else {
-                // No sprite def — texture_name stays as-is, no clip.
+                s.size = {def->clip[2], def->clip[3]};
+            }
+            else {
+                // No sprite def — keep whatever texture_name was, no clip.
                 s.offset = {0, 0};
-                s.size   = {1, 1};
+                s.size = {1, 1};
             }
         });
 }

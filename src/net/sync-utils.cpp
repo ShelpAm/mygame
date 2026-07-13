@@ -2,18 +2,20 @@
 #include "components/building-data.hpp"
 #include "components/combat-stats.hpp"
 #include "components/defense-structure.hpp"
+#include "components/entity-kind.hpp"
 #include "components/interactable.hpp"
 #include "components/movement.hpp"
 #include "components/npc-state.hpp"
 #include "components/player.hpp"
 #include "components/position.hpp"
 #include "components/soldier-ai.hpp"
+#include "components/survival-state.hpp"
 #include "components/vision.hpp"
 #include "net/net-packet.hpp"
 #include "net/sync-io.hpp"
-#include "components/survival-state.hpp"
 #include "world/map-data.hpp"
 #include <cassert>
+#include <spdlog/spdlog.h>
 #include <stdexcept>
 
 namespace sync_util {
@@ -22,17 +24,7 @@ namespace sync_util {
 
 uint8_t entity_kind(flecs::entity e)
 {
-    if (e.has<PlayerTag>())
-        return EntityKind::player;
-    if (e.has<NPCState>())
-        return EntityKind::npc;
-    if (e.has<SoldierAI>())
-        return EntityKind::soldier;
-    if (e.has<DefenseStructure>())
-        return EntityKind::structure;
-    if (e.has<BuildingData>())
-        return EntityKind::building;
-    return EntityKind::enemy;
+    return static_cast<std::uint8_t>(to_kind_value(e.get<EntityKind>()));
 }
 
 // ── serialize_entity ─────────────────────────────────────────────────────────
@@ -40,60 +32,101 @@ uint8_t entity_kind(flecs::entity e)
 void serialize_entity(flecs::entity e, std::vector<uint8_t> &out)
 {
     auto const *ep = e.try_get<Transform>();
-    auto const *ec = e.try_get<CombatStats>();
-    assert(ep && ec);
+    assert(ep);
 
-    uint16_t mask = SyncComponent::entity_kind | SyncComponent::position | SyncComponent::combat;
-    if (e.has<Movement>())
-        mask |= SyncComponent::movement;
-    if (e.has<SoldierAI>())
-        mask |= SyncComponent::soldier_ai;
-    if (e.has<Interactable>())
-        mask |= SyncComponent::interact;
-    if (e.has<SurvivalState>())
-        mask |= SyncComponent::survival;
-    if (e.has<Vision>())
-        mask |= SyncComponent::vision;
+    uint16_t mask = SyncComponent::entity_kind | SyncComponent::position;
+    // clang-format off
+    if (e.has<CombatStats>())   mask |= SyncComponent::combat;
+    if (e.has<Movement>())      mask |= SyncComponent::movement;
+    if (e.has<SoldierAI>())     mask |= SyncComponent::soldier_ai;
+    if (e.has<Interactable>())  mask |= SyncComponent::interact;
+    if (e.has<SurvivalState>()) mask |= SyncComponent::survival;
+    if (e.has<Vision>())        mask |= SyncComponent::vision;
+    // clang-format on
+
+    // --- 获取 config_name ---
+    auto const *kt = e.try_get<EntityKind>();
+    assert(kt && !kt->prototype.empty());
+    std::string const &prototype = kt->prototype;
+
+    // --- 打印实体摘要 ---
+    spdlog::trace("Serializing entity {} (config='{}'), mask=0x{:04X}", e.id(), prototype, mask);
 
     SyncWriter w(out);
     w.write(e.id());
     w.write(mask);
 
-    // entity_kind (bit 0) — computed, not a component
-    uint8_t kind = entity_kind(e);
-    w.write(kind);
+    // entity kind config name
+    w.write(static_cast<uint8_t>(prototype.size()));
+    for (auto ch : prototype)
+        w.write(static_cast<uint8_t>(ch));
 
-    // For structures / buildings, also send the type
-    if (kind == EntityKind::structure || kind == EntityKind::building) {
+    // For structures / buildings, also send subtype and footprint
+    auto kind_value = to_kind_value(e.get<EntityKind>());
+    if (kind_value == EntityKindValue::structure || kind_value == EntityKindValue::building) {
         auto const *bd = e.try_get<BuildingData>();
-        w.write(static_cast<uint8_t>(bd ? static_cast<uint8_t>(bd->type) : 0));
+        assert(bd);
+        uint8_t type = static_cast<uint8_t>(bd->type);
+        uint8_t wdt = bd ? bd->width_tiles : 1;
+        uint8_t hgt = bd ? bd->height_tiles : 1;
+        spdlog::trace("  -> building: subtype={}, size={}x{}", type, wdt, hgt);
+        w.write(type);
+        w.write(wdt);
+        w.write(hgt);
     }
 
-    // position (bit 1)
-    serialize_transform(w, e.get<Transform>());
+    // position
+    Transform const &t = e.get<Transform>();
+    serialize_transform(w, t);
+    spdlog::trace("  -> pos=({:.2f},{:.2f}), facing=({:.2f},{:.2f})", t.world_pos.x, t.world_pos.y,
+                  t.facing.x, t.facing.y);
 
-    // combat (bit 2)
-    serialize_combat_stats(w, e.get<CombatStats>());
+    // combat
+    if (mask & SyncComponent::combat) {
+        CombatStats const &cs = e.get<CombatStats>();
+        serialize_combat_stats(w, cs);
+        spdlog::trace("  -> hp={}/{}, alive={}, team={}, atk={}, def={}, range={}", cs.hp,
+                      cs.max_hp, cs.alive, static_cast<int>(cs.team), cs.attack, cs.defense,
+                      cs.attack_range);
+    }
 
-    // movement (bit 3)
-    if (mask & SyncComponent::movement)
-        serialize_movement(w, e.get<Movement>());
+    // movement
+    if (mask & SyncComponent::movement) {
+        Movement const &m = e.get<Movement>();
+        serialize_movement(w, m);
+        spdlog::trace("  -> velocity=({:.2f},{:.2f})", m.velocity.x, m.velocity.y);
+    }
 
-    // soldier_ai (bit 4)
-    if (mask & SyncComponent::soldier_ai)
-        serialize_soldier_ai(w, e.get<SoldierAI>());
+    // soldier_ai
+    if (mask & SyncComponent::soldier_ai) {
+        SoldierAI const &ai = e.get<SoldierAI>();
+        serialize_soldier_ai(w, ai);
+        spdlog::trace("  -> role={}, stance={}, in_combat={}, offset=({:.2f},{:.2f})",
+                      static_cast<int>(ai.role), static_cast<int>(ai.stance), ai.in_combat,
+                      ai.formation_offset.x, ai.formation_offset.y);
+    }
 
-    // interact (bit 5) — presence flag
-    if (mask & SyncComponent::interact)
-        serialize_interactable(w, e.get<Interactable>());
+    // interact
+    if (mask & SyncComponent::interact) {
+        Interactable const &i = e.get<Interactable>();
+        serialize_interactable(w, i);
+        spdlog::trace("  -> interactable");
+    }
 
-    // survival (bit 6)
-    if (mask & SyncComponent::survival)
-        serialize_survival_state(w, e.get<SurvivalState>());
+    // survival
+    if (mask & SyncComponent::survival) {
+        SurvivalState const &s = e.get<SurvivalState>();
+        serialize_survival_state(w, s);
+        spdlog::trace("  -> food={:.1f}, water={:.1f}, health={:.1f}, energy={:.1f}", s.food,
+                      s.water, s.health, s.energy);
+    }
 
-    // vision (bit 7)
-    if (mask & SyncComponent::vision)
-        serialize_vision(w, e.get<Vision>());
+    // vision
+    if (mask & SyncComponent::vision) {
+        Vision const &v = e.get<Vision>();
+        serialize_vision(w, v);
+        spdlog::trace("  -> range={}, arc={}", v.range, v.arc);
+    }
 }
 
 // ── write_world_header ───────────────────────────────────────────────────────
@@ -116,9 +149,8 @@ SyncPayload build_dirty_payload(SyncState const &ss, EntityId player_eid,
     // Explored tiles
     {
         auto eit = ss.player_explored_tiles.find(player_eid);
-        auto count = static_cast<uint16_t>(eit != ss.player_explored_tiles.end()
-                                              ? eit->second.size()
-                                              : 0);
+        auto count =
+            static_cast<uint16_t>(eit != ss.player_explored_tiles.end() ? eit->second.size() : 0);
         write_bytes(result.bytes, count);
         if (eit != ss.player_explored_tiles.end())
             for (auto const &t : eit->second) {
@@ -148,17 +180,16 @@ SyncPayload build_dirty_payload(SyncState const &ss, EntityId player_eid,
     }
 
     // 2. Newly-visible entities
-    ss.ecs_world.query<Transform, CombatStats>().each(
-        [&](flecs::entity e, Transform &pos, CombatStats &) {
-            if (result.entity_ids.contains(e.id()))
-                return;
-            if (e.id() == player_eid)
-                return;
-            if (prev_sent.contains(e.id()))
-                return;
-            if (visible.contains(world_to_tile(pos.world_pos)))
-                emit(e);
-        });
+    ss.ecs_world.query<Transform>().each([&](flecs::entity e, Transform &pos) {
+        if (result.entity_ids.contains(e.id()))
+            return;
+        if (e.id() == player_eid)
+            return;
+        if (prev_sent.contains(e.id()))
+            return;
+        if (visible.contains(world_to_tile(pos.world_pos)))
+            emit(e);
+    });
 
     return result;
 }
@@ -173,9 +204,8 @@ SyncPayload build_full_payload(SyncState const &ss, EntityId player_eid)
     // Explored tiles
     {
         auto eit = ss.player_explored_tiles.find(player_eid);
-        auto count = static_cast<uint16_t>(eit != ss.player_explored_tiles.end()
-                                              ? eit->second.size()
-                                              : 0);
+        auto count =
+            static_cast<uint16_t>(eit != ss.player_explored_tiles.end() ? eit->second.size() : 0);
         write_bytes(result.bytes, count);
         if (eit != ss.player_explored_tiles.end())
             for (auto const &t : eit->second) {
@@ -185,16 +215,20 @@ SyncPayload build_full_payload(SyncState const &ss, EntityId player_eid)
     }
 
     auto it = ss.player_visible_tiles.find(player_eid);
-    auto const &visible = it != ss.player_visible_tiles.end() ? it->second
-                                                              : decltype(it->second){};
+    auto const &visible = it != ss.player_visible_tiles.end() ? it->second : decltype(it->second){};
 
-    ss.ecs_world.query<Transform, CombatStats>().each(
-        [&](flecs::entity e, Transform &pos, CombatStats &) {
-            if (e.id() == player_eid || visible.contains(world_to_tile(pos.world_pos))) {
-                serialize_entity(e, result.bytes);
-                result.entity_ids.insert(e.id());
-            }
-        });
+    ss.ecs_world.query<EntityKind>().each([&](flecs::entity e, EntityKind const &kind) {
+        spdlog::info("e.type={}", kind.prototype);
+        bool should_send{};
+        should_send |= e.id() == player_eid;
+        should_send |=
+            e.try_get<Transform>() && visible.contains(world_to_tile(e.get<Transform>().world_pos));
+        should_send |= true; // TODO: Use entity.add<Replicated>() or so in the future.
+        if (should_send) {
+            serialize_entity(e, result.bytes);
+            result.entity_ids.insert(e.id());
+        }
+    });
     return result;
 }
 

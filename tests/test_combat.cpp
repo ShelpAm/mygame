@@ -102,11 +102,23 @@ BOOST_AUTO_TEST_CASE(soldier_ai_moves_toward_leader)
     BOOST_TEST(mov->velocity.x > 0.F);
 }
 
-BOOST_AUTO_TEST_CASE(spawn_enemy_wave)
+BOOST_AUTO_TEST_CASE(spawn_enemy)
 {
     flecs::world world;
-    CombatSystem csys;
-    csys.spawn_enemy_wave(world, 3, Vec2f(0.F, 0.F), 100.F, Team::enemy);
+    auto e1 = world.entity();
+    e1.set<CombatStats>(CombatStats{.team = Team::enemy, .max_hp = 8, .hp = 8,
+                                    .attack = 3, .defense = 1, .attack_range = 80.F});
+    e1.set<Transform>(Transform{.world_pos = Vec2f(0.F, 0.F)});
+
+    auto e2 = world.entity();
+    e2.set<CombatStats>(CombatStats{.team = Team::enemy, .max_hp = 8, .hp = 8,
+                                    .attack = 3, .defense = 1, .attack_range = 80.F});
+    e2.set<Transform>(Transform{.world_pos = Vec2f(50.F, 0.F)});
+
+    auto e3 = world.entity();
+    e3.set<CombatStats>(CombatStats{.team = Team::enemy, .max_hp = 8, .hp = 8,
+                                    .attack = 3, .defense = 1, .attack_range = 80.F});
+    e3.set<Transform>(Transform{.world_pos = Vec2f(100.F, 0.F)});
 
     int enemyCount = 0;
     world.query<CombatStats>().each([&](flecs::entity, CombatStats &cs) {

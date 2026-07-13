@@ -3,6 +3,7 @@
 #include "core/camera-device.hpp"
 #include "core/game-types.hpp"
 #include "core/math.hpp"
+#include "game-data.hpp"
 #include <array>
 #include <math.h>
 #include <optional>
@@ -20,7 +21,10 @@ struct SpriteDef {
 
 class ResourceManager {
   public:
-    ResourceManager() = default;
+    ResourceManager()
+        : entity_database_{read_entity_database_from_yaml("assets/data/entities.yaml")}
+    {
+    }
     ResourceManager(ResourceManager const &) = delete;
     ResourceManager(ResourceManager &&) = delete;
     ResourceManager &operator=(ResourceManager const &) = delete;
@@ -56,6 +60,8 @@ class ResourceManager {
     /// Returns nullptr if no definition exists for the given name.
     SpriteDef const *resolve_sprite(std::string const &sprite_name) const;
 
+    EntityConfig const &entity_config(std::string const &entity_type) const;
+
     CameraDevice &camera() { return *camera_; }
 
     void clear();
@@ -65,4 +71,5 @@ class ResourceManager {
     std::unordered_map<std::string, AnimationClip> clips_;
     std::unordered_map<std::string, SpriteDef> sprites_;
     std::unique_ptr<CameraDevice> camera_;
+    EntityDatabase entity_database_;
 };

@@ -136,7 +136,7 @@ void run_soldier_ai(flecs::world &world, flecs::entity e, SoldierAI &ai, Transfo
             }
         }
         if (!found) {
-            spdlog::debug(
+            spdlog::trace(
                 "SoldierAI {}: path of {} tiles but no walkable line to any, using first step",
                 e.id(), path.size());
             target_waypoint = center_of_tile(path[0]);

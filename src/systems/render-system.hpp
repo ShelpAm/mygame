@@ -5,8 +5,8 @@
 #include "core/game-types.hpp"
 #include "core/math.hpp"
 #include "world/location-store.hpp"
-#include <SDL3/SDL.h>
 #include <array>
+#include <SDL3/SDL.h>
 #include <vector>
 class ResourceManager;
 class CameraSystem;
@@ -68,10 +68,11 @@ class RenderSystem {
     void render_projectiles(Client const &client);
     void render_damage_numbers(Client &client, std::vector<CombatEvent> const &events);
     void render_fog_overlay(PlayerVisibility const &vis);
+    void render_debug(Client const &client) const;
 
     enum class RectMode : std::uint8_t {
-        fill,
-        box,
+        fill, // Fill
+        line, // Outline
     };
     void draw_rectangle(Vec2f left_up, Vec2f size, SDL_Color color, RectMode mode) const;
     // Low-level draw: texture name + parameters. origin is normalized [0,1].
@@ -81,6 +82,9 @@ class RenderSystem {
     void draw_sprite(Vec2f foot_pos, float scale, std::string const &tex, uint8_t alpha, bool flip,
                      Vec2f origin, Vec2f clip_offset = {0, 0}, Vec2f clip_size = {1, 1}) const;
     void draw(Sprite const &s, Vec2f pos, uint8_t alpha = max_alpha) const;
+
+    void draw_text_with_bg(Vec2f pos, std::string const &text, SDL_Color text_color,
+                           SDL_Color bg_color) const;
 
     // distance -> alpha mapping (smooth fade at boundary)
     static std::uint8_t alpha_for(float d)

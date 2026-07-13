@@ -1,5 +1,8 @@
 #pragma once
 
+#include "components/entity-kind.hpp"
+#include "components/visual/animation.hpp"
+#include "components/visual/sprite.hpp"
 #include <flecs.h>
 
 class ResourceManager;
@@ -11,7 +14,7 @@ class ResourceManager;
 /// new clip is picked up by the frame-advancement pass.
 class AnimationControllerSystem {
   public:
-    AnimationControllerSystem() = default;
+    AnimationControllerSystem(flecs::world &world);
 
     /// Query all entities with Animation + Sprite + Movement + CombatStats + KindTag
     /// and determine which clip should play. Swaps clip on the Animation component
@@ -19,4 +22,7 @@ class AnimationControllerSystem {
     /// @param world     flecs world with animated entities
     /// @param resources ResourceManager holding the registered clips
     void update(flecs::world &world, ResourceManager const &resources, float);
+
+  private:
+    flecs::query<Animation, Sprite, EntityKind> query_;
 };

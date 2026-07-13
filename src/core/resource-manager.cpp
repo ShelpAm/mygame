@@ -162,11 +162,21 @@ void ResourceManager::load_sprites(std::string const &path)
     for (auto const &[name, entry] : cfg.sprites) {
         sprites_[name] = {entry.texture, entry.clip};
     }
-    spdlog::info("ResourceManager: loaded {} sprite definitions from sprites.yaml", sprites_.size());
+    spdlog::info("ResourceManager: loaded {} sprite definitions from sprites.yaml",
+                 sprites_.size());
 }
 
 SpriteDef const *ResourceManager::resolve_sprite(std::string const &sprite_name) const
 {
     auto it = sprites_.find(sprite_name);
     return it != sprites_.end() ? &it->second : nullptr;
+}
+
+EntityConfig const &ResourceManager::entity_config(std::string const &entity_type) const
+{
+    auto it = entity_database_.find(entity_type);
+    if (it == entity_database_.end())
+        throw std::runtime_error("ResourceManager: entity config not found for type " +
+                                 entity_type);
+    return it->second;
 }

@@ -6,56 +6,58 @@
 #include "components/entity-kind.hpp"
 #include "components/movement.hpp"
 #include "components/soldier-ai.hpp"
+#include "components/visual-fx.hpp"
 #include "components/visual/animation.hpp"
 #include "components/visual/sprite.hpp"
-#include "components/visual-fx.hpp"
 #include "core/resource-manager.hpp"
 
-void AnimationControllerSystem::update(flecs::world &world,
-                                        ResourceManager const &resources,
-                                        float delta_time)
+AnimationControllerSystem::AnimationControllerSystem(flecs::world &world)
+    : query_(world.query<Animation, Sprite, EntityKind>())
 {
-    world.query<Animation, Sprite, Movement, CombatStats, KindTag>().each(
-        [&](flecs::entity e, Animation &anim, Sprite &s, Movement const &mov,
-            CombatStats const &cs, KindTag const &kt) {
-            // Copy HitFlash into local timers so determine_clip_name
-            // can switch to hurt / attack clips.
-            float hurt_timer = 0.f;
-            float attack_timer = 0.f;
-            if (auto *hf = e.try_get<HitFlash>()) {
-                hurt_timer = hf->remaining;
-                attack_timer = hf->remaining;
-            }
+}
 
-            auto clip_name = determine_clip_name(hurt_timer, attack_timer,
-                                                  mov.velocity, cs.alive);
+void AnimationControllerSystem::update(flecs::world &world, ResourceManager const &resources,
+                                       float delta_time)
+{
+    query_.each([&](flecs::entity e, Animation &anim, Sprite &s, EntityKind const &kind) {
+        // Copy HitFlash into local timers so determine_clip_name
+        // can switch to hurt / attack clips.
+        float hurt_timer = 0.F;
+        float attack_timer = 0.F;
+        if (auto *hf = e.try_get<HitFlash>()) {
+            hurt_timer = hf->remaining;
+            attack_timer = hf->remaining;
+        }
 
-            uint8_t role = 0;
-            if (auto *ai = e.try_get<SoldierAI>())
-                role = static_cast<uint8_t>(ai->role);
+        auto const *mov = e.try_get<Movement>();
+        auto const *cs = e.try_get<CombatStats>();
+        auto clip_name = determine_clip_name(
+            hurt_timer, attack_timer, mov ? mov->velocity : Vec2f{0, 0}, cs ? cs->alive : true);
 
-            uint8_t subtype = 0;
-            if (auto *bd = e.try_get<BuildingData>())
-                subtype = static_cast<uint8_t>(bd->type);
+        auto const &clipconf = resources.entity_config(kind.prototype).clip;
+        if (!clipconf)
+            throw std::runtime_error("Entity prototype " + kind.prototype +
+                                     " has no clip defined in entities.yaml");
+        std::string clip_key = clipconf.value() + "_" + clip_name;
+        auto const *clip = resources.clip(clip_key);
 
-            auto *clip = get_clip(clip_name, kt.value,
-                                  static_cast<uint8_t>(cs.team),
-                                  role, resources, subtype);
+        // If the primary clip wasn't found, fall back to structure_idle
+        if (!clip)
+            clip = resources.clip("structure_idle");
+        assert(clip);
 
-            if (clip && clip != anim.clip) {
-                anim.clip = clip;
-                anim.frame_index = 0;
-                anim.frame_timer = clip->frame_durations.empty()
-                                       ? 0.1F
-                                       : clip->frame_durations[0];
-            }
+        if (clip != anim.clip) {
+            anim.clip = clip;
+            anim.frame_index = 0;
+            anim.frame_timer = clip->frame_durations.empty() ? 0.1F : clip->frame_durations[0];
+        }
 
-            // Flip based on movement direction
-            if (mov.velocity.x > 1.f)
-                s.flip = clip ? !clip->faces_right : false;
-            else if (mov.velocity.x < -1.f)
-                s.flip = clip ? clip->faces_right : false;
-        });
+        // Flip based on movement direction
+        if (mov && mov->velocity.x > 1.f)
+            s.flip = clip ? !clip->faces_right : false;
+        else if (mov && mov->velocity.x < -1.f)
+            s.flip = clip ? clip->faces_right : false;
+    });
 
     // Tick down HitFlash timers and clean up expired ones
     world.each([delta_time](flecs::entity e, HitFlash &hf) {
