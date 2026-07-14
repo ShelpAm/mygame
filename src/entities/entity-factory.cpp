@@ -410,17 +410,30 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
                 gd.max_y = std::max(gd.max_y, tile.y);
             }
 
-        // Assign types: one of each special first, then generic for the rest.
+        // Shuffle building groups with a deterministic seed so each town
+        // looks different but the layout is reproducible.
+        std::vector<int> group_keys;
+        group_keys.reserve(groups.size());
+        for (auto const &[g, _] : groups)
+            group_keys.push_back(g);
+        // Seed based on town location (deterministic).
+        auto const seed = static_cast<uint32_t>(loc.tile_center.x * 65537U + loc.tile_center.y);
+        std::mt19937 rng{seed};
+        std::shuffle(group_keys.begin(), group_keys.end(), rng);
+
+        // Assign types: special buildings go to the first N groups (shuffled).
         std::vector<BuildingData::Type> types;
         types.reserve(groups.size());
-        for (auto [type, str] : special_types)
-            types.push_back(type);
-        assert(groups.size() >= special_types.size());
-        for (auto i = 0UZ; i != groups.size() - special_types.size(); ++i)
+        types.push_back(BuildingData::Type::inn);
+        types.push_back(BuildingData::Type::market);
+        types.push_back(BuildingData::Type::temple);
+        types.push_back(BuildingData::Type::blacksmith);
+        assert(groups.size() >= 4);
+        for (auto i = 0UZ; i != groups.size() - 4; ++i)
             types.push_back(BuildingData::Type::generic);
 
-        for (auto [group, type] : std::views::zip(groups, types)) {
-            auto const &[g, gd] = group;
+        for (auto [gk, type] : std::views::zip(group_keys, types)) {
+            auto const &gd = groups.at(gk);
             float const avg_x = gd.sum_x / static_cast<float>(gd.count);
             float const avg_y = gd.sum_y / static_cast<float>(gd.count);
             float const group_r = static_cast<float>(gd.max_x - gd.min_x + 1) / 2;
@@ -442,7 +455,7 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
                          .set(BuildingData{.type = type,
                                            .town_id = loc.id,
                                            .display_name = "",
-                                           .group_id = g,
+                                           .group_id = gk,
                                            .width_tiles = w,
                                            .height_tiles = h})
                          .set(coll)
