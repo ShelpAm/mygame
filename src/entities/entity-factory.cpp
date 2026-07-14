@@ -1,5 +1,6 @@
 #include "entities/entity-factory.hpp"
 #include <array>
+#include <ranges>
 #include <string_view>
 
 using namespace std::string_view_literals;
@@ -372,11 +373,11 @@ EntityId EntityFactory::spawn_npc(std::string const &id, std::string const &name
 void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> const &loc_defs,
                                             MapData const &map_data)
 {
-    static constexpr std::array<BuildingData::Type, 4> special_types = {
-        BuildingData::Type::inn,
-        BuildingData::Type::market,
-        BuildingData::Type::temple,
-        BuildingData::Type::blacksmith,
+    static std::unordered_map<BuildingData::Type, std::string_view> const special_types = {
+        {BuildingData::Type::inn, "inn"},
+        {BuildingData::Type::market, "market"},
+        {BuildingData::Type::temple, "temple"},
+        {BuildingData::Type::blacksmith, "blacksmith"},
     };
 
     for (auto const &loc : loc_defs) {
@@ -410,39 +411,40 @@ void EntityFactory::spawn_building_entities(std::vector<LocationDefinition> cons
             }
 
         // Assign types: one of each special first, then generic for the rest.
-        std::vector<BuildingData::Type> assignments;
-        assignments.reserve(groups.size());
-        for (size_t gi = 0; gi < groups.size(); ++gi)
-            assignments.push_back(gi < std::size(special_types) ? special_types[gi]
-                                                                : BuildingData::Type::generic);
+        std::vector<BuildingData::Type> types;
+        types.reserve(groups.size());
+        for (auto [type, str] : special_types)
+            types.push_back(type);
+        assert(groups.size() >= special_types.size());
+        for (auto i = 0UZ; i != groups.size() - special_types.size(); ++i)
+            types.push_back(BuildingData::Type::generic);
 
-        size_t ai = 0;
-        for (auto const &[g, gd] : groups) {
+        for (auto [group, type] : std::views::zip(groups, types)) {
+            auto const &[g, gd] = group;
             float const avg_x = gd.sum_x / static_cast<float>(gd.count);
             float const avg_y = gd.sum_y / static_cast<float>(gd.count);
             float const group_r = static_cast<float>(gd.max_x - gd.min_x + 1) / 2;
             auto world_pos = Vec2f{avg_x + 0.5F, avg_y + 0.5F + group_r} * tile_size; // down center
 
-            auto btype = assignments[ai++];
-            static constexpr std::array kBuildingKinds{
-                "inn"sv, "market"sv, "temple"sv, "blacksmith"sv,
-            };
-            auto const &kind_name =
-                static_cast<std::size_t>(btype) < std::size(kBuildingKinds)
-                    ? kBuildingKinds[static_cast<std::size_t>(btype)]
-                    : "building"sv;
-            uint8_t w = static_cast<uint8_t>(gd.max_x - gd.min_x + 1);
-            uint8_t h = static_cast<uint8_t>(gd.max_y - gd.min_y + 1);
+            auto it = special_types.find(type);
+            auto kind_name = it != special_types.end() ? it->second : "building"sv;
+            auto w = static_cast<uint8_t>(gd.max_x - gd.min_x + 1);
+            auto h = static_cast<uint8_t>(gd.max_y - gd.min_y + 1);
 
             // Collider matches the actual footprint in world units.
             float half_w = static_cast<float>(w) * tile_size * 0.5F;
             float half_h = static_cast<float>(h) * tile_size * 0.5F;
-            Collider coll{{-half_w, -half_h}, {half_w, half_h}};
+            Collider coll{.min = {-half_w, -half_h}, .max = {half_w, half_h}};
 
             auto e = world_.entity()
                          .set(EntityKind{std::string(kind_name)})
                          .set(Transform{.world_pos = world_pos, .facing = Vec2f{0.F, -1.F}})
-                         .set(BuildingData{btype, loc.id, "", g, w, h})
+                         .set(BuildingData{.type = type,
+                                           .town_id = loc.id,
+                                           .display_name = "",
+                                           .group_id = g,
+                                           .width_tiles = w,
+                                           .height_tiles = h})
                          .set(coll)
                          .set(Interactable{.interact_radius = 48.F, .can_talk = false});
             mark_dirty(e.id());

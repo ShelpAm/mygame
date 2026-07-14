@@ -32,6 +32,8 @@ conan install . --output-folder=build/Debug --build=missing -s build_type=Debug
 - **Conventional commits** — `feat:`, `fix:`, `refactor:`, `chore:`, etc.
 - **Tests** — write Boost.Test unit tests for new features (`tests/test_*.cpp`). The test target links `TheSunsetStraits_lib` + `Boost::unit_test_framework`.
 - **Regard warnings as errors** — treat compiler warnings as errors. Use `-Werror` in coding.
+- **Don't Pretend** - Ask if you don't konw. Don't pretend a fallback unless
+  instructor explicitly says so.
 
 ### TDD Workflow
 

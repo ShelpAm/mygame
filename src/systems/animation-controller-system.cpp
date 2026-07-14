@@ -24,7 +24,7 @@ void AnimationControllerSystem::update(flecs::world &world, ResourceManager cons
         // can switch to hurt / attack clips.
         float hurt_timer = 0.F;
         float attack_timer = 0.F;
-        if (auto *hf = e.try_get<HitFlash>()) {
+        if (auto const *hf = e.try_get<HitFlash>()) {
             hurt_timer = hf->remaining;
             attack_timer = hf->remaining;
         }
@@ -40,10 +40,16 @@ void AnimationControllerSystem::update(flecs::world &world, ResourceManager cons
                                      " has no clip defined in entities.yaml");
         std::string clip_key = clipconf.value() + "_" + clip_name;
         auto const *clip = resources.clip(clip_key);
+        std::string fallback{"unavailable_idle"};
+        assert(resources.clip(fallback));
 
         // If the primary clip wasn't found, fall back to structure_idle
-        if (!clip)
-            clip = resources.clip("structure_idle");
+        if (!clip) {
+            clip = resources.clip("unavailable_idle");
+            spdlog::warn("AnimationControllerSystem::update: clip group '{}' has no '{}' clip, "
+                         "using fallback '{}'",
+                         clipconf.value(), clip_name, fallback);
+        }
         assert(clip);
 
         if (clip != anim.clip) {

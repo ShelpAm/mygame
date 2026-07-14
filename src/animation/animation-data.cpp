@@ -21,8 +21,10 @@ static void add_frames(AnimationClip &clip, std::string const &base, int count, 
 static void register_group(ResourceManager &resources, std::string const &prefix,
                            std::vector<AnimationClip> const &clips)
 {
-    for (auto const &c : clips)
+    for (auto const &c : clips) {
         resources.register_clip(prefix + "_" + c.name, c);
+        spdlog::debug("register_group: registered clip {}_{}", prefix, c.name);
+    }
 }
 
 // ── YAML loader ───────────────────────────────────────────────────────────

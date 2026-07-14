@@ -5,7 +5,7 @@
 #include "core/math.hpp"
 #include "game-data.hpp"
 #include <array>
-#include <math.h>
+#include <cmath>
 #include <optional>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
